@@ -84,6 +84,16 @@ raggedlib:
     rrf-k: 60
     max-chunks-per-book: 3
     hnsw-ef-search: 100
+    # vector hits weigh 0..1 in RRF by cosine similarity between these bounds (embedding-model specific)
+    vector-sim-floor: 0.40
+    vector-sim-full: 0.70
+    min-relative-score: 0.10
+    max-keyword-query-chars: 500
+    # keyword fallback when the strict all-terms query finds < text-candidates/2 (see KeywordFallback.kt)
+    fallback-min-coverage: 0.5
+    fallback-common-term-frequency: 0.05
+    fallback-max-terms: 12
+    term-stats-ttl-seconds: 600
   chat:
     num-ctx: 16384
     temperature: 0.3

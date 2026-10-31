@@ -30,6 +30,11 @@ data class RaggedlibProperties(
     )
 
     data class Ingest(
+        /**
+         * Reset books left mid-pipeline (EXTRACTING/EMBEDDING) to PENDING at startup. Disable only for an extra,
+         * read-only instance sharing the database with one that is indexing — it would wipe that run's work.
+         */
+        val recoverOnStartup: Boolean = true,
         /** Parallel extraction workers (external processes, CPU bound). */
         val extractConcurrency: Int = 3,
         /** Extracted books waiting for the embedder (bounds memory). */
@@ -57,6 +62,25 @@ data class RaggedlibProperties(
         val rrfK: Int = 60,
         val maxChunksPerBook: Int = 3,
         val hnswEfSearch: Int = 100,
+        /**
+         * Vector hits are weighted in RRF by cosine similarity: 0 at/below the floor, 1 at/above "full".
+         * Calibrated for qwen3-embedding:0.6b with the query instruction (relevant ≈ 0.6–0.8, noise ≈ 0.4–0.5);
+         * re-check after changing the embedding model. Set both to 0 for plain, unweighted RRF.
+         */
+        val vectorSimFloor: Double = 0.40,
+        val vectorSimFull: Double = 0.70,
+        /** Fused candidates scoring below this fraction of the best one are dropped (before the per-book cap). */
+        val minRelativeScore: Double = 0.10,
+        /** Full-text search only looks at this many leading characters of the query. */
+        val maxKeywordQueryChars: Int = 500,
+        /** Keyword fallback (see KeywordFallback): min IDF-weighted share of query terms a passage must contain. */
+        val fallbackMinCoverage: Double = 0.5,
+        /** Terms in more than this fraction of chunks are "common": they score, but can't nominate candidates. */
+        val fallbackCommonTermFrequency: Double = 0.05,
+        /** At most this many (rarest) query terms take part in the fallback. */
+        val fallbackMaxTerms: Int = 12,
+        /** How long lexeme document frequencies are cached; the corpus grows while indexing. */
+        val termStatsTtlSeconds: Long = 600,
     )
 
     data class Chat(

@@ -73,6 +73,7 @@ class IngestService(
     /** On startup, books stuck mid-pipeline lose their partial chunks and go back to PENDING. */
     @EventListener(ApplicationReadyEvent::class)
     fun recoverStuckBooks() {
+        if (!props.ingest.recoverOnStartup) return
         val stuck = books.stuckIds()
         stuck.forEach { id ->
             tx.executeWithoutResult {

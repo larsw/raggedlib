@@ -12,16 +12,24 @@ import java.sql.ResultSet
 import java.util.UUID
 import java.util.concurrent.Executors
 
-/** Hybrid retrieval: pgvector cosine top-N + Postgres full-text top-N, fused with RRF. */
+/**
+ * Hybrid retrieval, fused with weighted RRF over up to three ranked lists:
+ *  1. pgvector cosine top-N — each hit weighted by its own similarity, so a weak vector side (the embedding
+ *     misreads the query) can't outvote a strong keyword match just by holding rank 1,
+ *  2. strict full-text top-N (all terms, websearch syntax) — weight 1,
+ *  3. a keyword fallback when (2) finds too little — weighted by term coverage, see [KeywordFallback].
+ */
 @Service
 class SearchService(
     private val props: RaggedlibProperties,
     private val jdbc: NamedParameterJdbcTemplate,
     private val embeddingModel: EmbeddingModel,
     private val tx: TransactionTemplate,
+    private val termStats: TermStatistics,
 ) {
+    /** [weight] scales the row's RRF contribution (see [HybridRanking.rrf]). */
     private data class Row(val id: String, val bookId: Long, val title: String, val authors: List<String>,
-                           val page: Int?, val section: String?, val text: String)
+                           val page: Int?, val section: String?, val text: String, val weight: Double = 1.0)
 
     fun search(req: SearchRequest): List<SourceChunk> {
         val query = req.query.trim()
@@ -44,8 +52,10 @@ class SearchService(
         val filterSql = filters.joinToString("") { " and $it" }
 
         // embed the query and run full-text search concurrently
-        val (vectorRows, textRows) = Executors.newVirtualThreadPerTaskExecutor().use { exec ->
-            val text = exec.submit<List<Row>> { textSearch(query, filterSql, params, s.textCandidates) }
+        val (vectorRows, textLists) = Executors.newVirtualThreadPerTaskExecutor().use { exec ->
+            // full-text cost grows with query length (a pasted page took minutes); the embedding gets it all
+            val keywordQuery = query.take(s.maxKeywordQueryChars)
+            val text = exec.submit<List<List<Row>>> { textSearch(keywordQuery, filterSql, params, s.textCandidates) }
             val vector = exec.submit<List<Row>> {
                 val emb = embeddingModel.embed(props.embedding.queryInstruction + query)
                 vectorSearch(emb, filterSql, params, s.vectorCandidates)
@@ -54,13 +64,15 @@ class SearchService(
         }
 
         val byId = HashMap<String, Row>()
-        (vectorRows + textRows).forEach { byId.putIfAbsent(it.id, it) }
+        val lists = listOf(vectorRows) + textLists
+        lists.forEach { list -> list.forEach { byId.putIfAbsent(it.id, it) } }
         val fused = HybridRanking.rrf(
-            listOf(vectorRows, textRows).map { list -> list.map { HybridRanking.Candidate(it.id, it.bookId) } },
+            lists.map { list -> list.map { HybridRanking.Candidate(it.id, it.bookId, it.weight) } },
             s.rrfK,
         )
         val cap = if (bookIds != null && bookIds.size <= 2) null else s.maxChunksPerBook
-        return HybridRanking.capPerBook(fused, cap, topK).mapIndexed { i, f ->
+        val kept = HybridRanking.dropWeak(fused, s.minRelativeScore)
+        return HybridRanking.capPerBook(kept, cap, topK).mapIndexed { i, f ->
             val r = byId.getValue(f.id)
             SourceChunk(i + 1, r.id, r.bookId, r.title, r.authors, r.page, r.section, r.text, Math.round(f.score * 1e6) / 1e6)
         }
@@ -84,42 +96,78 @@ class SearchService(
                 ) t order by distance
                 """.trimIndent(),
                 params,
-            ) { rs, _ -> row(rs) }
+            ) { rs, _ ->
+                val similarity = 1.0 - rs.getDouble("distance")
+                row(rs).copy(weight = HybridRanking.similarityWeight(similarity, props.search.vectorSimFloor, props.search.vectorSimFull))
+            }
         } ?: emptyList()
     }
 
     /**
-     * Strict pass first (all terms, websearch syntax). Natural-language questions rarely match every
-     * term, so if that yields too few hits, fall back to an OR over the (stop-word-filtered) terms,
-     * ranked by ts_rank_cd so passages matching more terms win.
+     * Strict pass (every term, websearch syntax) and — if it finds fewer than half the wanted candidates —
+     * the keyword fallback as a separate list, so RRF treats it as its own (weaker) evidence instead of
+     * letting it continue the strict ranking.
      */
-    private fun textSearch(query: String, filterSql: String, base: MapSqlParameterSource, limit: Int): List<Row> {
-        val strict = textSearch(query, filterSql, base, limit, "websearch_to_tsquery('english', :q)")
-        if (strict.size >= limit / 2) return strict
-        val loose = textSearch(
-            query, filterSql, base, limit,
-            "replace(plainto_tsquery('english', :q)::text, ' & ', ' | ')::tsquery",
-        )
+    private fun textSearch(query: String, filterSql: String, base: MapSqlParameterSource, limit: Int): List<List<Row>> {
+        val strict = strictSearch(query, filterSql, base, limit)
+        if (strict.size >= limit / 2 || KeywordFallback.usesWebsearchSyntax(query)) return listOf(strict)
         val seen = strict.mapTo(HashSet()) { it.id }
-        return (strict + loose.filter { it.id !in seen }).take(limit)
+        val fallback = fallbackSearch(query, filterSql, base, limit).filter { it.id !in seen }
+        return listOf(strict, fallback)
     }
 
-    private fun textSearch(
-        query: String, filterSql: String, base: MapSqlParameterSource, limit: Int, tsQueryExpr: String,
-    ): List<Row> {
+    private fun strictSearch(query: String, filterSql: String, base: MapSqlParameterSource, limit: Int): List<Row> {
         val params = MapSqlParameterSource(base.values).addValue("q", query).addValue("limit", limit)
         return jdbc.query(
             """
             select v.id, v.book_id, b.title, b.authors, v.page, v.section, v.content,
                    ts_rank_cd(v.content_tsv, q.query) as rank
             from vector_store v join books b on b.id = v.book_id,
-                 (select $tsQueryExpr as query) q
+                 websearch_to_tsquery('english', :q) q(query)
             where v.content_tsv @@ q.query $filterSql
             order by rank desc
             limit :limit
             """.trimIndent(),
             params,
         ) { rs, _ -> row(rs) }
+    }
+
+    /** Passages holding enough of the query's *discriminative* terms, ranked by IDF-weighted coverage. */
+    private fun fallbackSearch(query: String, filterSql: String, base: MapSqlParameterSource, limit: Int): List<Row> {
+        val s = props.search
+        val lexemes = jdbc.queryForList(
+            "select unnest(tsvector_to_array(to_tsvector('english', :q)))", MapSqlParameterSource("q", query), String::class.java,
+        )
+        val plan = KeywordFallback.plan(
+            termStats.frequencies(lexemes.filterNotNull()), termStats.totalDocs(), s.fallbackCommonTermFrequency, s.fallbackMaxTerms,
+        ) ?: return emptyList()
+
+        // coverage = Σ idf(term present) / Σ idf(all terms); one bound tsquery + weight per term
+        val params = MapSqlParameterSource(base.values)
+            .addValue("candidates", plan.candidateQuery)
+            .addValue("rankQuery", plan.rankQuery)
+            .addValue("total", plan.totalWeight)
+            .addValue("minCoverage", s.fallbackMinCoverage)
+            .addValue("limit", limit)
+        val coverage = plan.terms.withIndex().joinToString(" + ") { (i, term) ->
+            params.addValue("t$i", KeywordFallback.tsQueryLiteral(term.lexeme)).addValue("w$i", term.weight)
+            "(case when v.content_tsv @@ cast(:t$i as tsquery) then cast(:w$i as float8) else 0 end)"
+        }
+        return jdbc.query(
+            """
+            select * from (
+                select v.id, v.book_id, b.title, b.authors, v.page, v.section, v.content,
+                       ($coverage) / cast(:total as float8) as coverage,
+                       ts_rank_cd(v.content_tsv, cast(:rankQuery as tsquery)) as rank
+                from vector_store v join books b on b.id = v.book_id
+                where v.content_tsv @@ cast(:candidates as tsquery) $filterSql
+            ) c
+            where coverage >= :minCoverage
+            order by coverage desc, rank desc
+            limit :limit
+            """.trimIndent(),
+            params,
+        ) { rs, _ -> row(rs).copy(weight = rs.getDouble("coverage")) }
     }
 
     private fun row(rs: ResultSet): Row {
