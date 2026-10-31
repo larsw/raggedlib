@@ -9,7 +9,7 @@ x-models: &models
 
 services:
   postgres:
-    image: pgvector/pgvector:0.8.1-pg18
+    image: pgvector/pgvector:0.8.7-pg18
     restart: unless-stopped
     environment:
       POSTGRES_DB: raggedlib
@@ -40,15 +40,14 @@ services:
       test: ["CMD", "ollama", "list"]
       interval: 10s
       retries: 30
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: all
-              capabilities: [gpu]
+    # GPU via CDI (Container Device Interface) rather than the legacy nvidia runtime hook: with the hook,
+    # a running container can silently lose the GPU after host events such as `systemctl daemon-reload`
+    # ("Failed to initialize NVML: Unknown Error"), and Ollama then falls back to the CPU.
+    # One-time host setup if missing: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+    devices:
+      - nvidia.com/gpu=all
 
-  # One-shot: make sure the embedding + chat models are present (no-op when already pulled).
+  # One-shot: pull the embedding + chat models only if missing, so a registry hiccup can't block startup.
   models:
     image: ollama/ollama:latest
     depends_on:
@@ -57,7 +56,10 @@ services:
     environment:
       <<: *models
       OLLAMA_HOST: http://ollama:11434
-    entrypoint: ["/bin/sh", "-c", "ollama pull \"$$EMBED_MODEL\" && ollama pull \"$$CHAT_MODEL\""]
+    entrypoint:
+      - /bin/sh
+      - -c
+      - for m in "$$EMBED_MODEL" "$$CHAT_MODEL"; do ollama show "$$m" >/dev/null 2>&1 || ollama pull "$$m" || exit 1; done
     restart: "no"
 
   backend:
