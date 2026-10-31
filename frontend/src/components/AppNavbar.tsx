@@ -1,6 +1,6 @@
 import { Alignment, Button, Navbar, NavbarDivider, NavbarGroup, NavbarHeading, Tab, Tabs, Tooltip } from "@blueprintjs/core";
 import type { TabId } from "../hooks/useHashTab";
-import type { Theme } from "../hooks/useTheme";
+import { nextTheme, THEME_META, type Theme } from "../hooks/useTheme";
 import { SystemStatus } from "./SystemStatus";
 
 interface Props {
@@ -33,15 +33,32 @@ export function AppNavbar({ tab, onTabChange, theme, onToggleTheme }: Props) {
       <NavbarGroup align={Alignment.END}>
         <SystemStatus />
         <NavbarDivider />
-        <Tooltip content={theme === "dark" ? "Light theme" : "Dark theme"} placement="bottom-end">
-          <Button
-            variant="minimal"
-            icon={theme === "dark" ? "flash" : "moon"}
-            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
-            onClick={onToggleTheme}
-          />
-        </Tooltip>
+        <ThemeButton theme={theme} onClick={onToggleTheme} />
       </NavbarGroup>
     </Navbar>
+  );
+}
+
+/** Tri-state button: the icon shows the current theme, a click advances dark → light → sepia → dark. */
+function ThemeButton({ theme, onClick }: { theme: Theme; onClick: () => void }) {
+  const current = THEME_META[theme];
+  const next = THEME_META[nextTheme(theme)];
+  return (
+    <Tooltip
+      content={
+        <span>
+          {current.label} theme · click for <strong>{next.label.toLowerCase()}</strong>
+        </span>
+      }
+      placement="bottom-end"
+    >
+      <Button
+        variant="minimal"
+        icon={current.icon}
+        className="theme-button"
+        aria-label={`Theme: ${current.label}. Switch to ${next.label.toLowerCase()} theme`}
+        onClick={onClick}
+      />
+    </Tooltip>
   );
 }

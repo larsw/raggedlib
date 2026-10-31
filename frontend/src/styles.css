@@ -37,6 +37,257 @@ html.app-dark {
   color-scheme: dark;
 }
 
+/* ── Sepia ──────────────────────────────────────────────────────────────────────────────────
+ * Blueprint's light theme, re-tinted to warm paper. Blueprint 6 derives most colors from the
+ * --bp-palette-* / --bp-intent-* custom properties, so overriding those on <html> (higher
+ * specificity than Blueprint's :root) re-tints buttons, inputs, cards, tags and borders. The
+ * handful of components that still hard-code #fff / gray hex values are patched below.
+ */
+html.app-sepia {
+  --sepia-paper: #f3ead8; /* page */
+  --sepia-surface: #faf4e6; /* cards, menus, popovers */
+  --sepia-surface-2: #ece2cc;
+  --sepia-text: #3b2e21;
+  --sepia-muted: #6e5b45;
+  --sepia-faint: #a08c70;
+  --sepia-accent: #9b5a1f;
+
+  --app-bg: var(--sepia-paper);
+  --app-surface: var(--sepia-surface);
+  --app-surface-2: var(--sepia-surface-2);
+  --app-border: rgba(74, 52, 30, 0.14);
+  --app-border-strong: rgba(74, 52, 30, 0.26);
+  --app-text: var(--sepia-text);
+  --app-muted: var(--sepia-muted);
+  --app-accent: var(--sepia-accent);
+  --app-accent-soft: rgba(155, 90, 31, 0.1);
+  --app-cite-bg: rgba(155, 90, 31, 0.14);
+  --app-cite-fg: #7c4616;
+  --app-mark: rgba(214, 158, 46, 0.4);
+  --app-code-bg: #ebe0c8;
+  --app-flash: rgba(155, 90, 31, 0.22);
+  color-scheme: light;
+
+  /* Blueprint palette: grays → warm browns */
+  --bp-palette-white: var(--sepia-surface);
+  --bp-palette-light-gray-5: var(--sepia-paper);
+  --bp-palette-light-gray-4: var(--sepia-surface-2);
+  --bp-palette-light-gray-3: #e4d7bc;
+  --bp-palette-light-gray-2: #dacbab;
+  --bp-palette-light-gray-1: #cfbe9b;
+  --bp-palette-gray-5: #bfac8b;
+  --bp-palette-gray-4: #a8957a;
+  --bp-palette-gray-3: #8f7c63;
+  --bp-palette-gray-2: #786650;
+  --bp-palette-gray-1: #65533f;
+  --bp-palette-dark-gray-5: #4f4133;
+  --bp-palette-dark-gray-4: #46392c;
+  --bp-palette-dark-gray-3: #3d3126;
+  --bp-palette-dark-gray-2: #352a20;
+  --bp-palette-dark-gray-1: #2e241b;
+  --bp-palette-black: #231a12;
+
+  /* Intents: default → warm gray-brown, primary → umber. Success/warning/danger keep Blueprint's hues. */
+  --bp-intent-default-rest: #6e5b45;
+  --bp-intent-default-hover: #4f4133;
+  --bp-intent-default-active: #46392c;
+  --bp-intent-default-disabled: var(--sepia-faint);
+  --bp-intent-default-foreground: #fffaf0;
+  --bp-intent-primary-rest: var(--sepia-accent);
+  --bp-intent-primary-hover: #80491a;
+  --bp-intent-primary-active: #6c3d15;
+  --bp-intent-primary-foreground: #fffaf0;
+  --bp-emphasis-focus-color: var(--sepia-accent);
+
+  --bp-typography-color-default-rest: var(--sepia-text);
+  --bp-typography-color-muted: var(--sepia-muted);
+  --bp-typography-color-default-disabled: var(--sepia-faint);
+  --bp-surface-background-color-default-rest: var(--sepia-surface);
+  --bp-surface-background-color-default-hover: var(--sepia-paper);
+  --bp-surface-background-color-default-active: var(--sepia-surface-2);
+}
+
+/* Components whose light-theme colors are hard-coded in blueprint.css. Plain selector lists (not :is())
+ * so each override is exactly one class more specific than the Blueprint rule it replaces. */
+html.app-sepia body,
+html.app-sepia .bp6-heading,
+html.app-sepia .bp6-tab,
+html.app-sepia .bp6-menu,
+html.app-sepia .bp6-menu-header > h6,
+html.app-sepia .bp6-running-text h1,
+html.app-sepia .bp6-running-text h2,
+html.app-sepia .bp6-running-text h3,
+html.app-sepia .bp6-running-text h4,
+html.app-sepia .bp6-running-text h5,
+html.app-sepia .bp6-running-text h6,
+html.app-sepia .bp6-running-text pre,
+html.app-sepia .bp6-code-block,
+html.app-sepia table.bp6-html-table th,
+html.app-sepia table.bp6-html-table td,
+html.app-sepia .bp6-running-text table th,
+html.app-sepia .bp6-running-text table td,
+html.app-sepia .bp6-control.bp6-switch input ~ .bp6-control-indicator,
+html.app-sepia .bp6-menu-item:active .bp6-menu-item-label,
+html.app-sepia .bp6-html-select .bp6-icon:hover,
+html.app-sepia .bp6-select .bp6-icon:hover {
+  color: var(--sepia-text);
+}
+html.app-sepia .bp6-text-muted,
+html.app-sepia .bp6-heading.bp6-text-muted,
+html.app-sepia .bp6-menu-header > h6.bp6-text-muted,
+html.app-sepia .bp6-non-ideal-state,
+html.app-sepia .bp6-non-ideal-state .bp6-heading,
+html.app-sepia .bp6-code,
+html.app-sepia .bp6-running-text code,
+html.app-sepia .bp6-key,
+html.app-sepia .bp6-running-text kbd,
+html.app-sepia .bp6-breadcrumb,
+html.app-sepia .bp6-menu-item .bp6-menu-item-label,
+html.app-sepia .bp6-menu-item::before,
+html.app-sepia .bp6-menu-item .bp6-menu-item-icon,
+html.app-sepia .bp6-menu-item .bp6-menu-item-selected-icon,
+html.app-sepia .bp6-menu-item .bp6-submenu-icon,
+html.app-sepia .bp6-html-select .bp6-icon,
+html.app-sepia .bp6-select .bp6-icon,
+html.app-sepia .bp6-callout.bp6-callout-icon > .bp6-icon:first-child,
+html.app-sepia .bp6-callout[class*=bp6-icon-]::before,
+html.app-sepia .bp6-dialog-header .bp6-icon:not([class*=bp6-intent]),
+html.app-sepia .bp6-drawer-header .bp6-icon,
+html.app-sepia .bp6-toast > .bp6-icon,
+html.app-sepia .bp6-segmented-control > .bp6-button.bp6-minimal {
+  color: var(--sepia-muted);
+}
+html.app-sepia .bp6-non-ideal-state-visual {
+  color: var(--sepia-faint);
+}
+html.app-sepia .bp6-navbar,
+html.app-sepia .bp6-menu,
+html.app-sepia .bp6-popover .bp6-popover-content,
+html.app-sepia .bp6-drawer,
+html.app-sepia .bp6-omnibar,
+html.app-sepia .bp6-toast,
+html.app-sepia .bp6-dialog-header,
+html.app-sepia .bp6-dialog-footer-fixed,
+html.app-sepia .bp6-tag-input.bp6-active,
+html.app-sepia .bp6-key,
+html.app-sepia .bp6-running-text kbd,
+html.app-sepia .bp6-panel-stack2-view,
+html.app-sepia .bp6-segmented-control > .bp6-button:not(.bp6-minimal):not(.bp6-intent-primary),
+html.app-sepia .bp6-editable-text.bp6-editable-text-editing::before,
+html.app-sepia .bp6-control.bp6-switch .bp6-control-indicator::before {
+  background: var(--sepia-surface);
+}
+html.app-sepia .bp6-popover .bp6-popover-arrow-fill {
+  fill: var(--sepia-surface);
+}
+html.app-sepia .bp6-dialog,
+html.app-sepia .bp6-segmented-control,
+html.app-sepia .bp6-card-list > .bp6-card.bp6-interactive:hover,
+html.app-sepia .bp6-card-list > .bp6-card.bp6-interactive:active,
+html.app-sepia .bp6-section-header.bp6-interactive:hover,
+html.app-sepia .bp6-section-header.bp6-interactive:active {
+  background: var(--sepia-paper);
+}
+html.app-sepia .bp6-card-list > .bp6-card.bp6-selected {
+  background: var(--sepia-surface-2);
+}
+/* Hard-coded blue accents → umber. Only plain links: Blueprint renders MenuItem/AnchorButton as <a>. */
+html.app-sepia a:not([class*="bp6-"]),
+html.app-sepia a:not([class*="bp6-"]):hover,
+html.app-sepia .bp6-tab[aria-selected=true],
+html.app-sepia .bp6-tab:not([aria-disabled=true]):hover,
+html.app-sepia .bp6-menu-item.bp6-active:not([class*=bp6-intent-]),
+html.app-sepia .bp6-menu-item.bp6-active:not([class*=bp6-intent-])::before,
+html.app-sepia .bp6-menu-item.bp6-active:not([class*=bp6-intent-]) .bp6-menu-item-icon,
+html.app-sepia .bp6-menu-item.bp6-active:not([class*=bp6-intent-]) .bp6-menu-item-selected-icon,
+html.app-sepia .bp6-menu-item.bp6-active:not([class*=bp6-intent-]) .bp6-submenu-icon {
+  color: var(--app-cite-fg);
+}
+html.app-sepia .bp6-menu-item.bp6-active:not([class*=bp6-intent-]) {
+  background-color: var(--app-accent-soft);
+}
+html.app-sepia .bp6-tab[aria-selected=true] {
+  box-shadow: inset 0 -3px 0 var(--app-cite-fg);
+}
+html.app-sepia .bp6-tab-indicator-wrapper .bp6-tab-indicator {
+  background-color: var(--app-cite-fg);
+}
+html.app-sepia .bp6-control input:checked ~ .bp6-control-indicator,
+html.app-sepia .bp6-control.bp6-switch input:checked ~ .bp6-control-indicator {
+  background: var(--bp-intent-primary-rest);
+}
+html.app-sepia .bp6-control:hover input:checked ~ .bp6-control-indicator,
+html.app-sepia .bp6-control.bp6-switch:hover input:checked ~ .bp6-control-indicator {
+  background: var(--bp-intent-primary-hover);
+}
+/* Primary-intent variants that blueprint.css hard-codes in blue */
+html.app-sepia .bp6-icon.bp6-intent-primary,
+html.app-sepia .bp6-icon-standard.bp6-intent-primary,
+html.app-sepia .bp6-icon-large.bp6-intent-primary,
+html.app-sepia .bp6-callout.bp6-intent-primary,
+html.app-sepia .bp6-callout.bp6-intent-primary[class*=bp6-icon-]::before,
+html.app-sepia .bp6-callout.bp6-intent-primary > .bp6-icon:first-child,
+html.app-sepia .bp6-callout.bp6-intent-primary .bp6-heading,
+html.app-sepia .bp6-link.bp6-intent-primary,
+html.app-sepia .bp6-menu-item.bp6-intent-primary {
+  color: var(--app-cite-fg);
+}
+html.app-sepia .bp6-callout.bp6-intent-primary:not(.bp6-minimal),
+html.app-sepia .bp6-menu-item.bp6-intent-primary:hover {
+  background-color: var(--app-accent-soft);
+}
+html.app-sepia .bp6-menu-item.bp6-intent-primary:active,
+html.app-sepia .bp6-menu-item.bp6-intent-primary.bp6-active {
+  background-color: var(--app-cite-bg);
+  color: var(--bp-intent-primary-active);
+}
+html.app-sepia .bp6-progress-bar.bp6-intent-primary .bp6-progress-meter,
+html.app-sepia .bp6-slider-progress.bp6-intent-primary {
+  background-color: var(--bp-intent-primary-rest);
+}
+html.app-sepia .bp6-spinner.bp6-intent-primary .bp6-spinner-head {
+  stroke: var(--bp-intent-primary-rest);
+}
+html.app-sepia .bp6-toast.bp6-intent-primary,
+html.app-sepia .bp6-tooltip.bp6-intent-primary .bp6-popover-content {
+  background: var(--bp-intent-primary-rest);
+  color: var(--bp-intent-primary-foreground);
+}
+html.app-sepia .bp6-tooltip.bp6-intent-primary .bp6-popover-arrow-fill {
+  fill: var(--bp-intent-primary-rest);
+}
+html.app-sepia .bp6-toast.bp6-intent-primary .bp6-button {
+  background-color: var(--bp-intent-primary-rest) !important;
+  color: var(--bp-intent-primary-foreground) !important;
+}
+html.app-sepia .bp6-toast.bp6-intent-primary .bp6-button:hover {
+  background-color: var(--bp-intent-primary-hover) !important;
+}
+html.app-sepia .bp6-toast.bp6-intent-primary .bp6-button:active {
+  background-color: var(--bp-intent-primary-active) !important;
+}
+/* Tooltips stay dark (as in Blueprint's light theme), but warm. */
+html.app-sepia .bp6-tooltip .bp6-popover-content {
+  background: var(--bp-palette-dark-gray-5);
+  color: var(--sepia-surface);
+}
+html.app-sepia .bp6-tooltip a:not([class*="bp6-"]) {
+  color: #e8c48f;
+}
+html.app-sepia .bp6-tooltip .bp6-popover-arrow-fill {
+  fill: var(--bp-palette-dark-gray-5);
+}
+html.app-sepia .bp6-tooltip .bp6-text-muted,
+html.app-sepia .bp6-tooltip .bp6-code,
+html.app-sepia .bp6-tooltip .bp6-running-text code,
+html.app-sepia .bp6-tooltip .bp6-key {
+  color: var(--bp-palette-gray-5);
+}
+/* Covers sit on paper — a light warm wash keeps bright cover art from glaring. */
+html.app-sepia img {
+  filter: sepia(0.18) saturate(0.92);
+}
+
 html,
 body,
 #root {

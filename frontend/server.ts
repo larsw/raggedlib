@@ -36,12 +36,17 @@ async function proxy(req: Request, server: Bun.Server<undefined>): Promise<Respo
   const url = new URL(req.url);
   const target = BACKEND_URL + url.pathname + url.search;
   const hasBody = req.method !== "GET" && req.method !== "HEAD";
+  // To the browser this is a same-origin request, so the backend's CORS check must not apply.
+  // Forwarding Origin would make every POST fail (403) unless the page was opened via exactly
+  // the origin in the backend's allow-list (e.g. 127.0.0.1:3000 or a LAN hostname would break).
+  const forwardHeaders = stripHeaders(req.headers);
+  forwardHeaders.delete("origin");
 
   let upstream: Response;
   try {
     upstream = await fetch(target, {
       method: req.method,
-      headers: stripHeaders(req.headers),
+      headers: forwardHeaders,
       body: hasBody ? await req.arrayBuffer() : undefined,
       redirect: "manual",
       decompress: false, // pass the body through byte-for-byte, keep Content-Encoding intact

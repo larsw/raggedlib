@@ -8,11 +8,15 @@
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect x='2' y='1' width='3' height='14' rx='1' fill='%234c90f0'/%3E%3Crect x='6' y='3' width='3' height='12' rx='1' fill='%2372ca9b'/%3E%3Crect x='10' y='2' width='3' height='13' rx='1' transform='rotate(-8 11 8)' fill='%23fbb360'/%3E%3C/svg%3E" />
     <script>
       // Apply the stored theme before first paint to avoid a light flash.
-      try {
-        if (localStorage.getItem("raggedlib.theme") !== "light") document.documentElement.classList.add("app-dark");
-      } catch (e) {
-        document.documentElement.classList.add("app-dark");
-      }
+      // Mirrors parseTheme() in src/hooks/useTheme.ts: "light" | "sepia" | anything else → dark.
+      (function () {
+        var t = null;
+        try {
+          t = localStorage.getItem("raggedlib.theme");
+        } catch (e) {}
+        if (t === "sepia") document.documentElement.classList.add("app-sepia");
+        else if (t !== "light") document.documentElement.classList.add("app-dark");
+      })();
     </script>
   </head>
   <body>
