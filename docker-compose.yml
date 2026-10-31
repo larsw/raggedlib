@@ -1,0 +1,98 @@
+name: raggedlib
+
+# Full stack:  docker compose up -d --build      → http://localhost:3000
+# Infra only (run backend/frontend on the host):  docker compose up -d postgres ollama models
+
+x-models: &models
+  EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+  CHAT_MODEL: ${CHAT_MODEL:-qwen3.5:9b}
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.1-pg18
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: raggedlib
+      POSTGRES_USER: raggedlib
+      POSTGRES_PASSWORD: raggedlib
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U raggedlib -d raggedlib"]
+      interval: 5s
+      retries: 20
+
+  ollama:
+    image: ollama/ollama:latest
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:11434:11434"
+    environment:
+      OLLAMA_KEEP_ALIVE: "30m"
+      OLLAMA_MAX_LOADED_MODELS: "2"
+      OLLAMA_NUM_PARALLEL: "2"
+      OLLAMA_FLASH_ATTENTION: "1"
+    volumes:
+      - ollama:/root/.ollama
+    healthcheck:
+      test: ["CMD", "ollama", "list"]
+      interval: 10s
+      retries: 30
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # One-shot: make sure the embedding + chat models are present (no-op when already pulled).
+  models:
+    image: ollama/ollama:latest
+    depends_on:
+      ollama:
+        condition: service_healthy
+    environment:
+      <<: *models
+      OLLAMA_HOST: http://ollama:11434
+    entrypoint: ["/bin/sh", "-c", "ollama pull \"$$EMBED_MODEL\" && ollama pull \"$$CHAT_MODEL\""]
+    restart: "no"
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      models:
+        condition: service_completed_successfully
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/raggedlib
+      SPRING_DATASOURCE_USERNAME: raggedlib
+      SPRING_DATASOURCE_PASSWORD: raggedlib
+      SPRING_AI_OLLAMA_BASE_URL: http://ollama:11434
+      SPRING_AI_OLLAMA_CHAT_MODEL: ${CHAT_MODEL:-qwen3.5:9b}
+      SPRING_AI_OLLAMA_EMBEDDING_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
+      RAGGEDLIB_LIBRARY_PATH: /library
+    volumes:
+      - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library:ro
+    ports:
+      - "127.0.0.1:8080:8080"
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    environment:
+      BACKEND_URL: http://backend:8080
+      PORT: "3000"
+    ports:
+      - "127.0.0.1:3000:3000"
+
+volumes:
+  pgdata:
+  ollama:

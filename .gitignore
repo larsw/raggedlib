@@ -1,0 +1,7 @@
+node_modules/
+target/
+dist/
+.idea/
+*.iml
+.env
+backend/data/

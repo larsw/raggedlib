@@ -1,0 +1,166 @@
+diff --git a/lib/css/blueprint.css b/lib/css/blueprint.css
+index 41644ab79401bf50dec3fd7da2ed1e3a73bbb01c..6db4560a16ad945186569f210a4b3d5ce21b3f77 100644
+--- a/lib/css/blueprint.css
++++ b/lib/css/blueprint.css
+@@ -207,7 +207,7 @@
+   --bp-typography-color-danger-disabled:#e76a6e;
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp-surface-border-color-default:oklch(from var(--bp-intent-default-rest) l c h / 0.12);
+     --bp-surface-border-color-strong:oklch(from var(--bp-intent-default-rest) l c h / 0.25);
+@@ -250,7 +250,7 @@
+   --bp-typography-color-default-active:#54575d;
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   [data-bp-color-scheme=dark],
+   .bp6-dark{
+     --bp-surface-border-color-default:oklch(from var(--bp-palette-white) l c h / 0.2);
+@@ -3770,7 +3770,7 @@ a > .bp6-dark .bp6-running-text code{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -4808,7 +4808,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -4819,7 +4819,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -6285,7 +6285,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -6633,7 +6633,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -6644,7 +6644,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -6655,7 +6655,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -6818,7 +6818,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -7357,7 +7357,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -7639,7 +7639,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -7729,7 +7729,7 @@ a.bp6-button.bp6-disabled{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -8350,7 +8350,7 @@ label.bp6-label:not(.bp6-inline) .bp6-popover-target{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -8377,7 +8377,7 @@ form{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -13276,7 +13276,7 @@ body.bp6-overlay-open{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -14055,7 +14055,7 @@ a > .bp6-dark .bp6-tooltip .bp6-running-text code{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)
+@@ -15357,7 +15357,7 @@ a > .bp6-dark .bp6-tooltip .bp6-running-text code{
+   --bp6-button-warning-rest:var(--bp-palette-orange-5);
+ }
+ 
+-@supports (color: oklch(from var(--any-color) l c h)){
++@supports (color: oklch(from red l c h)){
+   :root{
+     --bp6-button-warning-rest:oklch(
+       from var(--bp-intent-warning-rest) calc(l + 0.177) calc(c - 0.01) calc(h + 6.26)

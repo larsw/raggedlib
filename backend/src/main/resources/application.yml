@@ -1,0 +1,98 @@
+# Every setting can be overridden via environment variables (Spring relaxed binding), e.g.
+#   RAGGEDLIB_LIBRARY_PATH=/library  SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/raggedlib
+#   SPRING_AI_OLLAMA_BASE_URL=http://ollama:11434  SPRING_AI_OLLAMA_CHAT_MODEL=qwen3.5:9b
+#   RAGGEDLIB_INGEST_EXTRACT_CONCURRENCY=3  RAGGEDLIB_TOOLS_EBOOK_CONVERT=/opt/calibre/ebook-convert
+server:
+  port: 8080
+  compression:
+    enabled: false   # never buffer/compress the chat SSE stream
+
+spring:
+  application:
+    name: raggedlib
+  threads:
+    virtual:
+      enabled: true
+  mvc:
+    async:
+      request-timeout: 30m
+  datasource:
+    url: jdbc:postgresql://localhost:55432/raggedlib
+    username: raggedlib
+    password: raggedlib
+    hikari:
+      maximum-pool-size: 16
+  flyway:
+    enabled: true
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+      init:
+        pull-model-strategy: never
+      chat:
+        model: "qwen3.5:9b"
+        num-ctx: 16384
+      embedding:
+        model: "qwen3-embedding:0.6b"
+    vectorstore:
+      pgvector:
+        initialize-schema: false     # Flyway owns the schema (V1__init.sql)
+        table-name: vector_store
+        dimensions: 1024
+        distance-type: COSINE_DISTANCE
+        index-type: HNSW
+    retry:
+      max-attempts: 3
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+
+raggedlib:
+  library-path: ${user.home}/Documents/CalibreLibrary
+  tmp-dir: ${java.io.tmpdir}
+  metadata-source: auto          # auto (calibredb, fallback metadata.db) | calibredb | sqlite
+  cors-origins: http://localhost:3000
+  tools:
+    calibredb: calibredb
+    ebook-convert: ebook-convert
+    pdftotext: pdftotext
+    calibredb-timeout: 2m
+    convert-timeout: 10m
+  ingest:
+    extract-concurrency: 3
+    queue-capacity: 3
+    embed-batch-size: 32
+    embed-parallelism: 2
+    min-letters-per-page: 80
+  chunking:
+    target-chars: 1500
+    max-chars: 2000
+    overlap-chars: 200
+    min-chars: 80
+  search:
+    default-top-k: 8
+    max-top-k: 50
+    vector-candidates: 40
+    text-candidates: 40
+    rrf-k: 60
+    max-chunks-per-book: 3
+    hnsw-ef-search: 100
+  chat:
+    num-ctx: 16384
+    temperature: 0.3
+    history-messages: 6
+    disable-thinking: true
+    rewrite-num-predict: 96
+  embedding:
+    dimensions: 1024
+
+logging:
+  level:
+    org.springframework.ai: INFO
