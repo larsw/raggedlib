@@ -41,6 +41,23 @@ spring:
         dimensions: 1024
         distance-type: COSINE_DISTANCE
         index-type: HNSW
+    mcp:
+      server:
+        name: raggedlib
+        version: 1.0.0
+        protocol: STATELESS          # streamable HTTP without sessions: plain POST /mcp per call
+        type: SYNC
+        capabilities:                # tools only
+          resource: false
+          prompt: false
+          completion: false
+        streamable-http:
+          mcp-endpoint: /mcp
+        instructions: >-
+          Tools over the user's personal ebook library (mostly technical books, indexed from Calibre).
+          search_library finds relevant passages fast (no LLM); ask_library writes a cited answer with a local LLM
+          (slow, 20-90 s). Cite passages by book title and page/section. list_books / list_tags give ids and tags to
+          narrow a search; library_status tells how much of the library is indexed.
     retry:
       max-attempts: 3
 
@@ -94,6 +111,12 @@ raggedlib:
     fallback-common-term-frequency: 0.05
     fallback-max-terms: 12
     term-stats-ttl-seconds: 600
+  # MCP endpoint (/mcp) for agent harnesses: each client sends one of these keys as
+  # "Authorization: Bearer <key>" or "X-API-Key: <key>". No keys = every MCP request refused.
+  # Env: RAGGEDLIB_MCP_API_KEYS_0_NAME=claude-code RAGGEDLIB_MCP_API_KEYS_0_KEY=<secret or sha256:<hex>>
+  mcp:
+    api-keys: []
+    answer-timeout: 150s           # ask_library is cut off here (partial answer returned); clients: allow ~180 s
   # cross-encoder reranking of the fused top candidates (llama.cpp /v1/rerank, bge-reranker-v2-m3); see Reranker.kt
   rerank:
     enabled: true
@@ -114,9 +137,14 @@ raggedlib:
     history-messages: 6
     disable-thinking: true
     rewrite-num-predict: 96
+    max-context-chars: 16000       # excerpt budget per answer; Ollama gives each of its 2 slots num-ctx/2 tokens
   embedding:
     dimensions: 1024
 
 logging:
   level:
     org.springframework.ai: INFO
+    # tools-only MCP server: these warn at startup that there are no resources/prompts/completions
+    org.springframework.ai.mcp.annotation.provider.resource: ERROR
+    org.springframework.ai.mcp.annotation.provider.prompt: ERROR
+    org.springframework.ai.mcp.annotation.provider.complete: ERROR

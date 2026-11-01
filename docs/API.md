@@ -104,6 +104,16 @@ interface ChatRequest extends SearchRequest {
 }
 ```
 
+### MCP
+
+`/mcp` is an MCP server (streamable HTTP, stateless, protocol handled by Spring AI) with the tools `search_library`,
+`ask_library`, `list_books`, `list_tags` and `library_status`. Tool results are JSON text: `search_library` returns
+`{query, passages: Passage[], note}`, where a `Passage` is a `SourceChunk` without `chunkId`. `ask_library` returns
+`{answer, sources: Passage[], searchQuery, model, elapsedMs}`.
+
+Each request needs `Authorization: Bearer <key>` or `X-API-Key: <key>` matching one of `raggedlib.mcp.api-keys`.
+Otherwise the server responds `401` with `WWW-Authenticate: Bearer realm="raggedlib-mcp"` and a JSON `{error, message}`.
+
 ### Chat SSE stream
 
 `POST /api/chat` responds with `Content-Type: text/event-stream`. Events (each `data:` is JSON):

@@ -30,6 +30,33 @@ docker compose up -d postgres ollama models reranker
 
 The host backend and the containerized backend can share the same database, because file paths are stored relative to the library root. Stop the `backend` and `frontend` containers first, or they will occupy the ports.
 
+## Use it from agents (MCP)
+
+The backend serves an [MCP](https://modelcontextprotocol.io) endpoint at `http://localhost:8080/mcp` (streamable HTTP, stateless) with five read-only tools:
+
+| Tool | What it does |
+|---|---|
+| `search_library` | Reranked passage search (about 1 s, no LLM). Takes `query`, and optionally `topK`, `bookIds`, `tags` and `rerank`. An empty result means the books don't cover it. |
+| `ask_library` | A cited answer from the local chat model (20–90 s; cut off at 150 s), with its sources as short excerpts. Takes `question`, and optionally `topK`, `bookIds`, `tags` and `model`. |
+| `list_books` | Find books by title/author substring, tag or status, to get ids for `bookIds` |
+| `list_tags` | Calibre tags by number of books |
+| `library_status` | How many books are indexed and searchable |
+
+Every MCP request needs an API key, sent as `Authorization: Bearer <key>` or `X-API-Key: <key>`. With no key configured, the endpoint refuses everything. The rest of the API (`/api`, used by the web UI) doesn't need a key; like the UI, it's published on localhost only.
+
+```bash
+KEY=$(openssl rand -hex 32)
+touch .env && sed -i '/^MCP_API_KEY=/d' .env && echo "MCP_API_KEY=$KEY" >> .env   # docker compose reads .env
+docker compose up -d --build backend
+claude mcp add --transport http raggedlib http://localhost:8080/mcp --header "Authorization: Bearer $KEY"
+```
+
+`ask_library` runs for up to 150 s, and the stateless transport sends no progress updates meanwhile. Give it a tool timeout of at least 180 s: many clients default to 60 s. In Claude Code, set `MCP_TOOL_TIMEOUT=180000`.
+
+Other harnesses take the same URL and header, for example as JSON: `{"type": "http", "url": "http://localhost:8080/mcp", "headers": {"Authorization": "Bearer <key>"}}`.
+
+Keys are configured in `raggedlib.mcp.api-keys`, as a list of `{name, key}`. The name only identifies the client in logs. A key can be stored as `sha256:<hex>` instead of in plain text; `printf %s "$KEY" | sha256sum` gives the hex. Clients still send the plain key. In docker-compose, `MCP_API_KEY` (and `MCP_API_KEY_NAME`) fill entry 0. For more keys, add `RAGGEDLIB_MCP_API_KEYS_1_NAME` / `RAGGEDLIB_MCP_API_KEYS_1_KEY` and so on to the backend's environment.
+
 ## How it works
 
 - **Sync** (`POST /api/library/sync`): reads metadata with `calibredb list`. If calibredb refuses, it falls back to reading `metadata.db` read-only. That happens when the Calibre GUI is open, and also inside the container, where the mount is read-only. Books whose calibre `last_modified` changed are queued for re-indexing.

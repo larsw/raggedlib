@@ -13,6 +13,8 @@ import org.springframework.ai.ollama.api.OllamaChatOptions
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.stereotype.Service
 import reactor.core.publisher.Flux
+import java.time.Duration
+import java.util.concurrent.atomic.AtomicBoolean
 
 data class HistoryMessage(val role: String = "user", val content: String = "")
 
@@ -24,6 +26,17 @@ data class ChatRequest(
     val history: List<HistoryMessage>? = null,
     val model: String? = null,
     val rerank: Boolean? = null,
+)
+
+/** A complete (non-streamed) answer, for callers that can't consume SSE (MCP). */
+data class ChatAnswer(
+    val question: String,
+    /** The query actually used for retrieval (a rewritten follow-up, if there was history). */
+    val searchQuery: String,
+    val answer: String,
+    val sources: List<SourceChunk>,
+    val model: String,
+    val elapsedMs: Long,
 )
 
 @Service
@@ -55,8 +68,9 @@ class ChatService(
         }
     }
 
+    /** Best passages for the question, cut to the model's excerpt budget ([RaggedlibProperties.Chat.maxContextChars]). */
     fun retrieve(req: ChatRequest, query: String): List<SourceChunk> =
-        search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.rerank))
+        withinBudget(search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.rerank)), props.chat.maxContextChars)
 
     fun stream(req: ChatRequest, sources: List<SourceChunk>): Flux<String> {
         val messages = mutableListOf<Message>()
@@ -82,6 +96,28 @@ class ChatService(
             .options(options(req.model).temperature(props.chat.temperature))
             .stream()
             .content()
+    }
+
+    /**
+     * Retrieval + the whole answer, blocking. [timeout] covers both; when it runs out, generation is stopped (which
+     * cancels the Ollama request) and the answer is returned as far as it got, marked as cut off.
+     */
+    fun answer(req: ChatRequest, timeout: Duration): ChatAnswer {
+        val started = System.nanoTime()
+        val query = standaloneQuery(req)
+        val sources = retrieve(req, query)
+        val left = timeout.minusNanos(System.nanoTime() - started).coerceAtLeast(Duration.ofSeconds(1))
+        val cut = AtomicBoolean(false)
+        val text = stream(req, sources)
+            .doOnCancel { cut.set(true) } // only take(left) cancels upstream: time ran out
+            .take(left)
+            .collectList()
+            .block()
+            ?.joinToString("")
+            ?.trim()
+            .orEmpty()
+        val answer = if (cut.get()) "$text\n\n[answer cut off after ${timeout.toSeconds()} s]".trim() else text
+        return ChatAnswer(req.query, query, answer, sources, modelFor(req), (System.nanoTime() - started) / 1_000_000)
     }
 
     fun modelFor(req: ChatRequest): String = req.model?.takeIf { it.isNotBlank() } ?: defaultModel
@@ -113,6 +149,20 @@ class ChatService(
             without the conversation. Resolve pronouns and references using the conversation. Keep the language
             of the question. Output only the query text, no quotes, no explanation.
         """.trimIndent()
+
+        /** Leading passages (always at least one) whose text plus per-excerpt header fits [budget] characters. */
+        internal fun withinBudget(sources: List<SourceChunk>, budget: Int): List<SourceChunk> {
+            var used = 0
+            var n = 0
+            for (s in sources) {
+                used += s.text.length + EXCERPT_OVERHEAD_CHARS
+                if (n > 0 && used > budget) break // a prefix: a later, shorter passage doesn't jump the queue
+                n++
+            }
+            return sources.take(n)
+        }
+
+        private const val EXCERPT_OVERHEAD_CHARS = 120
 
         internal fun cleanRewrite(s: String?): String? {
             if (s == null) return null

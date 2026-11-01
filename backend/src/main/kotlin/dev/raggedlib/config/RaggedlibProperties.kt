@@ -21,6 +21,7 @@ data class RaggedlibProperties(
     val chat: Chat = Chat(),
     val embedding: Embedding = Embedding(),
     val rerank: Rerank = Rerank(),
+    val mcp: Mcp = Mcp(),
 ) {
     data class Tools(
         val calibredb: String = "calibredb",
@@ -90,6 +91,13 @@ data class RaggedlibProperties(
         val historyMessages: Int = 6,
         val disableThinking: Boolean = true,
         val rewriteNumPredict: Int = 96,
+        /**
+         * Excerpt text given to the model per answer; passages beyond it are left out (and not returned as sources).
+         * Ollama splits num-ctx across OLLAMA_NUM_PARALLEL slots (16384 / 2 = 8192 tokens per request) and silently
+         * drops the *start* of a longer prompt — the system prompt and the best passages. 16000 chars ≈ 4.5K tokens,
+         * leaving room for instructions, history and the answer.
+         */
+        val maxContextChars: Int = 16_000,
     )
 
     data class Embedding(
@@ -126,4 +134,24 @@ data class RaggedlibProperties(
         /** After a failure, searches skip the reranker this long instead of each waiting out the timeout. */
         val cooldown: Duration = Duration.ofSeconds(15),
     )
+
+    /**
+     * MCP endpoint (`/mcp`, streamable HTTP) for agent harnesses. Every request needs one of [apiKeys], sent as
+     * `Authorization: Bearer <key>` or `X-API-Key: <key>`; with no keys configured, all MCP requests are refused.
+     */
+    data class Mcp(
+        val apiKeys: List<ApiKey> = emptyList(),
+        /**
+         * Upper bound for one `ask_library` call (retrieval + generation); the answer is cut off there and returned
+         * as far as it got. The stateless transport can't notice a client that gave up, so this also bounds the GPU
+         * time an abandoned call can take. Clients should allow somewhat more than this.
+         */
+        val answerTimeout: Duration = Duration.ofSeconds(150),
+    )
+
+    /**
+     * [name] identifies the client in logs. [key] is the secret itself, or `sha256:<hex>` of it so the plain key
+     * needn't sit in the configuration. Entries with a blank key are ignored.
+     */
+    data class ApiKey(val name: String = "", val key: String = "")
 }

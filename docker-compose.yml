@@ -100,6 +100,9 @@ services:
       SPRING_AI_OLLAMA_EMBEDDING_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
       RAGGEDLIB_LIBRARY_PATH: /library
       RAGGEDLIB_RERANK_BASE_URL: http://reranker:8080
+      # MCP endpoint http://localhost:8080/mcp — clients send "Authorization: Bearer $MCP_API_KEY" (unset = MCP refused)
+      RAGGEDLIB_MCP_API_KEYS_0_NAME: ${MCP_API_KEY_NAME:-default}
+      RAGGEDLIB_MCP_API_KEYS_0_KEY: ${MCP_API_KEY:-}
     volumes:
       - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library:ro
     ports:
