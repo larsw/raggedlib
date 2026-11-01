@@ -2,8 +2,10 @@ package dev.raggedlib.chat
 
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.search.SearchRequest
+import dev.raggedlib.search.SearchResponse
 import dev.raggedlib.search.SearchService
 import dev.raggedlib.search.SourceChunk
+import dev.raggedlib.search.SpellingCorrection
 import org.slf4j.LoggerFactory
 import org.springframework.ai.chat.client.ChatClient
 import org.springframework.ai.chat.messages.AssistantMessage
@@ -26,15 +28,19 @@ data class ChatRequest(
     val history: List<HistoryMessage>? = null,
     val model: String? = null,
     val rerank: Boolean? = null,
+    /** Spelling correction of the search query (default true). */
+    val correct: Boolean? = null,
 )
 
 /** A complete (non-streamed) answer, for callers that can't consume SSE (MCP). */
 data class ChatAnswer(
     val question: String,
-    /** The query actually used for retrieval (a rewritten follow-up, if there was history). */
+    /** The query actually used for retrieval (a rewritten follow-up if there was history, spell-corrected). */
     val searchQuery: String,
     val answer: String,
     val sources: List<SourceChunk>,
+    /** Words corrected in the search query. */
+    val corrections: List<SpellingCorrection>,
     val model: String,
     val elapsedMs: Long,
 )
@@ -68,9 +74,14 @@ class ChatService(
         }
     }
 
-    /** Best passages for the question, cut to the model's excerpt budget ([RaggedlibProperties.Chat.maxContextChars]). */
-    fun retrieve(req: ChatRequest, query: String): List<SourceChunk> =
-        withinBudget(search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.rerank)), props.chat.maxContextChars)
+    /**
+     * Best passages for the question, cut to the model's excerpt budget ([RaggedlibProperties.Chat.maxContextChars]);
+     * the response also says whether the search query was spell-corrected.
+     */
+    fun retrieve(req: ChatRequest, query: String): SearchResponse {
+        val found = search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.rerank, req.correct))
+        return found.copy(results = withinBudget(found.results, props.chat.maxContextChars))
+    }
 
     fun stream(req: ChatRequest, sources: List<SourceChunk>): Flux<String> {
         val messages = mutableListOf<Message>()
@@ -105,7 +116,8 @@ class ChatService(
     fun answer(req: ChatRequest, timeout: Duration): ChatAnswer {
         val started = System.nanoTime()
         val query = standaloneQuery(req)
-        val sources = retrieve(req, query)
+        val found = retrieve(req, query)
+        val sources = found.results
         val left = timeout.minusNanos(System.nanoTime() - started).coerceAtLeast(Duration.ofSeconds(1))
         val cut = AtomicBoolean(false)
         val text = stream(req, sources)
@@ -117,7 +129,8 @@ class ChatService(
             ?.trim()
             .orEmpty()
         val answer = if (cut.get()) "$text\n\n[answer cut off after ${timeout.toSeconds()} s]".trim() else text
-        return ChatAnswer(req.query, query, answer, sources, modelFor(req), (System.nanoTime() - started) / 1_000_000)
+        return ChatAnswer(req.query, found.correctedQuery ?: query, answer, sources, found.corrections, modelFor(req),
+            (System.nanoTime() - started) / 1_000_000)
     }
 
     fun modelFor(req: ChatRequest): String = req.model?.takeIf { it.isNotBlank() } ?: defaultModel

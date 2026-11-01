@@ -117,6 +117,21 @@ export interface SearchRequest {
   bookIds?: number[]; // restrict to these books
   tags?: string[]; // restrict to books having ANY of these tags
   rerank?: boolean; // cross-encoder reranking; default on when the server has a reranker
+  correct?: boolean; // spelling correction of words the library doesn't contain; default true
+}
+
+/** A word of the query as typed and as searched for. */
+export interface SpellingCorrection {
+  from: string;
+  to: string;
+  known: boolean; // the typed word does occur in the library, rarely
+}
+
+export interface SearchResponse {
+  results: SourceChunk[];
+  /** what was searched for instead, when misspelled words were corrected */
+  correctedQuery?: string | null;
+  corrections?: SpellingCorrection[];
 }
 
 export interface ChatHistoryMessage {
@@ -131,6 +146,7 @@ export interface ChatRequest extends SearchRequest {
 
 /** Parsed events of the POST /api/chat SSE stream. */
 export type ChatEvent =
+  | { type: "corrected"; correctedQuery: string }
   | { type: "sources"; sources: SourceChunk[] }
   | { type: "token"; t: string }
   | { type: "done"; elapsedMs: number }

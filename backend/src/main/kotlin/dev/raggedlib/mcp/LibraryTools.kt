@@ -10,6 +10,7 @@ import dev.raggedlib.search.ScoreKind
 import dev.raggedlib.search.SearchRequest
 import dev.raggedlib.search.SearchService
 import dev.raggedlib.search.SourceChunk
+import dev.raggedlib.search.SpellingCorrection
 import org.slf4j.LoggerFactory
 import org.springframework.ai.mcp.annotation.McpTool
 import org.springframework.ai.mcp.annotation.McpTool.McpAnnotations
@@ -44,12 +45,21 @@ class LibraryTools(
         val text: String,
     )
 
-    data class SearchResult(val query: String, val passages: List<Passage>, val note: String?)
+    data class SearchResult(
+        val query: String,
+        /** What was searched for instead, when misspelled words were corrected; null otherwise. */
+        val correctedQuery: String?,
+        val passages: List<Passage>,
+        val note: String?,
+    )
 
     data class AnswerResult(
         val answer: String,
         val sources: List<Passage>,
+        /** The query the sources were retrieved with: a rewritten follow-up, spell-corrected. */
         val searchQuery: String,
+        /** Words of the question corrected for retrieval (the model still answers the question as asked). */
+        val corrections: List<SpellingCorrection>,
         val model: String,
         val elapsedMs: Long,
     )
@@ -98,20 +108,26 @@ Use list_books or list_tags first to restrict a search to particular books or ta
         tags: List<String>?,
         @McpToolParam(description = "Cross-encoder reranking with a relevance cutoff (default true). false = raw hybrid order, never empty while anything matches.", required = false)
         rerank: Boolean?,
+        @McpToolParam(description = "Correct misspelled words (default true): words the library lacks, or has only rarely next to a far more common spelling. false searches for the query exactly as written.", required = false)
+        correctSpelling: Boolean?,
     ): SearchResult {
         log.info("MCP search_library: '{}'", query.take(200))
-        val found = search.search(SearchRequest(query, topK, bookIds, tags, rerank)).map(::passage)
+        val response = search.search(SearchRequest(query, topK, bookIds, tags, rerank, correctSpelling))
+        val found = response.results.map(::passage)
         // MCP clients cap tool output (Claude Code: ~25K tokens); keep whole passages up to a character budget
         var used = 0
         val passages = found.takeWhile { used += it.text.length + 300; used <= MAX_OUTPUT_CHARS }.ifEmpty { found.take(1) }
-        val note = when {
-            found.isEmpty() -> "No passage in the indexed books was relevant enough. Try other terms, " +
-                "drop book/tag filters, or check library_status: only indexed books are searchable."
-            passages.size < found.size -> "Showing the best ${passages.size} of ${found.size} passages (output size limit); " +
-                "narrow the search with bookIds or tags to see others."
-            else -> null
-        }
-        return SearchResult(query, passages, note)
+        val notes = listOfNotNull(
+            response.correctedQuery?.let { c -> "Searched for \"$c\": ${correctionNote(response.corrections)}" },
+            when {
+                found.isEmpty() -> "No passage in the indexed books was relevant enough. Try other terms, " +
+                    "drop book/tag filters, or check library_status: only indexed books are searchable."
+                passages.size < found.size -> "Showing the best ${passages.size} of ${found.size} passages (output size limit); " +
+                    "narrow the search with bookIds or tags to see others."
+                else -> null
+            },
+        )
+        return SearchResult(query, response.correctedQuery, passages, notes.joinToString(" ").ifEmpty { null })
     }
 
     @McpTool(
@@ -135,10 +151,12 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
         tags: List<String>?,
         @McpToolParam(description = "Chat model override (an installed Ollama model); default is the server's.", required = false)
         model: String?,
+        @McpToolParam(description = "Correct misspelled words for retrieval (default true); false retrieves for the question exactly as written.", required = false)
+        correctSpelling: Boolean?,
     ): AnswerResult {
         require(question.isNotBlank()) { "question must not be empty" }
         log.info("MCP ask_library: '{}'", question.take(200))
-        val req = ChatRequest(query = question, topK = topK, bookIds = bookIds, tags = tags, model = model)
+        val req = ChatRequest(query = question, topK = topK, bookIds = bookIds, tags = tags, model = model, correct = correctSpelling)
         val a = try {
             chat.answer(req, props.mcp.answerTimeout)
         } catch (e: Exception) {
@@ -153,7 +171,7 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
         val sources = a.sources.map { s ->
             passage(s).let { p -> if (p.text.length > SOURCE_EXCERPT_CHARS) p.copy(text = p.text.take(SOURCE_EXCERPT_CHARS).trimEnd() + " …") else p }
         }
-        return AnswerResult(a.answer, sources, a.searchQuery, a.model, a.elapsedMs)
+        return AnswerResult(a.answer, sources, a.searchQuery, a.corrections, a.model, a.elapsedMs)
     }
 
     @McpTool(
@@ -216,6 +234,12 @@ Returns ids to pass as bookIds to search_library / ask_library. Only INDEXED boo
         /** ask_library returns sources as excerpts of this length; the answer cites them by ref. */
         const val SOURCE_EXCERPT_CHARS = 400
     }
+
+    private fun correctionNote(corrections: List<SpellingCorrection>): String =
+        corrections.joinToString("; ") { c ->
+            if (c.known) "'${c.from}' -> '${c.to}' ('${c.from}' is rare in the library, '${c.to}' far more common)"
+            else "'${c.from}' -> '${c.to}' ('${c.from}' occurs nowhere in the library)"
+        } + ". Pass correctSpelling=false to search for the query as written."
 
     private fun passage(c: SourceChunk) =
         Passage(c.ref, c.bookId, c.title, c.authors, c.page, c.section, c.score, c.scoreKind, c.text)

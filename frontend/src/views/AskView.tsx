@@ -22,11 +22,11 @@ export function AskView() {
   const selected = turns.find((t) => t.id === selectedId) ?? turns[turns.length - 1] ?? null;
 
   const ask = useCallback(
-    (q: string) => {
+    (q: string, opts?: { correct?: boolean }) => {
       setSelectedId(null);
       setFocus(null);
       stickToBottom.current = true;
-      void send(q, scope);
+      void send(q, scope, opts);
     },
     [send, scope],
   );
@@ -120,6 +120,8 @@ export function AskView() {
           loading={selected?.status === "pending" || selected?.status === "streaming"}
           retrieved={!!selected?.retrieved}
           reranked={!!selected?.rerank && !!system?.rerankEnabled && !!system.rerankerReachable}
+          correctedQuery={selected?.correctedQuery}
+          onAskAsTyped={selected && !busy ? () => ask(selected.question, { correct: false }) : undefined}
           focus={focus}
           onClose={() => setPanelOpen(false)}
         />

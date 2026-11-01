@@ -129,6 +129,11 @@ describe("readSseStream", () => {
 describe("parseChatEvent", () => {
   test("maps the chat protocol", () => {
     expect(parseChatEvent("sources", "[]")).toEqual({ type: "sources", sources: [] });
+    expect(parseChatEvent("corrected", '{"correctedQuery":"kubernetes pods","corrections":[]}')).toEqual({
+      type: "corrected",
+      correctedQuery: "kubernetes pods",
+    });
+    expect(parseChatEvent("corrected", "{}")).toBeNull();
     expect(parseChatEvent("token", '{"t":"x"}')).toEqual({ type: "token", t: "x" });
     expect(parseChatEvent("done", '{"elapsedMs":42}')).toEqual({ type: "done", elapsedMs: 42 });
     expect(parseChatEvent("error", '{"error":"boom"}')).toEqual({ type: "error", error: "boom" });

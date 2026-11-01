@@ -7,7 +7,20 @@ data class SearchRequest(
     val tags: List<String>? = null,
     /** Cross-encoder reranking (default on when the server has a reranker); false = fused order only. */
     val rerank: Boolean? = null,
+    /** Correct misspelled words before searching (default true); false searches for the query exactly as written. */
+    val correct: Boolean? = null,
 )
+
+data class SearchResponse(
+    val results: List<SourceChunk>,
+    /** The query actually searched for, when spelling correction changed it; null otherwise. */
+    val correctedQuery: String? = null,
+    /** The words that were corrected (as typed → as searched). */
+    val corrections: List<SpellingCorrection> = emptyList(),
+)
+
+/** A corrected word: [from] as typed, [to] as searched; [known]: the typed word occurs in the library (rarely). */
+data class SpellingCorrection(val from: String, val to: String, val known: Boolean)
 
 data class SourceChunk(
     val ref: Int,

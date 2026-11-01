@@ -8,6 +8,7 @@ import type {
   IngestStatus,
   Page,
   SearchRequest,
+  SearchResponse,
   SourceChunk,
   SyncResult,
   SystemInfo,
@@ -120,10 +121,10 @@ export const api = {
   ingestStop: () => postJson<IngestStatus>("/ingest/stop"),
   ingestStatus: (signal?: AbortSignal) => getJson<IngestStatus>("/ingest/status", signal),
 
-  search: (req: SearchRequest, signal?: AbortSignal) => postJson<SourceChunk[]>("/search", req, signal),
+  search: (req: SearchRequest, signal?: AbortSignal) => postJson<SearchResponse>("/search", req, signal),
 
   /**
-   * POST /api/chat and yield parsed stream events (sources -> token* -> done | error).
+   * POST /api/chat and yield parsed stream events (corrected? -> sources -> token* -> done | error).
    * Throws ApiError for non-2xx responses; the generator ends after done/error.
    */
   async *chat(req: ChatRequest, signal?: AbortSignal): AsyncGenerator<ChatEvent> {
@@ -154,6 +155,8 @@ export function parseChatEvent(event: string, data: string): ChatEvent | null {
   }
   const obj = (payload ?? {}) as Record<string, unknown>;
   switch (event) {
+    case "corrected":
+      return typeof obj.correctedQuery === "string" ? { type: "corrected", correctedQuery: obj.correctedQuery } : null;
     case "sources":
       return { type: "sources", sources: Array.isArray(payload) ? (payload as SourceChunk[]) : [] };
     case "token":

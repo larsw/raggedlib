@@ -6,6 +6,7 @@ import dev.raggedlib.ingest.ChunkStore
 import dev.raggedlib.ingest.IngestService
 import dev.raggedlib.config.notFound
 import org.slf4j.LoggerFactory
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 
@@ -16,6 +17,7 @@ class LibraryService(
     private val chunks: ChunkStore,
     private val ingest: IngestService,
     private val tx: TransactionTemplate,
+    private val events: ApplicationEventPublisher,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val syncLock = Any()
@@ -49,6 +51,7 @@ class LibraryService(
         val gone = existing.keys.filter { it !in seen }
         val removed = books.delete(gone) // chunks go via ON DELETE CASCADE
         log.info("Library sync via {}: +{} ~{} -{} (total {})", snapshot.source, added, updated, removed, snapshot.records.size)
+        if (removed > 0) events.publishEvent(BooksRemoved(removed))
         SyncResult(added, updated, removed, snapshot.records.size, snapshot.source)
     }
 
@@ -62,3 +65,6 @@ class LibraryService(
         return books.find(id)!!.book
     }
 }
+
+/** Published after a library sync deleted [count] books (and, by cascade, their passages). */
+data class BooksRemoved(val count: Int)

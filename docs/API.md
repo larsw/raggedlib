@@ -86,7 +86,7 @@ interface SystemInfo {
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
 | POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s) |
-| POST | `/api/search` | Body `SearchRequest` → `SourceChunk[]` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so the list can be shorter than `topK` or empty. |
+| POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
 
 ```ts
@@ -96,6 +96,13 @@ interface SearchRequest {
   bookIds?: number[];       // restrict to these books
   tags?: string[];          // restrict to books having ANY of these tags
   rerank?: boolean;         // cross-encoder reranking, default true; ignored (fused order) if the server has none
+  correct?: boolean;        // spelling correction, default true; false searches for the query exactly as written
+}
+
+interface SearchResponse {
+  results: SourceChunk[];
+  correctedQuery: string | null;               // what was searched for instead, if misspelled words were corrected
+  corrections: { from: string; to: string; known: boolean }[]; // as typed → as searched; known: the typed word occurs (rarely)
 }
 
 interface ChatRequest extends SearchRequest {
@@ -108,8 +115,9 @@ interface ChatRequest extends SearchRequest {
 
 `/mcp` is an MCP server (streamable HTTP, stateless, protocol handled by Spring AI) with the tools `search_library`,
 `ask_library`, `list_books`, `list_tags` and `library_status`. Tool results are JSON text: `search_library` returns
-`{query, passages: Passage[], note}`, where a `Passage` is a `SourceChunk` without `chunkId`. `ask_library` returns
-`{answer, sources: Passage[], searchQuery, model, elapsedMs}`.
+`{query, correctedQuery, passages: Passage[], note}`, where a `Passage` is a `SourceChunk` without `chunkId`. `ask_library`
+returns `{answer, sources: Passage[], searchQuery, corrections, model, elapsedMs}`, `searchQuery` being the (rewritten,
+spell-corrected) query the passages were retrieved with. Both take `correctSpelling: false` to use the query as written.
 
 Each request needs `Authorization: Bearer <key>` or `X-API-Key: <key>` matching one of `raggedlib.mcp.api-keys`.
 Otherwise the server responds `401` with `WWW-Authenticate: Bearer realm="raggedlib-mcp"` and a JSON `{error, message}`.
@@ -118,10 +126,11 @@ Otherwise the server responds `401` with `WWW-Authenticate: Bearer realm="ragged
 
 `POST /api/chat` responds with `Content-Type: text/event-stream`. Events (each `data:` is JSON):
 
-1. `event: sources` — `data: SourceChunk[]` (sent once, first)
-2. `event: token` — `data: {"t": "<text delta>"}` (many)
-3. `event: done` — `data: {"elapsedMs": number}`
-4. `event: error` — `data: {"error": "message"}` (terminal, instead of done)
+1. `event: corrected` — `data: {"correctedQuery": string, "corrections": {from, to}[]}` (only when the search query was spell-corrected; before sources)
+2. `event: sources` — `data: SourceChunk[]` (sent once)
+3. `event: token` — `data: {"t": "<text delta>"}` (many)
+4. `event: done` — `data: {"elapsedMs": number}`
+5. `event: error` — `data: {"error": "message"}` (terminal, instead of done)
 
 The answer text cites passages with bracketed numbers `[1]`, `[2][4]` matching `SourceChunk.ref`.
 Because it is a POST, the frontend consumes it with `fetch` + a `ReadableStream` SSE parser (not `EventSource`).

@@ -50,7 +50,11 @@ class ChatController(
         try {
             val query = chat.standaloneQuery(req)
             if (query != req.query) log.info("Rewrote follow-up '{}' -> '{}'", req.query, query)
-            val sources = chat.retrieve(req, query)
+            val found = chat.retrieve(req, query)
+            val sources = found.results
+            if (found.correctedQuery != null) {
+                send(emitter, "corrected", mapOf("correctedQuery" to found.correctedQuery, "corrections" to found.corrections))
+            }
             send(emitter, "sources", sources)
             chat.stream(req, sources).toStream(1).use { tokens ->
                 for (t in tokens) {

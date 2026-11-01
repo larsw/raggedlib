@@ -9,5 +9,5 @@ import org.springframework.web.bind.annotation.RestController
 @RequestMapping("/api")
 class SearchController(private val search: SearchService) {
     @PostMapping("/search")
-    fun search(@RequestBody req: SearchRequest): List<SourceChunk> = search.search(req)
+    fun search(@RequestBody req: SearchRequest): SearchResponse = search.search(req)
 }

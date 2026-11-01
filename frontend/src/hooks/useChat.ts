@@ -23,6 +23,8 @@ export interface ChatTurn {
   rerank?: boolean;
   /** the sources event arrived, so an empty `sources` means retrieval found nothing */
   retrieved?: boolean;
+  /** the passages were searched for with this spell-corrected query */
+  correctedQuery?: string;
   createdAt: string;
 }
 
@@ -81,7 +83,8 @@ export function useChat() {
   }, []);
 
   const send = useCallback(
-    async (question: string, scope: Scope) => {
+    /** `correct: false` retrieves for the question exactly as typed (no spelling correction). */
+    async (question: string, scope: Scope, opts: { correct?: boolean } = {}) => {
       const q = question.trim();
       if (!q) return;
       ctrlRef.current?.abort();
@@ -113,6 +116,7 @@ export function useChat() {
         rerank: scope.rerank,
         ...(history.length ? { history } : {}),
         ...(scope.model ? { model: scope.model } : {}),
+        ...(opts.correct === false ? { correct: false } : {}),
       };
 
       // Tokens are buffered and flushed at most every FLUSH_MS to keep re-renders cheap.
@@ -128,6 +132,9 @@ export function useChat() {
       try {
         for await (const ev of api.chat(req, ctrl.signal)) {
           switch (ev.type) {
+            case "corrected":
+              update(id, () => ({ correctedQuery: ev.correctedQuery }));
+              break;
             case "sources":
               update(id, () => ({ sources: ev.sources, retrieved: true, status: "streaming" }));
               break;

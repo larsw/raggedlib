@@ -13,6 +13,7 @@ import dev.raggedlib.library.LibraryPaths
 import org.slf4j.LoggerFactory
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.boot.context.event.ApplicationReadyEvent
+import org.springframework.context.ApplicationEventPublisher
 import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
@@ -40,6 +41,7 @@ class IngestService(
     private val embeddingModel: EmbeddingModel,
     private val paths: LibraryPaths,
     private val tx: TransactionTemplate,
+    private val events: ApplicationEventPublisher,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -201,6 +203,11 @@ class IngestService(
         } finally {
             active.clear()
             log.info("Ingestion finished: {} books, {} chunks", sessionProcessed.get(), sessionChunks.get())
+            try {
+                events.publishEvent(IngestionFinished(sessionProcessed.get(), sessionChunks.get()))
+            } catch (e: Exception) {
+                log.warn("Ingestion-finished listener failed: {}", e.message)
+            }
             synchronized(lock) {
                 r.closed = true
                 run = null

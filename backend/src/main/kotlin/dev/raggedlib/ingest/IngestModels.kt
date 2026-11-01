@@ -23,3 +23,6 @@ data class IngestStatus(
     val active: List<ActiveBook>,
     val recentErrors: List<IngestError>,
 )
+
+/** Published when an indexing run ends (finished or stopped); [chunks] passages were stored during it. */
+data class IngestionFinished(val books: Int, val chunks: Long)

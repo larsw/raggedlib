@@ -83,6 +83,30 @@ data class RaggedlibProperties(
         val fallbackMaxTerms: Int = 12,
         /** How long lexeme document frequencies are cached; the corpus grows while indexing. */
         val termStatsTtlSeconds: Long = 600,
+        val spelling: Spelling = Spelling(),
+    )
+
+    /**
+     * Spelling correction of search queries (see SpellingCorrector): words the library doesn't contain are replaced
+     * by the closest frequent word it does, and the response says so (`correctedQuery`).
+     */
+    data class Spelling(
+        val enabled: Boolean = true,
+        /** Shorter words are never corrected: one edit turns most of them into another word ("Hono" -> mono). */
+        val minWordLength: Int = 5,
+        /** An unknown word this long may be corrected two edits away instead of one (shorter: "comptime" -> comptia). */
+        val longWordLength: Int = 9,
+        /** Words in more passages (as typed) are never corrected. */
+        val typoMaxDocs: Int = 50,
+        /** A correction must occur in at least this many passages. */
+        val minCandidateDocs: Int = 20,
+        /**
+         * A word the library contains is only corrected to one this many times as frequent ("recieve", in 24
+         * passages, to "receive", in 11000; "minced" stays, though "minded" is ~40x as common).
+         */
+        val minFrequencyRatio: Double = 200.0,
+        /** Words in fewer passages are left out of the vocabulary (mostly typos and extraction noise). */
+        val minWordDocs: Int = 3,
     )
 
     data class Chat(

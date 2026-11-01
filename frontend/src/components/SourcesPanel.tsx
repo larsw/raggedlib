@@ -14,6 +14,10 @@ interface Props {
   retrieved?: boolean;
   /** the reranker took part in that retrieval */
   reranked?: boolean;
+  /** retrieval searched for this spell-corrected query instead of the question */
+  correctedQuery?: string;
+  /** asks the question again, retrieving for it as typed (shown with a correction; absent while busy) */
+  onAskAsTyped?: () => void;
   /** ref to scroll to & flash; `nonce` changes on every click so repeated clicks re-trigger */
   focus: { ref: number; nonce: number } | null;
   onClose: () => void;
@@ -22,7 +26,19 @@ interface Props {
 export const sourceDomId = (turnId: string, ref: number) => `src-${turnId}-${ref}`;
 
 /** Right-hand panel listing the passages retrieved for the selected answer. */
-export function SourcesPanel({ turnId, question, sources, answer, loading, retrieved, reranked, focus, onClose }: Props) {
+export function SourcesPanel({
+  turnId,
+  question,
+  sources,
+  answer,
+  loading,
+  retrieved,
+  reranked,
+  correctedQuery,
+  onAskAsTyped,
+  focus,
+  onClose,
+}: Props) {
   const cited = useMemo(
     () => new Set(citedRefs(answer, (r) => sources.some((s) => s.ref === r))),
     [answer, sources],
@@ -48,6 +64,18 @@ export function SourcesPanel({ turnId, question, sources, answer, loading, retri
           {question && (
             <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} ${Classes.TEXT_OVERFLOW_ELLIPSIS}`} title={question}>
               for “{question}”
+            </div>
+          )}
+          {correctedQuery && (
+            <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} sources-corrected`}>
+              <span className={Classes.TEXT_OVERFLOW_ELLIPSIS} title={`Spelling corrected: searched for “${correctedQuery}”`}>
+                searched for “{correctedQuery}”
+              </span>
+              {onAskAsTyped && (
+                <button type="button" className="correction-original" onClick={onAskAsTyped}>
+                  ask as typed
+                </button>
+              )}
             </div>
           )}
         </div>

@@ -19,6 +19,7 @@ import java.util.concurrent.Executors
  *  2. strict full-text top-N (all terms, websearch syntax) — weight 1,
  *  3. a keyword fallback when (2) finds too little — weighted by term coverage, see [KeywordFallback].
  * The best fused candidates are then re-scored by a cross-encoder ([Reranker]) when one is available.
+ * Misspelled query words are corrected first ([SpellingCorrector]) unless the request opts out.
  */
 @Service
 class SearchService(
@@ -28,14 +29,18 @@ class SearchService(
     private val tx: TransactionTemplate,
     private val termStats: TermStatistics,
     private val reranker: Reranker,
+    private val spelling: SpellingCorrector,
 ) {
     /** [weight] scales the row's RRF contribution (see [HybridRanking.rrf]). */
     private data class Row(val id: String, val bookId: Long, val title: String, val authors: List<String>,
                            val page: Int?, val section: String?, val text: String, val weight: Double = 1.0)
 
-    fun search(req: SearchRequest): List<SourceChunk> {
-        val query = req.query.trim()
-        if (query.isEmpty()) badRequest("query must not be empty")
+    fun search(req: SearchRequest): SearchResponse {
+        val typed = req.query.trim()
+        if (typed.isEmpty()) badRequest("query must not be empty")
+        // the corrected query drives every stage: keyword search, the embedding and the reranker
+        val correction = if (req.correct != false) spelling.correct(typed) else null
+        val query = correction?.query ?: typed
         val s = props.search
         val topK = (req.topK ?: s.defaultTopK).coerceIn(1, s.maxTopK)
         val bookIds = req.bookIds?.distinct()?.takeIf { it.isNotEmpty() }
@@ -76,11 +81,12 @@ class SearchService(
         val kept = HybridRanking.dropWeak(fused, s.minRelativeScore)
         val reranked = if (req.rerank != false && reranker.enabled) rerank(query, kept, byId, topK) else null
         val scoreKind = if (reranked != null) ScoreKind.RERANK else ScoreKind.FUSED
-        return HybridRanking.capPerBook(reranked ?: kept, cap, topK).mapIndexed { i, f ->
+        val results = HybridRanking.capPerBook(reranked ?: kept, cap, topK).mapIndexed { i, f ->
             val r = byId.getValue(f.id)
             SourceChunk(i + 1, r.id, r.bookId, r.title, r.authors, r.page, r.section, r.text,
                 Math.round(f.score * 1e6) / 1e6, scoreKind)
         }
+        return SearchResponse(results, correction?.query, correction?.corrections.orEmpty())
     }
 
     /**
