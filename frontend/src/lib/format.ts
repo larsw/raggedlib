@@ -66,3 +66,17 @@ export function formatLocation(page: number | null, section: string | null): str
 export function pluralize(n: number, singular: string, plural = `${singular}s`): string {
   return `${formatNumber(n)} ${n === 1 ? singular : plural}`;
 }
+
+/** File size: "940 KB", "12.4 MB". */
+export function formatBytes(bytes: number | null | undefined): string {
+  if (bytes == null || !Number.isFinite(bytes) || bytes < 0) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = bytes / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${units[i]}`;
+}

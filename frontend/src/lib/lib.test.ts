@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { citedRefs, splitCitations } from "./citations";
-import { formatDuration } from "./format";
+import { formatBytes, formatDuration } from "./format";
 import { highlightParts, queryTerms } from "./highlight";
 
 describe("splitCitations", () => {
@@ -67,5 +67,15 @@ describe("splitThinking", () => {
   test("open and closed think blocks", () => {
     expect(splitThinking("<think>hmm")).toEqual({ thinking: "hmm", answer: "", thinkingDone: false });
     expect(splitThinking("<think>\nhmm\n</think>\n\nAnswer")).toEqual({ thinking: "hmm", answer: "Answer", thinkingDone: true });
+  });
+});
+
+describe("formatBytes", () => {
+  test("picks a unit", () => {
+    expect(formatBytes(null)).toBe("—");
+    expect(formatBytes(512)).toBe("512 B");
+    expect(formatBytes(940 * 1024)).toBe("940 KB");
+    expect(formatBytes(12.4 * 1024 * 1024)).toBe("12.4 MB");
+    expect(formatBytes(3 * 1024 ** 3)).toBe("3.0 GB");
   });
 });

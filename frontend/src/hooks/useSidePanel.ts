@@ -21,25 +21,35 @@ export function clampPanelWidth(width: number, containerWidth: number | null): n
   return Math.round(Math.min(Math.max(width, PANEL_MIN_WIDTH), max));
 }
 
-function initial(): Stored {
+function initial(storageKey: string): Stored {
   const narrow = typeof window !== "undefined" && window.innerWidth < OVERLAY_BREAKPOINT;
-  const stored = loadJson<Partial<Stored> | null>(STORAGE_KEYS.sourcesPanel, null);
+  const stored = loadJson<Partial<Stored> | null>(storageKey, null);
   const width = typeof stored?.width === "number" && Number.isFinite(stored.width) ? stored.width : PANEL_DEFAULT_WIDTH;
   const collapsed = typeof stored?.collapsed === "boolean" ? stored.collapsed : narrow;
   return { width: clampPanelWidth(width, null), collapsed };
 }
 
+export interface SidePanelOptions {
+  /** localStorage key for width and collapsed state */
+  storageKey?: string;
+  /** Called instead of collapsing when the panel is dragged far below its minimum (panels that close, not fold). */
+  onSnapClose?: () => void;
+}
+
 /**
  * Width and collapsed state of a resizable side panel on the right of [containerRef], remembered across visits.
  * [handleProps] go on the drag handle: pointer drag, arrow keys (Shift for bigger steps), Home/End, double-click
- * to reset; dragging far below the minimum collapses the panel.
+ * to reset; dragging far below the minimum collapses the panel (or calls [SidePanelOptions.onSnapClose]).
  */
-export function useSidePanel(containerRef: React.RefObject<HTMLElement | null>) {
-  const [state, setState] = useState<Stored>(initial);
+export function useSidePanel(containerRef: React.RefObject<HTMLElement | null>, options: SidePanelOptions = {}) {
+  const storageKey = options.storageKey ?? STORAGE_KEYS.sourcesPanel;
+  const [state, setState] = useState<Stored>(() => initial(storageKey));
+  const onSnapClose = useRef(options.onSnapClose);
+  onSnapClose.current = options.onSnapClose;
   const [dragging, setDragging] = useState(false);
   const drag = useRef<{ startX: number; startWidth: number } | null>(null);
 
-  useEffect(() => saveJson(STORAGE_KEYS.sourcesPanel, state), [state]);
+  useEffect(() => saveJson(storageKey, state), [storageKey, state]);
 
   const containerWidth = () => containerRef.current?.getBoundingClientRect().width ?? null;
   const setWidth = useCallback(
@@ -61,7 +71,11 @@ export function useSidePanel(containerRef: React.RefObject<HTMLElement | null>) 
     // the panel is on the right: moving the handle left widens it
     const raw = d.startWidth + (d.startX - e.clientX);
     if (raw < COLLAPSE_SNAP) {
-      setCollapsed(true);
+      if (onSnapClose.current) {
+        drag.current = null;
+        setDragging(false);
+        onSnapClose.current();
+      } else setCollapsed(true);
       return;
     }
     setState({ collapsed: false, width: clampPanelWidth(raw, containerWidth()) });

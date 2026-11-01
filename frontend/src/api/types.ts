@@ -38,6 +38,23 @@ export interface Book {
   duplicateOf: number | null; // status DUPLICATE: id of the book whose passages stand in for this one
 }
 
+/** GET /api/books/{id}/details */
+export interface BookDetails {
+  book: Book;
+  calibre: CalibreExtras | null; // null when Calibre's metadata.db can't be read
+  duplicateOf: { id: number; title: string } | null;
+  sections: { title: string; firstPage: number | null; passages: number }[]; // indexed outline, reading order
+}
+
+export interface CalibreExtras {
+  description: string | null; // plain text, paragraphs separated by blank lines
+  publisher: string | null;
+  identifiers: Record<string, string>; // isbn, amazon, doi, …
+  rating: number | null; // 0.5–5 stars
+  addedAt: string | null;
+  fileSizes: Record<string, number>; // format -> bytes
+}
+
 export interface Page<T> {
   items: T[];
   total: number;

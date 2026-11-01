@@ -1,6 +1,7 @@
 import { readSseStream } from "./sse";
 import type {
   Book,
+  BookDetails,
   BookQuery,
   ChatEvent,
   ChatRequest,
@@ -112,6 +113,8 @@ export const api = {
     ),
 
   book: (id: number, signal?: AbortSignal) => getJson<Book>(`/books/${id}`, signal),
+
+  bookDetails: (id: number, signal?: AbortSignal) => getJson<BookDetails>(`/books/${id}/details`, signal),
 
   reindex: (id: number) => postJson<Book>(`/books/${id}/reindex`),
 

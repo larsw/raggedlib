@@ -140,8 +140,8 @@ export function AskView() {
           </span>
         </button>
       ) : (
-        <div className="sources-dock" style={{ width: panel.width }}>
-          <div className="sources-resize-handle" {...panel.handleProps} />
+        <div className="side-dock" style={{ width: panel.width }}>
+          <div className="side-resize-handle" {...panel.handleProps} />
           <SourcesPanel
           turnId={selected?.id ?? null}
           question={turns.length > 1 ? selected?.question : undefined}

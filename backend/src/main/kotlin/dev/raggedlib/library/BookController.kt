@@ -26,6 +26,7 @@ class BookController(
     private val books: BookRepository,
     private val library: LibraryService,
     private val paths: LibraryPaths,
+    private val details: BookDetailsService,
 ) {
     private val sorts = setOf("title", "author", "pubdate", "indexedAt", "id")
 
@@ -50,6 +51,9 @@ class BookController(
 
     @GetMapping("/books/{id}")
     fun get(@PathVariable id: Long): Book = (books.find(id) ?: notFound("book $id not found")).book
+
+    @GetMapping("/books/{id}/details")
+    fun details(@PathVariable id: Long): BookDetails = details.details(id)
 
     @PostMapping("/books/{id}/reindex")
     fun reindex(@PathVariable id: Long): Book = library.reindex(id)

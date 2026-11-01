@@ -16,12 +16,15 @@ import { api, bookFileUrl } from "../api/client";
 import { BOOK_STATUSES, type Book, type BookSort, type BookStatus } from "../api/types";
 import { useApp } from "../AppContext";
 import { BookCover } from "../components/BookCover";
+import { BookDetailsPanel } from "../components/BookDetailsPanel";
 import { ErrorState } from "../components/ErrorState";
 import { isBusyStatus, StatusTag } from "../components/StatusTag";
 import { TagFilterSelect } from "../components/TagFilterSelect";
 import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
 import { useDebounced } from "../hooks/useDebounced";
+import { useSidePanel } from "../hooks/useSidePanel";
+import { STORAGE_KEYS } from "../lib/storage";
 import { usePageVisible } from "../hooks/usePageVisible";
 import { useSyncLibrary } from "../hooks/useSyncLibrary";
 import { formatAuthors, formatDateTime, formatNumber, formatYear } from "../lib/format";
@@ -60,6 +63,12 @@ export function LibraryView({ active }: { active: boolean }) {
   const [sort, setSort] = useState<BookSort>("title");
   const [page, setPage] = useState(0);
   const [reindexing, setReindexing] = useState<Set<number>>(new Set());
+  /** the book shown in the details panel */
+  const [selectedId, setSelectedId] = useState<number | null>(null);
+  /** bumped on every list reload, so the open panel refreshes too */
+  const [refreshKey, setRefreshKey] = useState(0);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const panel = useSidePanel(bodyRef, { storageKey: STORAGE_KEYS.bookPanel, onSnapClose: () => setSelectedId(null) });
   const { sync, syncing } = useSyncLibrary();
 
   // back to the first page whenever the filter changes
@@ -84,6 +93,10 @@ export function LibraryView({ active }: { active: boolean }) {
     const t = setInterval(books.reload, 5000);
     return () => clearInterval(t);
   }, [hasBusy, visible, active, books.reload]);
+
+  useEffect(() => {
+    if (books.data) setRefreshKey((k) => k + 1);
+  }, [books.data]);
 
   const total = books.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
@@ -111,6 +124,22 @@ export function LibraryView({ active }: { active: boolean }) {
     navigate("ask");
   };
 
+  const searchIn = (book: Book) => {
+    setScope((s) => ({ ...s, books: [{ id: book.id, title: book.title, authors: book.authors }], tags: [] }));
+    navigate("search");
+  };
+
+  /** a row click opens the book's details, unless it hit a control inside the row */
+  const onRowClick = (e: React.MouseEvent, id: number) => {
+    if ((e.target as HTMLElement).closest("button, a, input, [role='button']")) return;
+    setSelectedId((cur) => (cur === id ? null : id));
+  };
+  const onRowKey = (e: React.KeyboardEvent, id: number) => {
+    if (e.target !== e.currentTarget || (e.key !== "Enter" && e.key !== " ")) return;
+    e.preventDefault();
+    setSelectedId((cur) => (cur === id ? null : id));
+  };
+
   const clearFilters = () => {
     setQ("");
     setStatus("");
@@ -118,7 +147,12 @@ export function LibraryView({ active }: { active: boolean }) {
   };
 
   return (
-    <div className="library-view">
+    <div
+      className={`library-view${panel.dragging ? " is-resizing" : ""}`}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && selectedId != null && !e.defaultPrevented) setSelectedId(null);
+      }}
+    >
       <div className="view-toolbar library-toolbar">
         <InputGroup
           leftIcon="search"
@@ -149,6 +183,8 @@ export function LibraryView({ active }: { active: boolean }) {
         <Button icon="refresh" text="Sync library" onClick={() => sync().then(books.reload)} loading={syncing} />
       </div>
 
+      <div className="library-body" ref={bodyRef}>
+      <div className="library-main">
       <div className="library-table-wrap">
         {books.error && !books.data ? (
           <ErrorState error={books.error} onRetry={books.reload} />
@@ -188,7 +224,15 @@ export function LibraryView({ active }: { active: boolean }) {
               {books.data.items.map((b) => {
                 const year = formatYear(b.pubdate);
                 return (
-                  <tr key={b.id}>
+                  <tr
+                    key={b.id}
+                    className={`library-row${b.id === selectedId ? " is-selected" : ""}`}
+                    tabIndex={0}
+                    aria-current={b.id === selectedId ? "true" : undefined}
+                    aria-label={`${b.title}: show details`}
+                    onClick={(e) => onRowClick(e, b.id)}
+                    onKeyDown={(e) => onRowKey(e, b.id)}
+                  >
                     <td className="cover-cell">
                       <BookCover bookId={b.id} hasCover={b.hasCover} width={24} title={b.title} />
                     </td>
@@ -271,6 +315,24 @@ export function LibraryView({ active }: { active: boolean }) {
           </ButtonGroup>
         </div>
       )}
+      </div>
+      {selectedId != null && (
+        <div className="side-dock" style={{ width: panel.width }}>
+          <div className="side-resize-handle" {...panel.handleProps} aria-label="Resize book details" />
+          <BookDetailsPanel
+            bookId={selectedId}
+            refreshKey={refreshKey}
+            reindexing={reindexing.has(selectedId)}
+            onClose={() => setSelectedId(null)}
+            onSelectBook={setSelectedId}
+            onFilterTag={setTag}
+            onAsk={askAbout}
+            onSearchIn={searchIn}
+            onReindex={(b) => reindex(b).then(() => setRefreshKey((k) => k + 1))}
+          />
+        </div>
+      )}
+      </div>
     </div>
   );
 }

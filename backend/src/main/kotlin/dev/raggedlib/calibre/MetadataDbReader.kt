@@ -19,6 +19,36 @@ class MetadataDbReader(private val libraryRoot: Path) {
         return open(db).use { readAll(it) }
     }
 
+    /** Metadata the index doesn't keep, for one book's detail view; null if the book isn't in metadata.db. */
+    fun extras(bookId: Long): CalibreExtras? {
+        val db = libraryRoot.resolve("metadata.db")
+        require(Files.isRegularFile(db)) { "metadata.db not found in $libraryRoot" }
+        return open(db).use { c ->
+            fun <T> query(sql: String, read: (java.sql.ResultSet) -> T): List<T> = c.prepareStatement(sql).use { ps ->
+                ps.setLong(1, bookId)
+                ps.executeQuery().use { rs -> buildList { while (rs.next()) add(read(rs)) } }
+            }
+            val added = query("select timestamp from books where id = ?") { it.getString(1) }
+            if (added.isEmpty()) return@use null
+            CalibreExtras(
+                description = query("select text from comments where book = ?") { it.getString(1) }.firstOrNull()
+                    ?.let(CommentText::toPlainText)?.ifBlank { null },
+                publisher = query("select p.name from books_publishers_link l join publishers p on p.id = l.publisher where l.book = ?") {
+                    it.getString(1)
+                }.firstOrNull(),
+                identifiers = query("select type, val from identifiers where book = ? order by type") { it.getString(1) to it.getString(2) }
+                    .toMap(),
+                // Calibre stores 0-10, shown as 0-5 stars
+                rating = query("select r.rating from books_ratings_link l join ratings r on r.id = l.rating where l.book = ?") {
+                    it.getInt(1)
+                }.firstOrNull()?.takeIf { it > 0 }?.let { it / 2.0 },
+                addedAt = CalibreDates.parse(added.first()),
+                fileSizes = query("select format, uncompressed_size from data where book = ?") { it.getString(1).uppercase() to it.getLong(2) }
+                    .toMap(),
+            )
+        }
+    }
+
     private fun open(db: Path): Connection {
         Class.forName("org.sqlite.JDBC")
         val uri = db.toAbsolutePath().toUri().rawPath // percent-encoded absolute path
