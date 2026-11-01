@@ -363,6 +363,27 @@ body {
   transform-origin: bottom;
 }
 
+/* ---------- settings menu (navbar gear) ---------- */
+
+.settings-menu {
+  width: 300px;
+  max-width: calc(100vw - 32px);
+  padding: 14px 16px 8px;
+}
+.settings-menu-title {
+  margin: 0 0 12px;
+  font-size: 15px;
+}
+.settings-menu .bp6-form-group:last-of-type {
+  margin-bottom: 8px;
+}
+.settings-menu-footer {
+  display: flex;
+  justify-content: flex-end;
+  border-top: 1px solid var(--app-border, rgba(128, 128, 128, 0.25));
+  padding-top: 6px;
+}
+
 .system-status {
   display: inline-flex;
   align-items: center;
@@ -830,16 +851,6 @@ mark {
   min-width: 0;
 }
 .scope-bar-options {
-  flex: 0 0 auto;
-}
-.scope-bar-options .bp6-html-select select {
-  max-width: 220px;
-}
-.scope-bar-options .topk-input {
-  flex: 0 0 auto;
-}
-.scope-bar-options .topk-input .bp6-input-group {
-  width: 76px;
   flex: 0 0 auto;
 }
 .scope-popover .bp6-menu {

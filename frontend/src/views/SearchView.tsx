@@ -74,7 +74,7 @@ export function SearchView() {
           />
           <Button type="submit" size="large" intent={Intent.PRIMARY} text="Search" disabled={!query.trim()} loading={loading} />
         </form>
-        <ScopeBar showModel={false} />
+        <ScopeBar />
       </div>
 
       <div className="search-results">
