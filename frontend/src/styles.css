@@ -1343,3 +1343,107 @@ body.is-resizing-x * {
   max-height: 80px;
   overflow: auto;
 }
+
+/* ---------- phones ---------- */
+
+/* the scope summary only exists on phones */
+.scope-summary {
+  display: none;
+}
+
+@media (max-width: 759px) {
+  /* navbar: one flex row that fits (Blueprint floats its groups, which widened the page past the screen) */
+  .app-navbar {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 8px;
+  }
+  .app-navbar > .bp6-navbar-group {
+    float: none;
+  }
+  .app-navbar > .bp6-navbar-group.bp6-align-left {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  .app-navbar .bp6-navbar-divider,
+  .app-navbar .system-status-label {
+    display: none;
+  }
+  .app-navbar .app-title {
+    margin-right: 10px;
+  }
+  .app-title-text,
+  .app-navbar .tab-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .app-navbar .bp6-tab .bp6-icon {
+    margin-right: 0;
+  }
+  .app-navbar .bp6-tab-list > *:not(:last-child) {
+    margin-right: 14px;
+  }
+  .app-navbar .bp6-tab {
+    padding: 0 4px;
+  }
+
+  /* ask */
+  .ask-main > .view-toolbar {
+    flex-wrap: nowrap;
+    padding: 6px 10px;
+  }
+  .ask-toolbar-count {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ask-main > .view-toolbar .bp6-button {
+    flex: none;
+  }
+  .chat-thread {
+    padding: 12px 12px 20px;
+  }
+  .ask-empty {
+    padding: 24px 12px 12px;
+  }
+  .ask-examples {
+    grid-template-columns: 1fr;
+  }
+  .composer {
+    padding: 8px 10px 10px;
+  }
+  .scope-summary {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 32px;
+    padding: 0 4px;
+    border: 0;
+    background: none;
+    font: inherit;
+    font-size: 12px;
+    color: var(--app-muted);
+    cursor: pointer;
+    text-align: left;
+  }
+  .scope-summary:focus-visible {
+    outline: 2px solid var(--app-accent);
+    border-radius: 2px;
+  }
+  .scope-summary-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .composer-scope:not(.is-open) {
+    display: none;
+  }
+}

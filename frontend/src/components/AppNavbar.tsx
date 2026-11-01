@@ -21,14 +21,15 @@ export function AppNavbar({ tab, onTabChange, theme, onToggleTheme }: Props) {
             <span />
             <span />
           </span>
-          raggedlib
+          <span className="app-title-text">raggedlib</span>
         </NavbarHeading>
         <NavbarDivider />
         <Tabs id="main-tabs" selectedTabId={tab} onChange={(id) => onTabChange(id as TabId)} size="large" animate>
-          <Tab id="ask" title="Ask" icon="chat" />
-          <Tab id="search" title="Search" icon="search" />
-          <Tab id="library" title="Library" icon="th" />
-          <Tab id="indexing" title="Indexing" icon="database" />
+          {/* labels are hidden on phones (icons only) but stay the tabs' accessible names */}
+          <Tab id="ask" title={<span className="tab-label">Ask</span>} icon="chat" />
+          <Tab id="search" title={<span className="tab-label">Search</span>} icon="search" />
+          <Tab id="library" title={<span className="tab-label">Library</span>} icon="th" />
+          <Tab id="indexing" title={<span className="tab-label">Indexing</span>} icon="database" />
         </Tabs>
       </NavbarGroup>
       <NavbarGroup align={Alignment.END}>

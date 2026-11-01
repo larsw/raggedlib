@@ -1,4 +1,5 @@
 import { Button, Classes, Icon } from "@blueprintjs/core";
+import type { Scope } from "../hooks/useScope";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../AppContext";
 import { ScopeBar } from "../components/scope/ScopeBar";
@@ -14,6 +15,8 @@ export function AskView() {
   const { turns, busy, send, stop, clear, remove } = useChat();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const viewRef = useRef<HTMLDivElement>(null);
+  /** phones: the scope controls fold behind a one-line summary (always shown on wider screens) */
+  const [scopeOpen, setScopeOpen] = useState(false);
   const panel = useSidePanel(viewRef);
   const panelOpen = !panel.collapsed;
   const { setCollapsed } = panel;
@@ -73,7 +76,7 @@ export function AskView() {
     <div className={`ask-view${panel.dragging ? " is-resizing" : ""}`} ref={viewRef}>
       <section className="ask-main" aria-label="Conversation">
         <div className="view-toolbar">
-          <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+          <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} ask-toolbar-count`}>
             {turns.length ? `${turns.length} question${turns.length === 1 ? "" : "s"} in this conversation` : ""}
           </span>
           <span className="spacer" />
@@ -106,7 +109,20 @@ export function AskView() {
           )}
         </div>
         <div className="composer">
-          <ScopeBar />
+          <button
+            type="button"
+            className="scope-summary"
+            aria-expanded={scopeOpen}
+            aria-controls="ask-scope"
+            onClick={() => setScopeOpen((o) => !o)}
+          >
+            <Icon icon="filter" size={12} />
+            <span className="scope-summary-text">{scopeSummary(scope, system?.rerankEnabled !== false)}</span>
+            <Icon icon={scopeOpen ? "chevron-down" : "chevron-up"} size={12} />
+          </button>
+          <div id="ask-scope" className={`composer-scope${scopeOpen ? " is-open" : ""}`}>
+            <ScopeBar />
+          </div>
           <ChatInput busy={busy} onSend={ask} onStop={stop} />
         </div>
       </section>
@@ -143,4 +159,15 @@ export function AskView() {
       )}
     </div>
   );
+}
+
+/** One line for the folded scope controls: "All books · reranked", "2 books · #rust · fused order". */
+function scopeSummary(scope: Scope, rerankAvailable: boolean): string {
+  const parts: string[] = [];
+  if (scope.books.length === 1) parts.push(scope.books[0]!.title);
+  else if (scope.books.length > 1) parts.push(`${scope.books.length} books`);
+  if (scope.tags.length) parts.push(scope.tags.map((t) => `#${t}`).join(" "));
+  if (!parts.length) parts.push("All books");
+  parts.push(scope.rerank && rerankAvailable ? "reranked" : "fused order");
+  return parts.join(" · ");
 }
