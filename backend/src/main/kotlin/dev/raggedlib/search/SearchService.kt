@@ -48,12 +48,14 @@ class SearchService(
 
         val filters = mutableListOf<String>()
         val params = MapSqlParameterSource()
+        // a DUPLICATE book (also while queued again) has no passages of its own: its copy is searched instead
+        val ownOrKept = "coalesce(duplicate_of, id)"
         if (bookIds != null) {
-            filters += "v.book_id in (:bookIds)"
+            filters += "v.book_id in (select $ownOrKept from books where id in (:bookIds))"
             params.addValue("bookIds", bookIds)
         }
         if (tags != null) {
-            filters += "v.book_id in (select id from books where tags && cast(:tags as text[]))"
+            filters += "v.book_id in (select $ownOrKept from books where tags && cast(:tags as text[]))"
             params.addValue("tags", tags.toTypedArray())
         }
         val filterSql = filters.joinToString("") { " and $it" }
@@ -78,7 +80,10 @@ class SearchService(
             s.rrfK,
         )
         val cap = if (bookIds != null && bookIds.size <= 2) null else s.maxChunksPerBook
-        val kept = HybridRanking.dropWeak(fused, s.minRelativeScore)
+        // the same passage twice (repeated in a book, shared by volumes or editions) would take two result slots
+        val kept = NearDuplicates.dropRepeats(HybridRanking.dropWeak(fused, s.minRelativeScore), s.nearDuplicateContainment) {
+            byId.getValue(it.id).text
+        }
         val reranked = if (req.rerank != false && reranker.enabled) rerank(query, kept, byId, topK) else null
         val scoreKind = if (reranked != null) ScoreKind.RERANK else ScoreKind.FUSED
         val results = HybridRanking.capPerBook(reranked ?: kept, cap, topK).mapIndexed { i, f ->

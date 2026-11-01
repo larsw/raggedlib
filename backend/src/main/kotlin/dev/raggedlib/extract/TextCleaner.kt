@@ -6,7 +6,8 @@ object TextCleaner {
     private val invisible = Regex("[\\u00AD\\u200B-\\u200D\\u2060\\uFEFF\\u0000-\\u0008\\u000B\\u000E-\\u001F\\u007F]")
     private val hSpace = Regex("[ \\t\\u00A0\\u2000-\\u200A\\u202F\\u205F\\u3000]+")
     private val lineBreakHyphen = Regex("(\\p{L})[-\\u2010\\u2011]\\s*\\n\\s*(\\p{Ll})")
-    private val dotLeader = Regex("(?:\\.\\s?){4,}|(?:…\\s?){2,}|(?:_\\s?){4,}")
+    // also "·" and U+FFFD: pdftotext's rendering of leader glyphs it has no character for
+    private val dotLeader = Regex("(?:\\.\\s?){4,}|(?:…\\s?){2,}|(?:_\\s?){4,}|(?:·\\s?){4,}|\uFFFD{4,}")
 
     /** Unicode normalisation (ligatures etc.), invisible chars, horizontal whitespace; keeps '\n' and '\f'. */
     fun normalize(text: String): String {

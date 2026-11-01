@@ -17,7 +17,7 @@ class BookRepository(
 ) {
     private val columns = """
         id, title, authors, tags, series, series_index, languages, pubdate, formats, source_format, cover_path,
-        calibre_last_modified, status, chunk_count, error, indexed_at
+        calibre_last_modified, status, chunk_count, error, indexed_at, duplicate_of
     """.trimIndent()
 
     private val rowMapper = RowMapper { rs, _ -> mapRow(rs) }
@@ -42,6 +42,7 @@ class BookRepository(
                 chunkCount = rs.getInt("chunk_count"),
                 error = rs.getString("error"),
                 indexedAt = rs.getTimestamp("indexed_at")?.toInstant(),
+                duplicateOf = rs.getObject("duplicate_of") as Long?,
             ),
             formatPaths = formatPaths,
             coverPath = cover,
@@ -104,9 +105,12 @@ class BookRepository(
         )
     }
 
-    /** Updates calibre metadata; when [reset] the book goes back to PENDING (caller deletes chunks). */
+    /**
+     * Updates calibre metadata; when [reset] the book goes back to PENDING. Its passages stay searchable until the
+     * re-index replaces them (and lends their embeddings where nothing changed).
+     */
     fun updateMetadata(r: CalibreRecord, sourceFormat: String?, reset: Boolean) {
-        val resetSql = if (reset) ", status = 'PENDING', chunk_count = 0, error = null, indexed_at = null" else ""
+        val resetSql = if (reset) ", status = 'PENDING', error = null" else ""
         jdbc.update(
             """
             update books set title = :title, authors = :authors, tags = :tags, series = :series, series_index = :seriesIndex,
@@ -151,19 +155,98 @@ class BookRepository(
         jdbc.update(
             """
             update books set status = 'INDEXED', chunk_count = :n, error = null, indexed_at = now(), updated_at = now(),
-                   source_format = :fmt
+                   source_format = :fmt, duplicate_of = null
             where id = :id
             """.trimIndent(),
             mapOf("id" to id, "n" to chunkCount, "fmt" to sourceFormat),
         )
     }
 
-    fun resetToPending(id: Long) {
+    /**
+     * Back to PENDING for re-indexing; existing passages stay (searchable) until the new ones replace them, and a
+     * duplicate keeps pointing at its copy until it is decided again.
+     */
+    fun requeue(ids: Collection<Long>): Int = if (ids.isEmpty()) 0 else jdbc.update(
+        "update books set status = 'PENDING', error = null, updated_at = now() where id in (:ids)",
+        mapOf("ids" to ids),
+    )
+
+    fun requeue(id: Long) = requeue(listOf(id))
+
+    /** The book has no passages any more (skipped, failed): status and count say so. Caller deletes the chunks. */
+    fun markEmpty(id: Long, status: BookStatus, error: String?, sourceFormat: String? = null) {
         jdbc.update(
-            "update books set status = 'PENDING', chunk_count = 0, error = null, indexed_at = null, updated_at = now() where id = :id",
-            mapOf("id" to id),
+            """
+            update books set status = :status, error = :error, chunk_count = 0, indexed_at = null, duplicate_of = null,
+                   source_format = coalesce(:sourceFormat, source_format), updated_at = now()
+            where id = :id
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("id", id).addValue("status", status.name).addValue("error", error)
+                .addValue("sourceFormat", sourceFormat),
         )
     }
+
+    /**
+     * [id]'s text is in [of]: no passages of its own; searches restricted to it use [of]. Caller deletes the chunks,
+     * in the same transaction: false (nothing changed) if [of] is gone by now. Its own duplicates now point at [of].
+     */
+    fun markDuplicate(id: Long, of: Long, note: String, sourceFormat: String?): Boolean {
+        // the keeper must not be deleted (library sync) between this check and the commit
+        if (jdbc.queryForList("select id from books where id = :of for key share", mapOf("of" to of), Long::class.java).isEmpty()) {
+            return false
+        }
+        jdbc.update(
+            "update books set duplicate_of = :of, updated_at = now() where duplicate_of = :id and status = 'DUPLICATE'",
+            mapOf("id" to id, "of" to of),
+        )
+        jdbc.update(
+            """
+            update books set status = 'DUPLICATE', duplicate_of = :of, error = :note, chunk_count = 0, indexed_at = now(),
+                   source_format = coalesce(:fmt, source_format), updated_at = now()
+            where id = :id
+            """.trimIndent(),
+            MapSqlParameterSource().addValue("id", id).addValue("of", of).addValue("note", note).addValue("fmt", sourceFormat),
+        )
+        return true
+    }
+
+    /** Keeps the book's passages but records a failure (a re-index failed; the old passages are still good). */
+    fun markFailedKeepingPassages(id: Long, error: String) {
+        jdbc.update(
+            "update books set status = 'FAILED', error = :error, updated_at = now() where id = :id",
+            mapOf("id" to id, "error" to error),
+        )
+    }
+
+    /**
+     * Duplicates of [keepers] go back to PENDING: the copy standing in for them is gone or lost its passages, so they
+     * need passages of their own. Returns their ids.
+     */
+    fun requeueDuplicatesOf(keepers: Collection<Long>): List<Long> {
+        if (keepers.isEmpty()) return emptyList()
+        return jdbc.queryForList(
+            """
+            update books set status = 'PENDING', error = null, duplicate_of = null, updated_at = now()
+            where status = 'DUPLICATE' and duplicate_of in (:ids) returning id
+            """.trimIndent(),
+            mapOf("ids" to keepers), Long::class.java,
+        ).filterNotNull()
+    }
+
+    /** Duplicates whose copy was deleted (duplicate_of set null by the foreign key) go back to PENDING. */
+    fun requeueOrphanedDuplicates(): List<Long> = jdbc.queryForList(
+        """
+        update books set status = 'PENDING', error = null, updated_at = now()
+        where status = 'DUPLICATE' and duplicate_of is null returning id
+        """.trimIndent(),
+        emptyMap<String, Any>(), Long::class.java,
+    ).filterNotNull()
+
+    /** Books (DUPLICATE or queued again) standing in for [id]'s text. */
+    fun duplicatesOf(id: Long): List<Long> = jdbc.queryForList(
+        "select id from books where duplicate_of = :id", mapOf("id" to id), Long::class.java,
+    ).filterNotNull()
+
 
     fun idsWithStatus(statuses: Collection<BookStatus>, restrictTo: Collection<Long>?): List<Long> {
         val params = MapSqlParameterSource("statuses", statuses.map { it.name })

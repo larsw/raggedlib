@@ -6,7 +6,7 @@ Base URL: `http://localhost:8080/api`. All bodies JSON (camelCase). Errors: HTTP
 ## Types
 
 ```ts
-type BookStatus = "PENDING" | "EXTRACTING" | "EMBEDDING" | "INDEXED" | "FAILED" | "SKIPPED";
+type BookStatus = "PENDING" | "EXTRACTING" | "EMBEDDING" | "INDEXED" | "FAILED" | "SKIPPED" | "DUPLICATE";
 
 interface Book {
   id: number;                 // calibre id
@@ -22,8 +22,10 @@ interface Book {
   hasCover: boolean;
   status: BookStatus;
   chunkCount: number;
-  error: string | null;       // last failure message (status FAILED/SKIPPED)
+  error: string | null;       // last failure message (status FAILED/SKIPPED), or which book a DUPLICATE copies
   indexedAt: string | null;
+  duplicateOf: number | null; // status DUPLICATE: the book whose passages stand in for this one (searches restricted
+                              // to this book, or to a tag only it has, use that book)
 }
 
 interface Page<T> { items: T[]; total: number; page: number; size: number; }
@@ -84,6 +86,7 @@ interface SystemInfo {
 | POST | `/api/books/{id}/reindex` | Deletes chunks, sets PENDING. If ingestion not running, starts it. Returns `Book`. |
 | GET  | `/api/tags` | `{ name: string, count: number }[]` sorted by count desc |
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
+| POST | `/api/ingest/reprocess` | Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books again (all, or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
 | POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s) |
 | POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |

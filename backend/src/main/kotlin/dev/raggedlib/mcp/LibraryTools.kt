@@ -73,6 +73,8 @@ class LibraryTools(
         val pubYear: Int?,
         val status: BookStatus,
         val chunks: Int,
+        /** Status DUPLICATE: the book with the same text, which searches restricted to this one use. */
+        val duplicateOf: Long?,
     )
 
     data class BookList(val total: Long, val page: Int, val size: Int, val books: List<BookInfo>)
@@ -178,7 +180,8 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
         name = "list_books",
         title = "List books in the library",
         description = """List or find books in the library by title/author substring, tag or indexing status.
-Returns ids to pass as bookIds to search_library / ask_library. Only INDEXED books are searchable.""",
+Returns ids to pass as bookIds to search_library / ask_library. INDEXED books are searchable; a DUPLICATE book has
+the same text as another (duplicateOf), which is searched in its place.""",
         annotations = McpAnnotations(title = "List books", readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false),
     )
     fun listBooks(
@@ -186,7 +189,7 @@ Returns ids to pass as bookIds to search_library / ask_library. Only INDEXED boo
         query: String?,
         @McpToolParam(description = "Only books with this tag (exact name, see list_tags).", required = false)
         tag: String?,
-        @McpToolParam(description = "Only books in this status: PENDING, INDEXED, FAILED, SKIPPED, EXTRACTING or EMBEDDING.", required = false)
+        @McpToolParam(description = "Only books in this status: PENDING, INDEXED, DUPLICATE, FAILED, SKIPPED, EXTRACTING or EMBEDDING.", required = false)
         status: String?,
         @McpToolParam(description = "Page number, from 0 (default 0).", required = false)
         page: Int?,
@@ -200,7 +203,7 @@ Returns ids to pass as bookIds to search_library / ask_library. Only INDEXED boo
         val p = books.search(query, st, tag, (page ?: 0).coerceAtLeast(0), (size ?: 25).coerceIn(1, 100), "title")
         return BookList(p.total, p.page, p.size, p.items.map { b ->
             BookInfo(b.id, b.title, b.authors, b.tags, b.languages, b.pubdate?.atZone(java.time.ZoneOffset.UTC)?.year,
-                b.status, b.chunkCount)
+                b.status, b.chunkCount, b.duplicateOf)
         })
     }
 
@@ -224,8 +227,10 @@ Returns ids to pass as bookIds to search_library / ask_library. Only INDEXED boo
     fun libraryStatus(): LibraryStatus {
         val s = ingest.status()
         val indexed = s.counts[BookStatus.INDEXED] ?: 0
+        val duplicates = s.counts[BookStatus.DUPLICATE] ?: 0
         return LibraryStatus(s.totalBooks, s.counts, s.totalChunks, s.running,
-            "$indexed of ${s.totalBooks} books are indexed and searchable.")
+            "${indexed + duplicates} of ${s.totalBooks} books are searchable" +
+                if (duplicates > 0) " ($duplicates of them duplicates of another book, searched through it)." else ".")
     }
 
     private companion object {

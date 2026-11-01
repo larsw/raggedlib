@@ -11,14 +11,15 @@ object PdfText {
 
     fun letterCount(raw: String): Int = raw.count { it.isLetter() }
 
-    fun paragraphs(raw: String): List<Paragraph> {
+    /** [keepJunk]: also return junk paragraphs (dotted TOC lines, …), which still tell where the contents are. */
+    fun paragraphs(raw: String, keepJunk: Boolean = false): List<Paragraph> {
         val out = mutableListOf<Paragraph>()
         val pages = Structure.stripPageFurniture(splitPages(raw).map { TextCleaner.normalize(it) })
         pages.forEachIndexed { i, normalized ->
             val page = i + 1
             normalized.split(Regex("\\n\\s*\\n")).forEach { block ->
                 val text = TextCleaner.joinWrappedLines(block)
-                if (!TextCleaner.isJunkParagraph(text)) out += Paragraph(text, page, null)
+                if (keepJunk || !TextCleaner.isJunkParagraph(text)) out += Paragraph(text, page, null)
             }
         }
         return out

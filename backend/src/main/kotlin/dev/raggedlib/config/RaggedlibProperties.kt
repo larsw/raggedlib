@@ -47,6 +47,11 @@ data class RaggedlibProperties(
         val embedParallelism: Int = 2,
         /** PDFs with fewer letters per page on average are treated as having no text layer. */
         val minLettersPerPage: Int = 80,
+        /**
+         * A book whose passages are, for at least this share, word for word in one other indexed book that is at
+         * least as long becomes DUPLICATE of it instead of being embedded (see Duplicates). 0 turns this off.
+         */
+        val duplicateMinShare: Double = 0.9,
     )
 
     data class Chunking(
@@ -73,6 +78,11 @@ data class RaggedlibProperties(
         val vectorSimFull: Double = 0.70,
         /** Fused candidates scoring below this fraction of the best one are dropped (before the per-book cap). */
         val minRelativeScore: Double = 0.10,
+        /**
+         * A candidate sharing at least this share of its word 5-grams with a better one is the same passage (repeated
+         * in a book, shared by volumes or editions) and dropped. 0 keeps them all.
+         */
+        val nearDuplicateContainment: Double = 0.6,
         /** Full-text search only looks at this many leading characters of the query. */
         val maxKeywordQueryChars: Int = 500,
         /** Keyword fallback (see KeywordFallback): min IDF-weighted share of query terms a passage must contain. */
@@ -126,6 +136,11 @@ data class RaggedlibProperties(
 
     data class Embedding(
         val dimensions: Int = 1024,
+        /**
+         * The model that embedded passages stored before the model was recorded with each one. Re-indexing reuses a
+         * stored embedding only if it came from the current model.
+         */
+        val legacyModel: String = "qwen3-embedding:0.6b",
         /** Prefix for search queries (qwen3-embedding is instruction-aware); empty to disable. */
         val queryInstruction: String = "Instruct: Given a question, retrieve passages from technical books that answer it\nQuery: ",
     )

@@ -5,6 +5,7 @@ const INTENT: Record<BookStatus, Intent> = {
   INDEXED: Intent.SUCCESS,
   FAILED: Intent.DANGER,
   SKIPPED: Intent.WARNING,
+  DUPLICATE: Intent.NONE,
   PENDING: Intent.NONE,
   EXTRACTING: Intent.PRIMARY,
   EMBEDDING: Intent.PRIMARY,
@@ -30,7 +31,7 @@ export function StatusTag({ status, error }: { status: BookStatus; error?: strin
       {status.toLowerCase()}
     </Tag>
   );
-  if (error && (status === "FAILED" || status === "SKIPPED")) {
+  if (error && (status === "FAILED" || status === "SKIPPED" || status === "DUPLICATE")) {
     return (
       <Tooltip content={<div className="tooltip-error">{error}</div>} placement="top">
         {tag}

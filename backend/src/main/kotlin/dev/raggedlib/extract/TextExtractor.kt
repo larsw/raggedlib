@@ -25,8 +25,8 @@ class TextExtractor(
         return if (format.equals("PDF", ignoreCase = true)) pdf(file) else ebook(file, format)
     }
 
-    private fun postProcess(paragraphs: List<Paragraph>): List<Paragraph> =
-        Structure.inferSections(Structure.mergeBroken(paragraphs, props.chunking.maxChars * 4))
+    private fun postProcess(paragraphs: List<Paragraph>, tocPages: Set<Int> = emptySet()): List<Paragraph> =
+        Structure.inferSections(Structure.mergeBroken(paragraphs, props.chunking.maxChars * 4), tocPages)
 
     private fun pdf(file: Path): Extraction {
         Files.createDirectories(props.tmpDir)
@@ -41,7 +41,10 @@ class TextExtractor(
             val pages = PdfText.splitPages(raw).size.coerceAtLeast(1)
             val letters = PdfText.letterCount(raw)
             if (letters < 500 || letters / pages < props.ingest.minLettersPerPage) return Extraction.NoText("no text layer")
-            return Extraction.Text(postProcess(PdfText.paragraphs(raw)))
+            // contents pages are recognised before cleanup drops their dotted lines as junk
+            val all = PdfText.paragraphs(raw, keepJunk = true)
+            val toc = Structure.tocPages(all)
+            return Extraction.Text(postProcess(all.filterNot { TextCleaner.isJunkParagraph(it.text) }, toc))
         } finally {
             out.deleteIfExists()
         }

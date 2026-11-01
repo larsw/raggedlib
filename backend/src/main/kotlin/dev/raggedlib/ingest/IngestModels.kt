@@ -26,3 +26,6 @@ data class IngestStatus(
 
 /** Published when an indexing run ends (finished or stopped); [chunks] passages were stored during it. */
 data class IngestionFinished(val books: Int, val chunks: Long)
+
+/** POST /api/ingest/reprocess: INDEXED/DUPLICATE books to extract again; all when both are null. */
+data class IngestReprocessRequest(val bookIds: List<Long>? = null, val formats: List<String>? = null)

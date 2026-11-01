@@ -1,6 +1,13 @@
 // Copied from docs/API.md — the contract between backend and frontend. Keep in sync.
 
-export type BookStatus = "PENDING" | "EXTRACTING" | "EMBEDDING" | "INDEXED" | "FAILED" | "SKIPPED";
+export type BookStatus =
+  | "PENDING"
+  | "EXTRACTING"
+  | "EMBEDDING"
+  | "INDEXED"
+  | "FAILED"
+  | "SKIPPED"
+  | "DUPLICATE"; // same text as another indexed book (duplicateOf), which searches use instead
 
 export const BOOK_STATUSES: readonly BookStatus[] = [
   "PENDING",
@@ -9,6 +16,7 @@ export const BOOK_STATUSES: readonly BookStatus[] = [
   "INDEXED",
   "FAILED",
   "SKIPPED",
+  "DUPLICATE",
 ];
 
 export interface Book {
@@ -25,8 +33,9 @@ export interface Book {
   hasCover: boolean;
   status: BookStatus;
   chunkCount: number;
-  error: string | null; // last failure message (status FAILED/SKIPPED)
+  error: string | null; // last failure message (status FAILED/SKIPPED), or which book a DUPLICATE copies
   indexedAt: string | null;
+  duplicateOf: number | null; // status DUPLICATE: id of the book whose passages stand in for this one
 }
 
 export interface Page<T> {

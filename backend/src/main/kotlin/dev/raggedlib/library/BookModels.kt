@@ -2,7 +2,8 @@ package dev.raggedlib.library
 
 import java.time.Instant
 
-enum class BookStatus { PENDING, EXTRACTING, EMBEDDING, INDEXED, FAILED, SKIPPED }
+/** DUPLICATE: the book's text is (almost) all in another indexed book ([Book.duplicateOf]), so it has no passages. */
+enum class BookStatus { PENDING, EXTRACTING, EMBEDDING, INDEXED, FAILED, SKIPPED, DUPLICATE }
 
 /** API representation (see docs/API.md). */
 data class Book(
@@ -21,6 +22,8 @@ data class Book(
     val chunkCount: Int,
     val error: String?,
     val indexedAt: Instant?,
+    /** Status DUPLICATE: the book whose passages stand in for this one. */
+    val duplicateOf: Long? = null,
 )
 
 /** Internal row with the relative file paths. */

@@ -14,6 +14,11 @@ class IngestController(private val ingest: IngestService) {
     fun start(@RequestBody(required = false) body: IngestStartRequest?): IngestStatus =
         ingest.start(body?.bookIds, body?.retryFailed == true)
 
+    /** Re-extracts indexed books (all, or [IngestReprocessRequest.bookIds] / formats), re-embedding only changed passages. */
+    @PostMapping("/reprocess")
+    fun reprocess(@RequestBody(required = false) body: IngestReprocessRequest?): IngestStatus =
+        ingest.reprocess(body?.bookIds, body?.formats)
+
     @PostMapping("/stop")
     fun stop(): IngestStatus = ingest.stop()
 

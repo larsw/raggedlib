@@ -72,18 +72,35 @@ class IngestService(
     private val recentErrors = ConcurrentLinkedDeque<IngestError>()
     private val chunker = with(props.chunking) { Chunker(targetChars, maxChars, overlapChars, minChars) }
 
-    /** On startup, books stuck mid-pipeline lose their partial chunks and go back to PENDING. */
+    /**
+     * On startup, books stuck mid-pipeline go back to PENDING. Passages are replaced in one transaction, so a stuck
+     * book still has its previous ones (if any), complete; they stay searchable until it is indexed again.
+     */
     @EventListener(ApplicationReadyEvent::class)
     fun recoverStuckBooks() {
         if (!props.ingest.recoverOnStartup) return
         val stuck = books.stuckIds()
-        stuck.forEach { id ->
-            tx.executeWithoutResult {
-                chunks.deleteForBook(id)
-                books.resetToPending(id)
-            }
-        }
+        books.requeue(stuck)
         if (stuck.isNotEmpty()) log.info("Reset {} interrupted books to PENDING", stuck.size)
+    }
+
+    /**
+     * Extracts [bookIds] (default: every INDEXED or DUPLICATE book, optionally only in [formats]) again, e.g. after
+     * extraction improved. Passages whose text and section come out unchanged keep their embeddings, so only
+     * changed ones cost GPU time; books turn out DUPLICATE (or stop being one) along the way.
+     */
+    fun reprocess(bookIds: List<Long>?, formats: List<String>?): IngestStatus {
+        val wanted = formats?.map { it.uppercase() }?.toSet()
+        val ids = books.idsWithStatus(listOf(BookStatus.INDEXED, BookStatus.DUPLICATE), bookIds?.distinct()?.takeIf { it.isNotEmpty() })
+            .filter { id -> wanted == null || books.find(id)?.book?.sourceFormat?.uppercase() in wanted }
+        // an empty list would make start() take every PENDING book
+        if (ids.isEmpty()) return status()
+        books.requeue(ids)
+        log.info("Reprocessing {} books", ids.size)
+        synchronized(lock) {
+            if (run == null) start(ids, false) else ids.forEach(::enqueue)
+        }
+        return status()
     }
 
     fun start(bookIds: List<Long>?, retryFailed: Boolean): IngestStatus {
@@ -225,7 +242,7 @@ class IngestService(
         val title = row.book.title
         val format = Formats.choose(row.formatPaths.keys)
         if (format == null) {
-            finish(id) { books.setStatus(id, BookStatus.SKIPPED, "no supported format (${row.formatPaths.keys.joinToString()})") }
+            finish(id) { empty(id, BookStatus.SKIPPED, "no supported format (${row.formatPaths.keys.joinToString()})") }
             return null
         }
         active[id] = ActiveBook(id, title, "EXTRACTING", null)
@@ -236,7 +253,7 @@ class IngestService(
             when (val ex = extractor.extract(file, format)) {
                 is Extraction.NoText -> {
                     active.remove(id)
-                    finish(id) { books.setStatus(id, BookStatus.SKIPPED, ex.reason) }
+                    finish(id) { empty(id, BookStatus.SKIPPED, ex.reason, format) }
                     return null
                 }
                 is Extraction.Text -> {
@@ -245,7 +262,7 @@ class IngestService(
                         (System.nanoTime() - started) / 1_000_000)
                     if (chunkList.isEmpty()) {
                         active.remove(id)
-                        finish(id) { books.setStatus(id, BookStatus.SKIPPED, "no usable text after cleanup") }
+                        finish(id) { empty(id, BookStatus.SKIPPED, "no usable text after cleanup", format) }
                         return null
                     }
                     active[id] = ActiveBook(id, title, "EXTRACTING", chunkList.size)
@@ -281,36 +298,115 @@ class IngestService(
         val id = row.book.id
         active[id] = ActiveBook(id, row.book.title, "EMBEDDING", ex.chunks.size)
         books.setStatus(id, BookStatus.EMBEDDING, null, ex.format)
+        if (storeAsDuplicate(ex)) return
+
+        // passages whose embedding input is unchanged (same title, section and text) keep their embedding
         val inputs = ex.chunks.map { embeddingInput(row.book.title, it) }
-        val batches = inputs.chunked(props.ingest.embedBatchSize.coerceAtLeast(1))
-        val vectors = ArrayList<FloatArray>(inputs.size)
+        val previous = chunks.embeddingsByInput(id, row.book.title) { embeddingInput(row.book.title, it) }
+        val vectors = arrayOfNulls<FloatArray>(inputs.size)
+        inputs.forEachIndexed { i, input -> vectors[i] = previous[input] }
+        val missing = inputs.indices.filter { vectors[it] == null }
+        val batches = missing.chunked(props.ingest.embedBatchSize.coerceAtLeast(1))
         val parallel = props.ingest.embedParallelism.coerceAtLeast(1)
         val embedStart = System.nanoTime()
         Executors.newVirtualThreadPerTaskExecutor().use { exec ->
             for (group in batches.chunked(parallel)) {
-                val futures = group.map { batch -> exec.submit<List<FloatArray>> { embedWithRetry(batch) } }
-                futures.forEach { f ->
+                val futures = group.map { batch -> batch to exec.submit<List<FloatArray>> { embedWithRetry(batch.map(inputs::get)) } }
+                futures.forEach { (batch, f) ->
                     val v = f.get()
-                    vectors += v
+                    check(v.size == batch.size) { "embedding count mismatch" }
+                    batch.forEachIndexed { j, i -> vectors[i] = v[j] }
                     rate.record(v.size)
                 }
             }
         }
         val embedMs = (System.nanoTime() - embedStart) / 1_000_000
-        log.info("Embedded book {}: {} chunks in {} ms ({} chunks/s)", id, vectors.size, embedMs,
-            "%.1f".format(vectors.size * 1000.0 / embedMs.coerceAtLeast(1)))
-        check(vectors.size == ex.chunks.size) { "embedding count mismatch" }
-        vectors.firstOrNull()?.let {
+        val reused = inputs.size - missing.size
+        log.info("Embedded book {}: {} chunks in {} ms ({} chunks/s){}", id, missing.size, embedMs,
+            "%.1f".format(missing.size * 1000.0 / embedMs.coerceAtLeast(1)),
+            if (reused > 0) ", $reused unchanged chunks kept their embeddings" else "")
+        val all = vectors.map { checkNotNull(it) { "missing embedding" } }
+        all.firstOrNull()?.let {
             check(it.size == props.embedding.dimensions) { "embedding has ${it.size} dims, expected ${props.embedding.dimensions}" }
         }
+        val dependents = books.duplicatesOf(id)
         tx.executeWithoutResult {
             chunks.deleteForBook(id)
-            chunks.insert(id, row.book.title, row.book.authors, ex.chunks, vectors)
+            chunks.insert(id, row.book.title, row.book.authors, ex.chunks, all)
             books.markIndexed(id, ex.chunks.size, ex.format)
         }
         sessionChunks.addAndGet(ex.chunks.size.toLong())
         sessionProcessed.incrementAndGet()
+        // its text changed: books that were copies of it are decided again (cheap if they still are)
+        if (dependents.isNotEmpty() && (missing.isNotEmpty() || previous.size != inputs.size)) {
+            books.requeue(dependents)
+            dependents.forEach(::enqueue)
+        }
+        absorbShorterCopies(id, ex)
     }
+
+    /**
+     * The other direction of [storeAsDuplicate]: indexed books whose text is (nearly) all in the book just stored,
+     * which is at least as long, become its duplicates — otherwise the order books happen to be indexed in would
+     * decide whether a copy is caught.
+     */
+    private fun absorbShorterCopies(id: Long, ex: Extracted) {
+        val minShare = props.ingest.duplicateMinShare
+        if (minShare <= 0.0) return
+        val hashes = ex.chunks.mapTo(HashSet()) { Duplicates.md5(it.text) }
+        for (m in chunks.booksContaining(hashes, id)) {
+            if (m.chunks > ex.chunks.size || m.shared < minShare * minOf(m.chunks, hashes.size)) continue
+            val other = books.find(m.bookId)?.book ?: continue
+            if (other.status == BookStatus.EXTRACTING || other.status == BookStatus.EMBEDDING) continue // decided on its own
+            val distinct = chunks.distinctPassages(m.bookId)
+            val keeper = Duplicates.keeper(m.bookId, m.chunks, distinct, listOf(Duplicates.Match(id, m.shared, ex.chunks.size)),
+                minShare, MIN_SHARED) ?: continue
+            val share = keeper.shared * 100 / distinct.coerceAtLeast(1)
+            val marked = tx.execute {
+                books.markDuplicate(m.bookId, id, "same text as “${ex.row.book.title}” (#$id): $share% of its passages", null)
+                    .also { if (it) chunks.deleteForBook(m.bookId) }
+            } == true
+            if (marked) log.info("Book {} '{}' duplicates book {} '{}' ({}% of {} passages); its passages were dropped",
+                m.bookId, other.title.take(60), id, ex.row.book.title.take(60), share, distinct)
+        }
+    }
+
+    /**
+     * If the extracted book duplicates another indexed one ([Duplicates]), marks it DUPLICATE without embedding it
+     * and drops its own passages. Books that were duplicates of this one now point at that copy.
+     */
+    private fun storeAsDuplicate(ex: Extracted): Boolean {
+        val minShare = props.ingest.duplicateMinShare
+        if (minShare <= 0.0) return false
+        val id = ex.row.book.id
+        val hashes = ex.chunks.mapTo(HashSet()) { Duplicates.md5(it.text) }
+        val keeper = Duplicates.keeper(id, ex.chunks.size, hashes.size, chunks.booksContaining(hashes, id), minShare, MIN_SHARED)
+            ?: return false
+        val keeperTitle = books.find(keeper.bookId)?.book?.title ?: "#${keeper.bookId}"
+        val share = keeper.shared * 100 / hashes.size
+        val marked = tx.execute {
+            books.markDuplicate(id, keeper.bookId, "same text as “$keeperTitle” (#${keeper.bookId}): $share% of its passages", ex.format)
+                .also { if (it) chunks.deleteForBook(id) }
+        } == true
+        if (!marked) return false // the copy was removed meanwhile: index this one
+        log.info("Book {} '{}' duplicates book {} '{}' ({}% of {} passages); not indexed", id, ex.row.book.title.take(60),
+            keeper.bookId, keeperTitle.take(60), share, hashes.size)
+        sessionProcessed.incrementAndGet()
+        return true
+    }
+
+    /** The book ends without passages ([status] SKIPPED or FAILED); its duplicates need passages of their own. */
+    private fun empty(id: Long, status: BookStatus, reason: String, format: String? = null) {
+        tx.executeWithoutResult {
+            chunks.deleteForBook(id)
+            books.markEmpty(id, status, reason, format)
+        }
+        requeueDuplicatesOf(id)
+    }
+
+    /** Duplicates of [id] go back to PENDING and into the current run: [id] no longer has passages to lend them. */
+    private fun requeueDuplicatesOf(id: Long): List<Long> =
+        books.requeueDuplicatesOf(listOf(id)).onEach(::enqueue)
 
     private fun embedWithRetry(batch: List<String>): List<FloatArray> {
         var attempt = 0
@@ -334,10 +430,9 @@ class IngestService(
         val msg = (e.message ?: e.javaClass.simpleName).take(1000)
         log.warn("Book {} '{}' failed: {}", row.book.id, row.book.title, msg)
         try {
-            tx.executeWithoutResult {
-                chunks.deleteForBook(row.book.id)
-                books.setStatus(row.book.id, BookStatus.FAILED, msg)
-            }
+            // a failed re-index (Ollama restarting, a converter timeout) leaves the previous passages, which are fine
+            if ((books.find(row.book.id)?.book?.chunkCount ?: 0) > 0) books.markFailedKeepingPassages(row.book.id, msg)
+            else empty(row.book.id, BookStatus.FAILED, msg)
         } catch (dbErr: Exception) {
             log.error("Could not mark book {} as failed", row.book.id, dbErr)
         }
@@ -350,6 +445,9 @@ class IngestService(
         private val POISON = Any()
 
         /** Small context header so each chunk is self-describing for the embedding model. */
+        /** Fewest shared passages that make a book a duplicate (or all of a shorter one). */
+        private const val MIN_SHARED = 5
+
         fun embeddingInput(title: String, chunk: Chunk): String = buildString {
             append("Book: ").append(title).append('\n')
             if (chunk.section != null) append("Section: ").append(chunk.section).append('\n')
