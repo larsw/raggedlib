@@ -18,6 +18,7 @@ import org.springframework.context.event.EventListener
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.time.Instant
+import java.util.UUID
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
@@ -300,11 +301,22 @@ class IngestService(
         books.setStatus(id, BookStatus.EMBEDDING, null, ex.format)
         if (storeAsDuplicate(ex)) return
 
-        // passages whose embedding input is unchanged (same title, section and text) keep their embedding
-        val inputs = ex.chunks.map { embeddingInput(row.book.title, it) }
-        val previous = chunks.embeddingsByInput(id, row.book.title) { embeddingInput(row.book.title, it) }
+        // Unchanged passages (same text, section and page, valid embedding) stay as they are: rewriting a row costs
+        // an HNSW index insert, which is slower than the embedding itself. Other passages reuse the embedding of a
+        // stored one with the same input (same title, section and text) where there is one.
+        val stored = chunks.reusable(id, row.book.title)
+        val unchanged = stored.groupByTo(HashMap()) { Triple(it.content, it.section, it.page) }
+            .mapValues { ArrayDeque(it.value) }
+        val keep = ArrayList<UUID>()
+        val toWrite = ex.chunks.filter { c ->
+            val match = unchanged[Triple(c.text, c.section, c.page)]?.removeFirstOrNull()
+            if (match != null) keep += match.id
+            match == null
+        }
+        val byInput = stored.associate { embeddingInput(row.book.title, Chunk(0, it.content, null, it.section)) to it.embedding }
+        val inputs = toWrite.map { embeddingInput(row.book.title, it) }
         val vectors = arrayOfNulls<FloatArray>(inputs.size)
-        inputs.forEachIndexed { i, input -> vectors[i] = previous[input] }
+        inputs.forEachIndexed { i, input -> vectors[i] = byInput[input] }
         val missing = inputs.indices.filter { vectors[it] == null }
         val batches = missing.chunked(props.ingest.embedBatchSize.coerceAtLeast(1))
         val parallel = props.ingest.embedParallelism.coerceAtLeast(1)
@@ -321,24 +333,25 @@ class IngestService(
             }
         }
         val embedMs = (System.nanoTime() - embedStart) / 1_000_000
-        val reused = inputs.size - missing.size
-        log.info("Embedded book {}: {} chunks in {} ms ({} chunks/s){}", id, missing.size, embedMs,
-            "%.1f".format(missing.size * 1000.0 / embedMs.coerceAtLeast(1)),
-            if (reused > 0) ", $reused unchanged chunks kept their embeddings" else "")
+        log.info("Embedded book {}: {} chunks in {} ms ({} chunks/s); {} unchanged, {} rewritten with their embeddings, {} dropped",
+            id, missing.size, embedMs, "%.1f".format(missing.size * 1000.0 / embedMs.coerceAtLeast(1)),
+            keep.size, toWrite.size - missing.size, stored.size - keep.size)
         val all = vectors.map { checkNotNull(it) { "missing embedding" } }
         all.firstOrNull()?.let {
             check(it.size == props.embedding.dimensions) { "embedding has ${it.size} dims, expected ${props.embedding.dimensions}" }
         }
         val dependents = books.duplicatesOf(id)
+        val storeStart = System.nanoTime()
         tx.executeWithoutResult {
-            chunks.deleteForBook(id)
-            chunks.insert(id, row.book.title, row.book.authors, ex.chunks, all)
+            chunks.deleteForBookExcept(id, keep)
+            chunks.insert(id, row.book.title, row.book.authors, toWrite, all)
             books.markIndexed(id, ex.chunks.size, ex.format)
         }
+        log.debug("Stored book {} in {} ms", id, (System.nanoTime() - storeStart) / 1_000_000)
         sessionChunks.addAndGet(ex.chunks.size.toLong())
         sessionProcessed.incrementAndGet()
         // its text changed: books that were copies of it are decided again (cheap if they still are)
-        if (dependents.isNotEmpty() && (missing.isNotEmpty() || previous.size != inputs.size)) {
+        if (dependents.isNotEmpty() && (toWrite.isNotEmpty() || keep.size != stored.size)) {
             books.requeue(dependents)
             dependents.forEach(::enqueue)
         }

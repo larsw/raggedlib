@@ -61,32 +61,38 @@ class ChunkStore(
         ) { rs, _ -> Duplicates.Match(rs.getLong(1), rs.getInt(2), rs.getInt(3)) }
     }
 
-    /**
-     * Stored embeddings of [bookId]'s passages, by the text they were computed from ([embeddingInput] of the
-     * stored section and content under [title]); only rows stored under that title, by the current embedding model
-     * (rows from before the model was recorded were made by `raggedlib.embedding.legacy-model`).
-     */
     /** Number of different passage texts [bookId] has. */
     fun distinctPassages(bookId: Long): Int = named.queryForObject(
         "select count(distinct md5(content)) from vector_store where book_id = :id", mapOf("id" to bookId), Int::class.java,
     ) ?: 0
 
-    fun embeddingsByInput(bookId: Long, title: String, embeddingInput: (Chunk) -> String): Map<String, FloatArray> {
-        val out = HashMap<String, FloatArray>()
-        named.query(
-            """
-            select section, content, embedding::text from vector_store
-            where book_id = :id and metadata->>'title' = :title
-              and coalesce(metadata->>'embeddingModel', :legacy) = :model
-            """.trimIndent(),
-            MapSqlParameterSource("id", bookId).addValue("title", title).addValue("model", embeddingModel)
-                .addValue("legacy", legacyModel),
-        ) { rs ->
-            val input = embeddingInput(Chunk(0, rs.getString(2), null, rs.getString(1)))
-            out[input] = parseVector(rs.getString(3))
-        }
-        return out
+    /** A stored passage whose embedding is still valid (same title and embedding model). */
+    class StoredChunk(val id: UUID, val content: String, val section: String?, val page: Int?, val embedding: FloatArray)
+
+    /**
+     * [bookId]'s stored passages whose embedding can be reused: stored under [title] (it is part of the embedding
+     * input) by the current embedding model (rows from before the model was recorded were made by
+     * `raggedlib.embedding.legacy-model`).
+     */
+    fun reusable(bookId: Long, title: String): List<StoredChunk> = named.query(
+        """
+        select id, content, section, page, embedding::text from vector_store
+        where book_id = :id and metadata->>'title' = :title
+          and coalesce(metadata->>'embeddingModel', :legacy) = :model
+        """.trimIndent(),
+        MapSqlParameterSource("id", bookId).addValue("title", title).addValue("model", embeddingModel)
+            .addValue("legacy", legacyModel),
+    ) { rs, _ ->
+        StoredChunk(rs.getObject(1) as UUID, rs.getString(2), rs.getString(3), rs.getObject(4) as Int?, parseVector(rs.getString(5)))
     }
+
+    /** Deletes [bookId]'s passages except [keep]. */
+    fun deleteForBookExcept(bookId: Long, keep: Collection<UUID>): Int =
+        if (keep.isEmpty()) deleteForBook(bookId)
+        else named.update(
+            "delete from vector_store where book_id = :id and not (id = any(:keep))",
+            MapSqlParameterSource("id", bookId).addValue("keep", keep.toTypedArray()),
+        )
 
     internal companion object {
         /** pgvector's text form, "[0.1,-2,3e-05]". */
