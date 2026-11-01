@@ -1,9 +1,10 @@
-import { Button, Classes, Tooltip } from "@blueprintjs/core";
+import { Button, Classes, Icon } from "@blueprintjs/core";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useApp } from "../AppContext";
 import { ScopeBar } from "../components/scope/ScopeBar";
 import { SourcesPanel } from "../components/SourcesPanel";
 import { useChat, type ChatTurn } from "../hooks/useChat";
+import { useSidePanel } from "../hooks/useSidePanel";
 import { AskEmptyState } from "./ask/AskEmptyState";
 import { ChatInput } from "./ask/ChatInput";
 import { ChatTurnView } from "./ask/ChatTurnView";
@@ -12,7 +13,10 @@ export function AskView() {
   const { scope, system } = useApp();
   const { turns, busy, send, stop, clear, remove } = useChat();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [panelOpen, setPanelOpen] = useState(true);
+  const viewRef = useRef<HTMLDivElement>(null);
+  const panel = useSidePanel(viewRef);
+  const panelOpen = !panel.collapsed;
+  const { setCollapsed } = panel;
   const [focus, setFocus] = useState<{ ref: number; nonce: number } | null>(null);
 
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -33,14 +37,14 @@ export function AskView() {
 
   const onSelect = useCallback((id: string) => {
     setSelectedId(id);
-    setPanelOpen(true);
-  }, []);
+    setCollapsed(false);
+  }, [setCollapsed]);
 
   const onCite = useCallback((turnId: string, ref: number) => {
     setSelectedId(turnId);
-    setPanelOpen(true);
+    setCollapsed(false);
     setFocus({ ref, nonce: Date.now() });
-  }, []);
+  }, [setCollapsed]);
 
   const onRetry = useCallback((turn: ChatTurn) => ask(turn.question), [ask]);
 
@@ -66,7 +70,7 @@ export function AskView() {
   };
 
   return (
-    <div className="ask-view">
+    <div className={`ask-view${panel.dragging ? " is-resizing" : ""}`} ref={viewRef}>
       <section className="ask-main" aria-label="Conversation">
         <div className="view-toolbar">
           <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
@@ -81,11 +85,6 @@ export function AskView() {
             disabled={turns.length === 0}
             onClick={newConversation}
           />
-          {!panelOpen && (
-            <Tooltip content="Show sources" placement="bottom-end">
-              <Button size="small" variant="minimal" icon="manual" aria-label="Show sources panel" onClick={() => setPanelOpen(true)} />
-            </Tooltip>
-          )}
         </div>
         <div className="chat-scroll" ref={scrollRef} onScroll={onScroll}>
           {turns.length === 0 ? (
@@ -111,8 +110,23 @@ export function AskView() {
           <ChatInput busy={busy} onSend={ask} onStop={stop} />
         </div>
       </section>
-      {panelOpen && (
-        <SourcesPanel
+      {panel.collapsed ? (
+        <button
+          type="button"
+          className="sources-rail"
+          onClick={() => panel.setCollapsed(false)}
+          aria-label={`Show sources${selected?.sources.length ? ` (${selected.sources.length} passages)` : ""}`}
+          title="Show sources"
+        >
+          <Icon icon="chevron-left" size={14} />
+          <span className="sources-rail-label">
+            Sources{selected?.sources.length ? ` · ${selected.sources.length}` : ""}
+          </span>
+        </button>
+      ) : (
+        <div className="sources-dock" style={{ width: panel.width }}>
+          <div className="sources-resize-handle" {...panel.handleProps} />
+          <SourcesPanel
           turnId={selected?.id ?? null}
           question={turns.length > 1 ? selected?.question : undefined}
           sources={selected?.sources ?? []}
@@ -123,8 +137,9 @@ export function AskView() {
           correctedQuery={selected?.correctedQuery}
           onAskAsTyped={selected && !busy ? () => ask(selected.question, { correct: false }) : undefined}
           focus={focus}
-          onClose={() => setPanelOpen(false)}
-        />
+          onCollapse={() => panel.setCollapsed(true)}
+          />
+        </div>
       )}
     </div>
   );

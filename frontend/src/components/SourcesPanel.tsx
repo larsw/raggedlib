@@ -1,4 +1,4 @@
-import { Button, Classes, NonIdealState, NonIdealStateIconSize, Spinner } from "@blueprintjs/core";
+import { Button, Classes, NonIdealState, NonIdealStateIconSize, Spinner, Tooltip } from "@blueprintjs/core";
 import { useEffect, useMemo } from "react";
 import type { SourceChunk } from "../api/types";
 import { citedRefs } from "../lib/citations";
@@ -20,7 +20,7 @@ interface Props {
   onAskAsTyped?: () => void;
   /** ref to scroll to & flash; `nonce` changes on every click so repeated clicks re-trigger */
   focus: { ref: number; nonce: number } | null;
-  onClose: () => void;
+  onCollapse: () => void;
 }
 
 export const sourceDomId = (turnId: string, ref: number) => `src-${turnId}-${ref}`;
@@ -37,7 +37,7 @@ export function SourcesPanel({
   correctedQuery,
   onAskAsTyped,
   focus,
-  onClose,
+  onCollapse,
 }: Props) {
   const cited = useMemo(
     () => new Set(citedRefs(answer, (r) => sources.some((s) => s.ref === r))),
@@ -79,7 +79,9 @@ export function SourcesPanel({
             </div>
           )}
         </div>
-        <Button variant="minimal" icon="cross" aria-label="Hide sources panel" onClick={onClose} />
+        <Tooltip content="Collapse" placement="bottom-end">
+          <Button variant="minimal" icon="chevron-right" aria-label="Collapse sources panel" onClick={onCollapse} />
+        </Tooltip>
       </div>
       <div className="sources-panel-list">
         {loading && sources.length === 0 ? (

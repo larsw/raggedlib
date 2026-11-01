@@ -37,4 +37,5 @@ export const STORAGE_KEYS = {
   theme: "raggedlib.theme",
   conversation: "raggedlib.conversation.v1",
   scope: "raggedlib.scope.v1",
+  sourcesPanel: "raggedlib.sourcesPanel.v1",
 } as const;
