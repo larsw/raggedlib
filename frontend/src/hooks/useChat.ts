@@ -19,6 +19,10 @@ export interface ChatTurn {
   elapsedMs?: number;
   model?: string;
   scopeLabel?: string;
+  /** reranking was requested for this turn (scope setting at send time) */
+  rerank?: boolean;
+  /** the sources event arrived, so an empty `sources` means retrieval found nothing */
+  retrieved?: boolean;
   createdAt: string;
 }
 
@@ -96,6 +100,7 @@ export function useChat() {
             status: "pending",
             model: scope.model || undefined,
             scopeLabel: scopeLabel(scope),
+            rerank: scope.rerank,
             createdAt: new Date().toISOString(),
           },
         ]);
@@ -105,6 +110,7 @@ export function useChat() {
         topK: scope.topK,
         ...(scope.books.length ? { bookIds: scope.books.map((b) => b.id) } : {}),
         ...(scope.tags.length ? { tags: scope.tags } : {}),
+        rerank: scope.rerank,
         ...(history.length ? { history } : {}),
         ...(scope.model ? { model: scope.model } : {}),
       };
@@ -123,7 +129,7 @@ export function useChat() {
         for await (const ev of api.chat(req, ctrl.signal)) {
           switch (ev.type) {
             case "sources":
-              update(id, () => ({ sources: ev.sources, status: "streaming" }));
+              update(id, () => ({ sources: ev.sources, retrieved: true, status: "streaming" }));
               break;
             case "token":
               answer += ev.t;

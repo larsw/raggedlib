@@ -37,7 +37,9 @@ interface SourceChunk {        // one retrieved passage
   page: number | null;         // 1-based page (PDF only)
   section: string | null;      // nearest heading (EPUB etc.)
   text: string;                // chunk text
-  score: number;               // fused relevance score, higher = better
+  score: number;               // higher = better; scale depends on scoreKind
+  scoreKind: "RERANK" | "FUSED"; // RERANK: reranker relevance 0..1, comparable across queries;
+                               // FUSED: weighted-RRF score, only meaningful within one result list
 }
 
 interface IngestStatus {
@@ -63,6 +65,9 @@ interface SystemInfo {
   embeddingModel: string;
   embeddingDimensions: number;
   availableChatModels: string[];        // from ollama /api/tags, minus embedding models
+  rerankEnabled: boolean;               // server has a reranker configured (raggedlib.rerank.enabled)
+  rerankerUrl: string;
+  rerankerReachable: boolean;           // GET <rerankerUrl>/health answered
 }
 ```
 
@@ -81,7 +86,7 @@ interface SystemInfo {
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
 | POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s) |
-| POST | `/api/search` | Body `SearchRequest` → `SourceChunk[]` (hybrid vector + full-text, no LLM) |
+| POST | `/api/search` | Body `SearchRequest` → `SourceChunk[]` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so the list can be shorter than `topK` or empty. |
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
 
 ```ts
@@ -90,6 +95,7 @@ interface SearchRequest {
   topK?: number;            // default 8, max 50
   bookIds?: number[];       // restrict to these books
   tags?: string[];          // restrict to books having ANY of these tags
+  rerank?: boolean;         // cross-encoder reranking, default true; ignored (fused order) if the server has none
 }
 
 interface ChatRequest extends SearchRequest {

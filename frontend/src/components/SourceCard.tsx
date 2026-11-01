@@ -53,7 +53,14 @@ export function SourceCard({ source, id, highlighted, dimmed, terms, defaultExpa
               <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} source-meta`}>
                 <span className={Classes.TEXT_OVERFLOW_ELLIPSIS}>{formatAuthors(source.authors)}</span>
                 {loc && <span className="source-loc" title={loc}>{loc}</span>}
-                {showScore && <span className="source-score">score {source.score.toFixed(3)}</span>}
+                {showScore && (
+                  <span
+                    className="source-score"
+                    title={source.scoreKind === "RERANK" ? "Reranker relevance" : "Fused rank score (relative to this query)"}
+                  >
+                    {source.scoreKind === "RERANK" ? `relevance ${Math.round(source.score * 100)}%` : `score ${source.score.toFixed(3)}`}
+                  </span>
+                )}
               </div>
             </div>
           </div>

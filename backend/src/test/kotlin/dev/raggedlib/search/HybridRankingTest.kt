@@ -64,4 +64,15 @@ class HybridRankingTest {
         assertEquals(listOf("x1", "x2", "x3", "x4", "y"), HybridRanking.capPerBook(fused, 3, 5).map { it.id })
         assertEquals(5, HybridRanking.capPerBook(fused, null, 5).size)
     }
+
+    @Test
+    fun `rerank reorders by reranker score, applies the cutoff and keeps fused order on ties`() {
+        val fused = listOf("a" to 1L, "b" to 2L, "c" to 3L, "d" to 4L, "e" to 5L)
+            .mapIndexed { i, (id, book) -> HybridRanking.Fused(id, book, 1.0 / (61 + i)) }
+        val scores = doubleArrayOf(0.30, 0.95, 0.05, Double.NaN, 0.30)
+        val out = HybridRanking.rerank(fused, scores, 0.10)
+        assertEquals(listOf("b", "a", "e"), out.map { it.id })   // c below cutoff, d not finite; a before e (tie)
+        assertEquals(listOf(0.95, 0.30, 0.30), out.map { it.score })
+        assertEquals(emptyList(), HybridRanking.rerank(fused, DoubleArray(5) { 0.01 }, 0.10))
+    }
 }

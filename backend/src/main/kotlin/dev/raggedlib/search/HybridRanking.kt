@@ -37,6 +37,18 @@ object HybridRanking {
     }
 
     /**
+     * Re-orders [candidates] by reranker [scores] (same order and size), each candidate taking its reranker score;
+     * drops those below [minScore] or not finite. Stable: equal scores keep the fused order.
+     */
+    fun rerank(candidates: List<Fused>, scores: DoubleArray, minScore: Double): List<Fused> {
+        require(scores.size == candidates.size) { "${scores.size} scores for ${candidates.size} candidates" }
+        return candidates.indices
+            .filter { scores[it].isFinite() && scores[it] >= minScore }
+            .sortedByDescending { scores[it] }
+            .map { candidates[it].copy(score = scores[it]) }
+    }
+
+    /**
      * Drops candidates nothing vouches for: non-positive scores, and scores below [minRelative] × the best one.
      * Must run before [capPerBook], whose diversity pass otherwise fills slots with near-zero hits from other
      * books ahead of strong hits from a capped book. Relative, so a query whose results are all weak still

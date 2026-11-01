@@ -23,6 +23,7 @@ data class ChatRequest(
     val tags: List<String>? = null,
     val history: List<HistoryMessage>? = null,
     val model: String? = null,
+    val rerank: Boolean? = null,
 )
 
 @Service
@@ -55,7 +56,7 @@ class ChatService(
     }
 
     fun retrieve(req: ChatRequest, query: String): List<SourceChunk> =
-        search.search(SearchRequest(query, req.topK, req.bookIds, req.tags))
+        search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.rerank))
 
     fun stream(req: ChatRequest, sources: List<SourceChunk>): Flux<String> {
         val messages = mutableListOf<Message>()

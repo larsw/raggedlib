@@ -10,6 +10,10 @@ interface Props {
   sources: SourceChunk[];
   answer: string;
   loading: boolean;
+  /** retrieval finished for this turn (an empty list then means "nothing found", not "nothing yet") */
+  retrieved?: boolean;
+  /** the reranker took part in that retrieval */
+  reranked?: boolean;
   /** ref to scroll to & flash; `nonce` changes on every click so repeated clicks re-trigger */
   focus: { ref: number; nonce: number } | null;
   onClose: () => void;
@@ -18,7 +22,7 @@ interface Props {
 export const sourceDomId = (turnId: string, ref: number) => `src-${turnId}-${ref}`;
 
 /** Right-hand panel listing the passages retrieved for the selected answer. */
-export function SourcesPanel({ turnId, question, sources, answer, loading, focus, onClose }: Props) {
+export function SourcesPanel({ turnId, question, sources, answer, loading, retrieved, reranked, focus, onClose }: Props) {
   const cited = useMemo(
     () => new Set(citedRefs(answer, (r) => sources.some((s) => s.ref === r))),
     [answer, sources],
@@ -52,6 +56,16 @@ export function SourcesPanel({ turnId, question, sources, answer, loading, focus
       <div className="sources-panel-list">
         {loading && sources.length === 0 ? (
           <NonIdealState icon={<Spinner size={24} />} description="Retrieving passages…" />
+        ) : sources.length === 0 && retrieved ? (
+          <NonIdealState
+            icon="inbox-search"
+            iconSize={NonIdealStateIconSize.SMALL}
+            description={
+              reranked
+                ? "No passage was relevant enough to the reranker. Try other terms, widen the scope, or turn reranking off."
+                : "No passages matched this question. Try other terms or widen the scope."
+            }
+          />
         ) : sources.length === 0 ? (
           <NonIdealState icon="manual" iconSize={NonIdealStateIconSize.SMALL} description="Passages used for an answer show up here." />
         ) : (

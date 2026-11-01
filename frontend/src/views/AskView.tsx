@@ -9,7 +9,7 @@ import { ChatInput } from "./ask/ChatInput";
 import { ChatTurnView } from "./ask/ChatTurnView";
 
 export function AskView() {
-  const { scope } = useApp();
+  const { scope, system } = useApp();
   const { turns, busy, send, stop, clear, remove } = useChat();
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [panelOpen, setPanelOpen] = useState(true);
@@ -118,6 +118,8 @@ export function AskView() {
           sources={selected?.sources ?? []}
           answer={selected?.answer ?? ""}
           loading={selected?.status === "pending" || selected?.status === "streaming"}
+          retrieved={!!selected?.retrieved}
+          reranked={!!selected?.rerank && !!system?.rerankEnabled && !!system.rerankerReachable}
           focus={focus}
           onClose={() => setPanelOpen(false)}
         />

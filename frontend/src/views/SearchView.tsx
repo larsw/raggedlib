@@ -10,9 +10,11 @@ import { queryTerms } from "../lib/highlight";
 
 /** Plain hybrid passage search (no LLM). */
 export function SearchView() {
-  const { scope } = useApp();
+  const { scope, system } = useApp();
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState<string | null>(null);
+  /** whether the reranker took part in the search being shown (the toggle may have changed since) */
+  const [reranked, setReranked] = useState(false);
   const [results, setResults] = useState<SourceChunk[] | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>();
@@ -29,11 +31,13 @@ export function SearchView() {
     setLoading(true);
     setError(undefined);
     setSubmitted(text);
+    setReranked(scope.rerank && !!system?.rerankEnabled && !!system.rerankerReachable);
     const req: SearchRequest = {
       query: text,
       topK: scope.topK,
       ...(scope.books.length ? { bookIds: scope.books.map((b) => b.id) } : {}),
       ...(scope.tags.length ? { tags: scope.tags } : {}),
+      rerank: scope.rerank,
     };
     try {
       const res = await api.search(req, ctrl.signal);
@@ -83,11 +87,19 @@ export function SearchView() {
             <NonIdealState
               icon="search"
               title="Hybrid passage search"
-              description="Vector + full-text search over every indexed passage — no LLM involved. Fast for finding where a topic is covered."
+              description="Vector + full-text search over every indexed passage, re-scored by a small cross-encoder — no chat model involved. Fast for finding where a topic is covered."
             />
           )
         ) : results.length === 0 ? (
-          <NonIdealState icon="inbox-search" title="No passages found" description="Try other terms or widen the scope." />
+          <NonIdealState
+            icon="inbox-search"
+            title="No passages found"
+            description={
+              reranked
+                ? "Nothing in the library looked relevant enough to the reranker. Try other terms, widen the scope, or turn reranking off."
+                : "Try other terms or widen the scope."
+            }
+          />
         ) : (
           <>
             <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} results-summary`}>

@@ -18,6 +18,7 @@ import java.util.concurrent.Executors
  *     misreads the query) can't outvote a strong keyword match just by holding rank 1,
  *  2. strict full-text top-N (all terms, websearch syntax) — weight 1,
  *  3. a keyword fallback when (2) finds too little — weighted by term coverage, see [KeywordFallback].
+ * The best fused candidates are then re-scored by a cross-encoder ([Reranker]) when one is available.
  */
 @Service
 class SearchService(
@@ -26,6 +27,7 @@ class SearchService(
     private val embeddingModel: EmbeddingModel,
     private val tx: TransactionTemplate,
     private val termStats: TermStatistics,
+    private val reranker: Reranker,
 ) {
     /** [weight] scales the row's RRF contribution (see [HybridRanking.rrf]). */
     private data class Row(val id: String, val bookId: Long, val title: String, val authors: List<String>,
@@ -72,10 +74,35 @@ class SearchService(
         )
         val cap = if (bookIds != null && bookIds.size <= 2) null else s.maxChunksPerBook
         val kept = HybridRanking.dropWeak(fused, s.minRelativeScore)
-        return HybridRanking.capPerBook(kept, cap, topK).mapIndexed { i, f ->
+        val reranked = if (req.rerank != false && reranker.enabled) rerank(query, kept, byId, topK) else null
+        val scoreKind = if (reranked != null) ScoreKind.RERANK else ScoreKind.FUSED
+        return HybridRanking.capPerBook(reranked ?: kept, cap, topK).mapIndexed { i, f ->
             val r = byId.getValue(f.id)
-            SourceChunk(i + 1, r.id, r.bookId, r.title, r.authors, r.page, r.section, r.text, Math.round(f.score * 1e6) / 1e6)
+            SourceChunk(i + 1, r.id, r.bookId, r.title, r.authors, r.page, r.section, r.text,
+                Math.round(f.score * 1e6) / 1e6, scoreKind)
         }
+    }
+
+    /**
+     * Cross-encoder pass over the best fused candidates (see [Reranker]): new order, reranker scores, and an
+     * absolute cutoff. Candidates beyond the reranked head are dropped — the fused tail has never held anything
+     * the reranker would rank above it in evaluation. Null if the reranker is unavailable.
+     */
+    private fun rerank(query: String, kept: List<HybridRanking.Fused>, byId: Map<String, Row>, topK: Int): List<HybridRanking.Fused>? {
+        val r = props.rerank
+        val head = kept.take(maxOf(r.candidates, topK))
+        if (head.isEmpty()) return head
+        val documents = head.map { f ->
+            val row = byId.getValue(f.id)
+            // the same text the reranker was evaluated with: where the passage comes from, then the passage
+            buildString {
+                append(row.title)
+                if (!row.section.isNullOrBlank()) append(" — ").append(row.section)
+                append('\n').append(row.text.take(r.maxDocumentChars))
+            }
+        }
+        val scores = reranker.score(query.take(r.maxQueryChars), documents) ?: return null
+        return HybridRanking.rerank(head, scores, r.minScore)
     }
 
     private fun vectorSearch(embedding: FloatArray, filterSql: String, base: MapSqlParameterSource, limit: Int): List<Row> {

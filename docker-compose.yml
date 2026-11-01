@@ -1,7 +1,7 @@
 name: raggedlib
 
 # Full stack:  docker compose up -d --build      → http://localhost:3000
-# Infra only (run backend/frontend on the host):  docker compose up -d postgres ollama models
+# Infra only (run backend/frontend on the host):  docker compose up -d postgres ollama models reranker
 
 x-models: &models
   EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
@@ -47,6 +47,25 @@ services:
     devices:
       - nvidia.com/gpu=all
 
+  # Cross-encoder reranker: bge-reranker-v2-m3 (Q8_0, ~0.7 GB VRAM) behind llama.cpp's /v1/rerank. The GGUF is
+  # downloaded on first start into the reranker volume. Search falls back to the fused order while it is down,
+  # so it doesn't gate the backend.
+  reranker:
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda-b12030
+    restart: unless-stopped
+    command: ["-hf", "gpustack/bge-reranker-v2-m3-GGUF:Q8_0", "--reranking", "-ngl", "99",
+              "-c", "16384", "-np", "4", "-b", "4096", "-ub", "4096", "--host", "0.0.0.0", "--port", "8080"]
+    ports:
+      - "127.0.0.1:8091:8080"
+    volumes:
+      - reranker:/root/.cache
+    healthcheck:
+      test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
+      interval: 10s
+      retries: 60
+    devices:
+      - nvidia.com/gpu=all
+
   # One-shot: pull the embedding + chat models only if missing, so a registry hiccup can't block startup.
   models:
     image: ollama/ollama:latest
@@ -70,6 +89,8 @@ services:
         condition: service_healthy
       models:
         condition: service_completed_successfully
+      reranker:
+        condition: service_started
     environment:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/raggedlib
       SPRING_DATASOURCE_USERNAME: raggedlib
@@ -78,6 +99,7 @@ services:
       SPRING_AI_OLLAMA_CHAT_MODEL: ${CHAT_MODEL:-qwen3.5:9b}
       SPRING_AI_OLLAMA_EMBEDDING_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
       RAGGEDLIB_LIBRARY_PATH: /library
+      RAGGEDLIB_RERANK_BASE_URL: http://reranker:8080
     volumes:
       - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library:ro
     ports:
@@ -98,3 +120,4 @@ services:
 volumes:
   pgdata:
   ollama:
+  reranker:

@@ -94,6 +94,20 @@ raggedlib:
     fallback-common-term-frequency: 0.05
     fallback-max-terms: 12
     term-stats-ttl-seconds: 600
+  # cross-encoder reranking of the fused top candidates (llama.cpp /v1/rerank, bge-reranker-v2-m3); see Reranker.kt
+  rerank:
+    enabled: true
+    base-url: http://localhost:8091
+    candidates: 30
+    min-score: 0.10              # absolute relevance cutoff; lets a query with no real match come back empty
+    sigmoid: true                # llama.cpp returns bge-reranker's raw logit
+    max-query-chars: 1000
+    max-document-chars: 2000
+    connect-timeout: 1s
+    timeout: 5s
+    max-concurrent: 4            # match the reranker's -np slots
+    queue-wait: 2s               # no slot within this: fused order for that search
+    cooldown: 15s                # after a failure, skip the reranker this long
   chat:
     num-ctx: 16384
     temperature: 0.3

@@ -14,12 +14,14 @@ export interface Scope {
   /** "" = backend default chat model */
   model: string;
   topK: number;
+  /** Cross-encoder reranking of the retrieved passages (a preference: "Reset scope" keeps it). */
+  rerank: boolean;
 }
 
 export const DEFAULT_TOP_K = 8;
 export const MAX_TOP_K = 50;
 
-export const EMPTY_SCOPE: Scope = { books: [], tags: [], model: "", topK: DEFAULT_TOP_K };
+export const EMPTY_SCOPE: Scope = { books: [], tags: [], model: "", topK: DEFAULT_TOP_K, rerank: true };
 
 function sanitize(raw: Partial<Scope> | null): Scope {
   if (!raw || typeof raw !== "object") return EMPTY_SCOPE;
@@ -29,6 +31,7 @@ function sanitize(raw: Partial<Scope> | null): Scope {
     model: typeof raw.model === "string" ? raw.model : "",
     topK:
       typeof raw.topK === "number" && raw.topK >= 1 && raw.topK <= MAX_TOP_K ? Math.round(raw.topK) : DEFAULT_TOP_K,
+    rerank: typeof raw.rerank === "boolean" ? raw.rerank : true,
   };
 }
 

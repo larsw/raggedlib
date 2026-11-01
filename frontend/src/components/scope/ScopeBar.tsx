@@ -1,4 +1,4 @@
-import { Button, ControlGroup, HTMLSelect, NumericInput, Tooltip } from "@blueprintjs/core";
+import { AnchorButton, Button, ControlGroup, HTMLSelect, NumericInput, Tooltip } from "@blueprintjs/core";
 import { useApp } from "../../AppContext";
 import { DEFAULT_TOP_K, MAX_TOP_K, scopeIsEmpty } from "../../hooks/useScope";
 import { BookMultiSelect } from "./BookMultiSelect";
@@ -16,6 +16,10 @@ export function ScopeBar({ showModel = true }: { showModel?: boolean }) {
   if (scope.model && !modelOptions.some((o) => o.value === scope.model)) {
     modelOptions.push({ value: scope.model, label: `${scope.model} (unavailable)` });
   }
+
+  // unknown (system info still loading) counts as available, so a stored "on" isn't shown as off meanwhile
+  const rerankUnavailable = system !== undefined && !system.rerankEnabled;
+  const rerankOn = scope.rerank && !rerankUnavailable;
 
   return (
     <div className="scope-bar">
@@ -49,6 +53,31 @@ export function ScopeBar({ showModel = true }: { showModel?: boolean }) {
             onValueChange={(v) => {
               if (Number.isFinite(v) && v >= 1 && v <= MAX_TOP_K) setScope((s) => ({ ...s, topK: Math.round(v) }));
             }}
+          />
+        </Tooltip>
+        <Tooltip
+          content={
+            !system
+              ? "Checking whether reranking is available…"
+              : !system.rerankEnabled
+                ? "Reranking is not configured on the server"
+                : !system.rerankerReachable
+                  ? `Reranker unreachable (${system.rerankerUrl}) — results use the fused order`
+                  : scope.rerank
+                    ? "Reranking on: a cross-encoder re-scores the passages and drops irrelevant ones"
+                    : "Reranking off: fused vector + full-text order"
+          }
+          placement="top"
+        >
+          {/* AnchorButton: unlike a disabled Button it still gets hover/focus, so the tooltip can say why */}
+          <AnchorButton
+            icon="sort"
+            aria-label="Rerank passages"
+            aria-pressed={rerankOn}
+            active={rerankOn}
+            disabled={rerankUnavailable}
+            tabIndex={0}
+            onClick={() => setScope((s) => ({ ...s, rerank: !s.rerank }))}
           />
         </Tooltip>
         <Tooltip content="Reset scope" placement="top">

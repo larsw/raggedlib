@@ -1,6 +1,7 @@
 package dev.raggedlib.system
 
 import dev.raggedlib.config.RaggedlibProperties
+import dev.raggedlib.search.Reranker
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.client.SimpleClientHttpRequestFactory
 import org.springframework.web.bind.annotation.GetMapping
@@ -17,6 +18,9 @@ data class SystemInfo(
     val embeddingModel: String,
     val embeddingDimensions: Int,
     val availableChatModels: List<String>,
+    val rerankEnabled: Boolean,
+    val rerankerUrl: String,
+    val rerankerReachable: Boolean,
 )
 
 @RestController
@@ -27,6 +31,7 @@ class SystemController(
     @Value("\${spring.ai.ollama.chat.model}") private val chatModel: String,
     @Value("\${spring.ai.ollama.embedding.model}") private val embeddingModel: String,
     restClientBuilder: RestClient.Builder,
+    private val reranker: Reranker,
 ) {
     private val client = restClientBuilder.clone()
         .baseUrl(ollamaUrl)
@@ -56,6 +61,9 @@ class SystemController(
             embeddingModel = embeddingModel,
             embeddingDimensions = props.embedding.dimensions,
             availableChatModels = chatModels,
+            rerankEnabled = reranker.enabled,
+            rerankerUrl = props.rerank.baseUrl,
+            rerankerReachable = reranker.enabled && reranker.reachable(),
         )
     }
 }

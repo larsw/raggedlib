@@ -46,8 +46,12 @@ export interface SourceChunk {
   page: number | null; // 1-based page (PDF only)
   section: string | null; // nearest heading (EPUB etc.)
   text: string; // chunk text
-  score: number; // fused relevance score, higher = better
+  score: number; // higher = better; scale depends on scoreKind
+  scoreKind: ScoreKind;
 }
+
+/** RERANK: cross-encoder relevance 0..1, comparable across queries. FUSED: weighted-RRF score, relative only. */
+export type ScoreKind = "RERANK" | "FUSED";
 
 export type IngestStage = "EXTRACTING" | "EMBEDDING";
 
@@ -74,6 +78,9 @@ export interface SystemInfo {
   embeddingModel: string;
   embeddingDimensions: number;
   availableChatModels: string[]; // from ollama /api/tags, minus embedding models
+  rerankEnabled: boolean; // server has a reranker configured
+  rerankerUrl: string;
+  rerankerReachable: boolean;
 }
 
 export interface SyncResult {
@@ -109,6 +116,7 @@ export interface SearchRequest {
   topK?: number; // default 8, max 50
   bookIds?: number[]; // restrict to these books
   tags?: string[]; // restrict to books having ANY of these tags
+  rerank?: boolean; // cross-encoder reranking; default on when the server has a reranker
 }
 
 export interface ChatHistoryMessage {

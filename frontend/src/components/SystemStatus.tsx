@@ -27,7 +27,8 @@ export function SystemStatus() {
       ? "Backend unreachable on :8080 — start it to use raggedlib."
       : `Backend error: ${errorMessage(systemError)}`;
   } else if (system) {
-    intent = system.ollamaReachable ? Intent.SUCCESS : Intent.WARNING;
+    const rerankerOk = !system.rerankEnabled || system.rerankerReachable;
+    intent = system.ollamaReachable && rerankerOk ? Intent.SUCCESS : Intent.WARNING;
     label = system.chatModel;
     content = (
       <table className="status-table">
@@ -37,6 +38,16 @@ export function SystemStatus() {
           <Row label="Chat model" value={system.chatModel} />
           <Row label="Embeddings" value={`${system.embeddingModel} (${system.embeddingDimensions}d)`} />
           <Row label="Models" value={system.availableChatModels.length ? system.availableChatModels.join(", ") : "—"} />
+          <Row
+            label="Reranker"
+            value={
+              !system.rerankEnabled
+                ? "off"
+                : system.rerankerReachable
+                  ? `reachable (${system.rerankerUrl})`
+                  : `UNREACHABLE (${system.rerankerUrl})`
+            }
+          />
           <Row label="Library" value={system.libraryPath} />
         </tbody>
       </table>
