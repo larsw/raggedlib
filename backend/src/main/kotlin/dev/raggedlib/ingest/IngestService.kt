@@ -58,6 +58,7 @@ class IngestService(
         val inFlight = AtomicInteger()
         fun next(): Long? = extra.poll() ?: pending.poll()
         fun remaining(): Int = pending.size + extra.size
+        fun remainingIds(): List<Long> = pending.toList() + extra.toList()
     }
 
     private val lock = Any()
@@ -68,7 +69,13 @@ class IngestService(
     @Volatile private var startedAt: Instant? = null
     private val sessionProcessed = AtomicInteger()
     private val sessionChunks = AtomicLong()
+    /** Passages embedded per second (GPU work), shown as throughput. */
     private val rate = RateMeter()
+    /**
+     * Passages of finished books per second, embedded or not, for the ETA: re-indexing mostly reuses embeddings, so
+     * the embedding rate says little about how fast books get done. A longer window evens out book sizes.
+     */
+    private val progress = RateMeter(windowMillis = 600_000)
     private val active = ConcurrentHashMap<Long, ActiveBook>()
     private val recentErrors = ConcurrentLinkedDeque<IngestError>()
     private val chunker = with(props.chunking) { Chunker(targetChars, maxChars, overlapChars, minChars) }
@@ -119,6 +126,7 @@ class IngestService(
                 sessionProcessed.set(0)
                 sessionChunks.set(0)
                 rate.reset()
+                progress.reset()
                 log.info("Ingestion started: {} books", ids.size)
                 Thread.ofPlatform().name("ingest-coordinator").daemon(true).start { coordinate(r) }
             }
@@ -150,10 +158,12 @@ class IngestService(
         val counts = books.statusCounts()
         val r = run
         val perSec = if (r != null) rate.perSecond() else 0.0
-        val eta = if (r != null && perSec > 0.01) {
+        val done = if (r != null) progress.perSecond() else 0.0
+        val eta = if (r != null && done > 0.01) {
             val avg = books.avgChunksPerIndexedBook() ?: 300.0
-            val inFlightRemaining = active.values.sumOf { it.chunks ?: avg.toInt() }
-            ((r.remaining() * avg + inFlightRemaining) / perSec).toLong()
+            val queued = books.remainingPassages(r.remainingIds(), avg)
+            val inFlight = active.values.sumOf { it.chunks?.toDouble() ?: avg }
+            ((queued + inFlight) / done).toLong()
         } else null
         return IngestStatus(
             running = r != null,
@@ -350,6 +360,7 @@ class IngestService(
         log.debug("Stored book {} in {} ms", id, (System.nanoTime() - storeStart) / 1_000_000)
         sessionChunks.addAndGet(ex.chunks.size.toLong())
         sessionProcessed.incrementAndGet()
+        progress.record(ex.chunks.size)
         // its text changed: books that were copies of it are decided again (cheap if they still are)
         if (dependents.isNotEmpty() && (toWrite.isNotEmpty() || keep.size != stored.size)) {
             books.requeue(dependents)
@@ -405,6 +416,7 @@ class IngestService(
         log.info("Book {} '{}' duplicates book {} '{}' ({}% of {} passages); not indexed", id, ex.row.book.title.take(60),
             keeper.bookId, keeperTitle.take(60), share, hashes.size)
         sessionProcessed.incrementAndGet()
+        progress.record(ex.chunks.size)
         return true
     }
 

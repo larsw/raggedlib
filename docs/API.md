@@ -53,8 +53,9 @@ interface IngestStatus {
   totalChunks: number;                  // rows in vector store
   sessionProcessed: number;             // books finished (indexed+failed+skipped) in the current/last run
   sessionChunks: number;                // chunks embedded in the current/last run
-  chunksPerSecond: number;              // rolling rate over the last ~60s
-  etaSeconds: number | null;
+  chunksPerSecond: number;              // passages embedded per second, rolling over the last ~60s
+  etaSeconds: number | null;            // remaining passages / passages of books finished per second (last ~10 min),
+                                        // embedded or reused; null until a book has finished
   active: { bookId: number; title: string; stage: "EXTRACTING" | "EMBEDDING"; chunks: number | null }[];
   recentErrors: { bookId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }

@@ -274,6 +274,27 @@ class BookRepository(
     fun totalChunks(): Long =
         jdbc.queryForObject("select coalesce(sum(chunk_count), 0) from books", emptyMap<String, Any>(), Long::class.java) ?: 0L
 
+    /**
+     * Passages still to process for [ids], for the indexing ETA: a book's last known count (kept while it is queued
+     * again), [unknownAvg] for one never indexed, and next to nothing for a known duplicate.
+     */
+    fun remainingPassages(ids: Collection<Long>, unknownAvg: Double): Double {
+        if (ids.isEmpty()) return 0.0
+        var total = 0.0
+        ids.chunked(10_000).forEach { part ->
+            jdbc.query(
+                """
+                select coalesce(sum(chunk_count) filter (where chunk_count > 0), 0),
+                       count(*) filter (where chunk_count = 0 and duplicate_of is null),
+                       count(*) filter (where chunk_count = 0 and duplicate_of is not null)
+                from books where id in (:ids)
+                """.trimIndent(),
+                mapOf("ids" to part),
+            ) { rs -> total += rs.getLong(1) + rs.getLong(2) * unknownAvg + rs.getLong(3) * DUPLICATE_WEIGHT }
+        }
+        return total
+    }
+
     fun avgChunksPerIndexedBook(): Double? = jdbc.queryForObject(
         "select avg(chunk_count)::float8 from books where status = 'INDEXED' and chunk_count > 0",
         emptyMap<String, Any>(), Double::class.java,
@@ -281,6 +302,11 @@ class BookRepository(
 
     /** Books left mid-pipeline by a crash/restart. */
     fun stuckIds(): List<Long> = idsWithStatus(listOf(BookStatus.EXTRACTING, BookStatus.EMBEDDING), null)
+
+    private companion object {
+        /** A duplicate re-checked is matched, not embedded: about as quick as this many passages. */
+        const val DUPLICATE_WEIGHT = 20.0
+    }
 }
 
 private fun ResultSet.strings(col: String): List<String> {

@@ -153,8 +153,12 @@ export function IndexingView({ active }: { active: boolean }) {
 
         <div className="stats-grid">
           <Stat label="Chunks in store" value={formatNumber(s.totalChunks)} />
-          <Stat label="Throughput" value={`${formatNumber(s.chunksPerSecond, 1)} chunks/s`} sub="rolling ~60s" />
-          <Stat label="ETA" value={s.running ? formatDuration(s.etaSeconds) : "—"} />
+          <Stat label="Throughput" value={`${formatNumber(s.chunksPerSecond, 1)} chunks/s`} sub="embedded, rolling ~60s" />
+          <Stat
+            label="ETA"
+            value={s.running ? formatDuration(s.etaSeconds) : "—"}
+            sub={s.running ? "from books finished in the last ~10 min" : undefined}
+          />
           <Stat
             label={s.running ? "This run" : "Last run"}
             value={`${formatNumber(s.sessionProcessed)} books`}
