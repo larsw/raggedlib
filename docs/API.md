@@ -94,7 +94,7 @@ interface SystemInfo {
 | POST | `/api/books/{id}/reindex` | Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
 | GET  | `/api/tags` | `{ name: string, count: number }[]` sorted by count desc |
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
-| POST | `/api/ingest/reprocess` | Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books again (all, or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
+| POST | `/api/ingest/reprocess` | Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books again (all when `bookIds` is absent; an empty list selects none; or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
 | POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s) |
 | POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |

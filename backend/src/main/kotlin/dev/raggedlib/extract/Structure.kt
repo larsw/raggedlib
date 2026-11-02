@@ -4,6 +4,8 @@ package dev.raggedlib.extract
 object Structure {
     private val chapterHeading = Regex("^(chapter|part|appendix|section|lesson)\\s+([0-9]{1,3}|[ivxlc]{1,6}|[a-z])\\b.{0,100}$", RegexOption.IGNORE_CASE)
     private val numberedHeading = Regex("^\\d{1,2}(\\.\\d{1,2}){0,3}\\.?\\s+\\p{Lu}[^\\n]{1,90}$")
+    /** a numbered heading names something: "4 Basics", not "16 MB" (a figure's label) */
+    private val hasWord = Regex("\\p{L}{3,}")
     private val sentenceEnd = Regex("[.!?:;\"'”’)\\]]$")
 
     /**
@@ -14,7 +16,7 @@ object Structure {
         val t = unspaced(text.trim())
         if (t.length < 3 || t.length > 110 || '\n' in t) return null
         if (t.endsWith('.') || t.endsWith(',') || t.endsWith(';')) return null
-        if (!chapterHeading.matches(t) && !numberedHeading.matches(t)) return null
+        if (!chapterHeading.matches(t) && !(numberedHeading.matches(t) && hasWord.containsMatchIn(t))) return null
         if (Regex("\\s\\d{1,4}$").containsMatchIn(t) && !chapterHeading.matches(t)) return null // TOC line "3.2 Foo 45"
         // "Chapter 10: Tools 73" -> "Chapter 10: Tools", but "Chapter 3" keeps its number
         val stripped = t.replace(Regex("\\s+\\d{1,4}$"), "").trim()
@@ -173,7 +175,7 @@ object Structure {
      * Drops running headers/footers in PDFs: short lines in the first/last lines of a page that recur (digits
      * normalised) on many pages, plus bare page numbers.
      */
-    fun stripPageFurniture(pages: List<String>): List<String> {
+    fun stripPageFurniture(pages: List<String>, runningHeads: Boolean = true): List<String> {
         val edge = 5
         fun norm(l: String) = l.trim().lowercase().replace(Regex("\\d+"), "#").replace(Regex("\\s+"), " ")
         fun edgeLines(lines: List<String>): List<IndexedValue<String>> {
@@ -187,15 +189,83 @@ object Structure {
         }
         val threshold = maxOf(4, pages.size / 20)
         val pageNumber = Regex("^(page\\s+)?(\\d{1,4}|[ivxlcdm]{1,7})$", RegexOption.IGNORE_CASE)
-        return pageLines.map { lines ->
+        // page-numbered running heads also show up mid-page (a layout with sidebars puts them there in pdftotext's
+        // reading order), on a line of their own or split over two: "27" then the title
+        val candidates = if (runningHeads) pageLines.map { lines -> folioCandidates(lines, edgeLines(lines).map { it.index }) } else null
+        val heads = candidates?.let { runningHeads(it.map { page -> page.map { c -> c.text to c.number } }) } ?: emptyMap()
+        return pageLines.mapIndexed { page, lines ->
             val drop = edgeLines(lines).filter { (_, l) ->
                 val n = norm(l)
-                pageNumber.matches(l.trim()) ||
-                    (n.any { it.isLetterOrDigit() || it == '#' } && (counts[n] ?: 0) >= threshold)
+                pageNumber.matches(l.trim()) || (n.any { it.isLetterOrDigit() || it == '#' } && (counts[n] ?: 0) >= threshold)
             }.mapTo(HashSet()) { it.index }
+            // only the numbered copies: the same text without a number is often the section's own heading
+            if (heads.isNotEmpty()) candidates!![page].filter { heads[it.text] == page - it.number }.forEach { drop += it.lines }
             if (drop.isEmpty()) lines.joinToString("\n")
             else lines.filterIndexed { i, _ -> i !in drop }.joinToString("\n")
         }
+    }
+
+    /** Lines standing alone between blank lines (or the page edge). */
+    private fun isolatedLines(lines: List<String>): List<IndexedValue<String>> = lines.withIndex().filter { (i, l) ->
+        l.isNotBlank() && (i == 0 || lines[i - 1].isBlank()) && (i == lines.lastIndex || lines[i + 1].isBlank())
+    }
+
+    private val folioFirst = Regex("^(\\d{1,4})\\s+(\\S.{2,98})$")
+    private val bareNumber = Regex("^\\d{1,4}$")
+
+    /** A possible page-numbered running head on a page: its line(s), normalised text and number. */
+    internal data class FolioCandidate(val lines: List<Int>, val text: String, val number: Int)
+
+    private fun folioText(line: String) = line.trim().lowercase().replace(Regex("\\s+"), " ")
+
+    /**
+     * Running-head candidates of one page: "27 Title" on a page-edge or isolated line, or "27" and "Title" as a block
+     * of two lines of their own.
+     */
+    private fun folioCandidates(lines: List<String>, edge: List<Int>): List<FolioCandidate> {
+        val out = ArrayList<FolioCandidate>()
+        val positions = (edge + isolatedLines(lines).map { it.index }).toSet()
+        for (i in positions) folio(lines[i])?.let { (text, n) -> out += FolioCandidate(listOf(i), text, n) }
+        for (i in 0 until lines.size - 1) {
+            val a = lines[i].trim()
+            val b = lines[i + 1].trim()
+            if (!bareNumber.matches(a) || b.isEmpty() || b.length > 100 || b.none { it.isLetter() }) continue
+            val alone = (i == 0 || lines[i - 1].isBlank()) && (i + 2 > lines.lastIndex || lines[i + 2].isBlank())
+            if (alone) out += FolioCandidate(listOf(i, i + 1), folioText(b), a.toInt())
+        }
+        return out
+    }
+
+    /**
+     * "4 Part 1 A Bit of Background" -> (normalised text, page number); null otherwise. Only the page number in front:
+     * that form reads as a numbered heading ("4 …"). A running head with the number behind it ("Chapter 1 Structured
+     * Query Language 3") is kept: [headingOf] strips the number, and in many PDFs it is the best section label there is.
+     */
+    private fun folio(line: String): Pair<String, Int>? {
+        val m = folioFirst.matchEntire(line.trim()) ?: return null
+        val text = m.groupValues[2]
+        if (text.none { it.isLetter() }) return null
+        return folioText(text) to m.groupValues[1].toInt()
+    }
+
+    /**
+     * Running heads that start with the printed page number ("4 Part 1 A Bit of Background" on even pages of a part):
+     * text -> offset between page index and printed number. Unlike headers repeated through the whole book they may
+     * recur only a dozen times, too few for the overall repeat count, but their number follows the page: the same
+     * text at least 3 times with one constant offset (on most of its occurrences). A real numbered heading ("4
+     * Basics") doesn't recur with the page.
+     */
+    internal fun runningHeads(candidatesByPage: List<List<Pair<String, Int>>>): Map<String, Int> {
+        val offsets = HashMap<String, MutableList<Int>>()
+        candidatesByPage.forEachIndexed { page, candidates ->
+            candidates.distinctBy { it.first }.forEach { (text, number) ->
+                offsets.getOrPut(text) { mutableListOf() } += page - number
+            }
+        }
+        return offsets.mapNotNull { (text, list) ->
+            val (offset, n) = list.groupingBy { it }.eachCount().maxBy { it.value }
+            if (n >= 3 && n * 10 >= list.size * 6) text to offset else null
+        }.toMap()
     }
 
     /** Drops short single-line paragraphs that repeat many times (running headers in converted ebooks). */
