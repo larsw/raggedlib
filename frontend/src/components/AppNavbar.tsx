@@ -29,6 +29,7 @@ export function AppNavbar({ tab, onTabChange, theme, onToggleTheme }: Props) {
           <Tab id="ask" title={<span className="tab-label">Ask</span>} icon="chat" />
           <Tab id="search" title={<span className="tab-label">Search</span>} icon="search" />
           <Tab id="library" title={<span className="tab-label">Library</span>} icon="th" />
+          <Tab id="vectors" title={<span className="tab-label">Vectors</span>} icon="scatter-plot" />
           <Tab id="indexing" title={<span className="tab-label">Indexing</span>} icon="database" />
         </Tabs>
       </NavbarGroup>

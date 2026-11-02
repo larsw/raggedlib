@@ -184,3 +184,27 @@ export type ChatEvent =
   | { type: "token"; t: string }
   | { type: "done"; elapsedMs: number }
   | { type: "error"; error: string };
+
+export type VectorMethod = "pca" | "umap" | "tsne";
+
+export interface VectorPoint {
+  id: string;
+  bookId: number;
+  title: string;
+  page: number | null;
+  section: string | null;
+  snippet: string;
+  x: number;
+  y: number;
+}
+
+export interface VectorSpace {
+  method: VectorMethod;
+  seed: number;
+  size: number;
+  totalPassages: number;
+  dimensions: number;
+  explainedVariance: number[] | null;
+  elapsedMs: number;
+  points: VectorPoint[];
+}
