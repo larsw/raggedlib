@@ -78,10 +78,13 @@ docs/API.md HTTP contract
 
 ## Troubleshooting
 
-- **Chat is slow, or `ollama ps` shows `100% CPU`.** The Ollama container hands the GPU over through CDI
-  (`devices: nvidia.com/gpu=all`), so it can't silently lose the GPU after a host `systemctl daemon-reload`,
-  which used to show up as "Failed to initialize NVML: Unknown Error". If CDI isn't set up on your host, run
-  `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` once.
+- **Chat is slow, or `ollama ps` shows `100% CPU`.** The Ollama and reranker containers get the GPU through CDI
+  (a `driver: cdi` device reservation for `nvidia.com/gpu=all`), so they can't silently lose it after a host
+  `systemctl daemon-reload`, which used to show up as "Failed to initialize NVML: Unknown Error". If CDI isn't set up
+  on your host, run `sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml` once.
+- **`compose up` fails with `error gathering device information … "nvidia.com/gpu=all": no such file or directory`.**
+  Docker older than 28.2 ships with CDI switched off. Run
+  `sudo nvidia-ctk runtime configure --runtime=docker --cdi.enabled && sudo systemctl restart docker`.
 - **Reranker unreachable** (yellow status dot, "Reranker UNREACHABLE" in its tooltip). Search still works in the fused
   order. Check `docker compose logs reranker`; on first start it downloads the model (~640 MB) before it turns healthy.
 - **Slow generation even on the GPU.** On a laptop, check `powerprofilesctl get`. The `power-saver` profile keeps the
