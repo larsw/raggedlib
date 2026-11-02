@@ -82,6 +82,13 @@ export type ScoreKind = "RERANK" | "FUSED";
 
 export type IngestStage = "EXTRACTING" | "OCR" | "EMBEDDING";
 
+/** GET/PUT /api/settings: server settings, shared by everyone using this server. */
+export interface ServerSettings {
+  parallelBooks: number; // books extracted at the same time while indexing
+  parallelBooksDefault: number;
+  parallelBooksMax: number;
+}
+
 export interface IngestStatus {
   running: boolean;
   stopRequested: boolean;
@@ -91,6 +98,7 @@ export interface IngestStatus {
   totalChunks: number; // rows in vector store
   sessionProcessed: number; // books finished (indexed+failed+skipped) in the current/last run
   sessionChunks: number; // chunks embedded in the current/last run
+  parallelBooks: number; // books extracted at the same time (Settings)
   chunksPerSecond: number; // passages embedded per second, rolling over the last ~60s
   etaSeconds: number | null; // from passages of books finished in the last ~10 min (embedded or reused)
   active: {

@@ -164,6 +164,7 @@ export function IndexingView({ active }: { active: boolean }) {
             value={`${formatNumber(s.sessionProcessed)} books`}
             sub={`${formatNumber(s.sessionChunks)} chunks embedded`}
           />
+          <Stat label="In parallel" value={`${formatNumber(s.parallelBooks)} books`} sub="change in Settings (gear)" />
         </div>
 
         {s.running && sessTotal > 0 && (

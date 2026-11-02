@@ -54,6 +54,7 @@ interface IngestStatus {
   totalChunks: number;                  // rows in vector store
   sessionProcessed: number;             // books finished (indexed+failed+skipped) in the current/last run
   sessionChunks: number;                // chunks embedded in the current/last run
+  parallelBooks: number;                // books extracted at the same time (see /api/settings)
   chunksPerSecond: number;              // passages embedded per second, rolling over the last ~60s
   etaSeconds: number | null;            // remaining passages / passages of books finished per second (last ~10 min),
                                         // embedded or reused; null until a book has finished
@@ -96,6 +97,8 @@ interface SystemInfo {
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
 | POST | `/api/ingest/reprocess` | Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books again (all when `bookIds` is absent; an empty list selects none; or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
 | POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
+| GET  | `/api/settings` | `ServerSettings` (below): settings changed at runtime, stored on the server. |
+| PUT  | `/api/settings` | Body `{ "parallelBooks"?: number }` → `ServerSettings`. `parallelBooks` (1–`parallelBooksMax`) applies to a running indexing at once; `400` outside the range. |
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s) |
 | POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
@@ -145,3 +148,14 @@ Otherwise the server responds `401` with `WWW-Authenticate: Bearer realm="ragged
 
 The answer text cites passages with bracketed numbers `[1]`, `[2][4]` matching `SourceChunk.ref`.
 Because it is a POST, the frontend consumes it with `fetch` + a `ReadableStream` SSE parser (not `EventSource`).
+
+### Server settings
+
+```ts
+interface ServerSettings {
+  parallelBooks: number;        // books extracted at the same time while indexing (the GPU embeds one queue)
+  parallelBooksDefault: number; // raggedlib.ingest.extract-concurrency
+  parallelBooksMax: number;     // raggedlib.ingest.max-extract-concurrency, or the number of cores (at most 16)
+}
+```
+
