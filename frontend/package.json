@@ -14,10 +14,13 @@
     "@blueprintjs/icons": "6.14.1",
     "@blueprintjs/select": "6.4.0",
     "foliate-js": "github:johnfactotum/foliate-js#78914aef4466eb960965702401634c2cb348e9b1",
+    "katex": "^0.19.1",
     "react": "19.3",
     "react-dom": "19.3",
     "react-markdown": "^10.1.0",
-    "remark-gfm": "^4.0.1"
+    "rehype-katex": "^7.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-math": "^6.0.0"
   },
   "devDependencies": {
     "@types/bun": "^1.4.4",

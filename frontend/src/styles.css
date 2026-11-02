@@ -1086,6 +1086,20 @@ body.is-resizing-x * {
   overflow-x: auto;
   line-height: 1.45;
 }
+/* math (KaTeX): a wide display formula scrolls instead of widening the answer */
+.markdown .katex {
+  font-size: 1.05em;
+}
+.markdown .katex-display {
+  margin: 0.6em 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 2px 0;
+}
+.markdown .katex-error {
+  font-family: var(--app-mono);
+  font-size: 0.9em;
+}
 .markdown pre code {
   background: none;
   border: 0;
