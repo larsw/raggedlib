@@ -36,6 +36,7 @@ export interface Book {
   error: string | null; // last failure message (status FAILED/SKIPPED), or which book a DUPLICATE copies
   indexedAt: string | null;
   duplicateOf: number | null; // status DUPLICATE: id of the book whose passages stand in for this one
+  ocrPages: number; // pages of the indexed text that came from OCR (scanned PDF pages); 0 = none
 }
 
 /** GET /api/books/{id}/details */
@@ -79,7 +80,7 @@ export interface SourceChunk {
 /** RERANK: cross-encoder relevance 0..1, comparable across queries. FUSED: weighted-RRF score, relative only. */
 export type ScoreKind = "RERANK" | "FUSED";
 
-export type IngestStage = "EXTRACTING" | "EMBEDDING";
+export type IngestStage = "EXTRACTING" | "OCR" | "EMBEDDING";
 
 export interface IngestStatus {
   running: boolean;
@@ -92,7 +93,13 @@ export interface IngestStatus {
   sessionChunks: number; // chunks embedded in the current/last run
   chunksPerSecond: number; // passages embedded per second, rolling over the last ~60s
   etaSeconds: number | null; // from passages of books finished in the last ~10 min (embedded or reused)
-  active: { bookId: number; title: string; stage: IngestStage; chunks: number | null }[];
+  active: {
+    bookId: number;
+    title: string;
+    stage: IngestStage;
+    chunks: number | null;
+    ocr: { done: number; total: number } | null; // stage OCR: pages read so far
+  }[];
   recentErrors: { bookId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }
 

@@ -80,6 +80,10 @@ raggedlib:
     calibredb: calibredb
     ebook-convert: ebook-convert
     pdftotext: pdftotext
+    pdftoppm: pdftoppm
+    pdfinfo: pdfinfo
+    pdfimages: pdfimages
+    tesseract: tesseract
     calibredb-timeout: 2m
     convert-timeout: 10m
   ingest:
@@ -88,6 +92,16 @@ raggedlib:
     embed-batch-size: 32
     embed-parallelism: 2
     min-letters-per-page: 80
+  # OCR (Tesseract) of PDF pages without a text layer; see PdfOcr.kt. Off by itself when tesseract isn't installed.
+  # Env: RAGGEDLIB_OCR_LANGUAGES=eng+nor (docker-compose: OCR_LANGUAGES, which also installs them in the image)
+  ocr:
+    enabled: true
+    languages: eng                 # always used, besides a book's Calibre languages; must be installed
+    # concurrency: 8               # pages at a time across all books; default: half the cores, at most 8
+    dpi: 300
+    page-timeout: 3m
+    min-confidence: 50             # pages read with lower mean word confidence (photos, diagrams) are dropped
+    min-image-coverage: 0.5        # in PDFs with a text layer: textless pages this much covered by images are OCR'd
   chunking:
     target-chars: 1500
     max-chars: 2000

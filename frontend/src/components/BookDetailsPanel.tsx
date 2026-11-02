@@ -152,6 +152,12 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk,
           <Fact label="Passages">{book.chunkCount ? formatNumber(book.chunkCount) : "—"}</Fact>
           <Fact label="Indexed">{formatDateTime(book.indexedAt)}</Fact>
           <Fact label="Indexed from">{book.sourceFormat ?? "—"}</Fact>
+          {book.ocrPages > 0 && (
+            <Fact label="OCR">
+              {formatNumber(book.ocrPages)} scanned {book.ocrPages === 1 ? "page" : "pages"} read by OCR; expect some
+              misread words
+            </Fact>
+          )}
         </dl>
       </section>
 

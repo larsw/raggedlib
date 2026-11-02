@@ -5,6 +5,7 @@ import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.extract.Chunk
 import dev.raggedlib.extract.Chunker
 import dev.raggedlib.extract.Extraction
+import dev.raggedlib.extract.OcrProgress
 import dev.raggedlib.extract.TextExtractor
 import dev.raggedlib.library.BookRepository
 import dev.raggedlib.library.BookRow
@@ -46,7 +47,7 @@ class IngestService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    private class Extracted(val row: BookRow, val format: String, val chunks: List<Chunk>)
+    private class Extracted(val row: BookRow, val format: String, val chunks: List<Chunk>, val ocrPages: Int)
     private data class Queued(val extracted: Extracted, val run: Run)
 
     private class Run(ids: List<Long>, val eligible: Set<BookStatus>) {
@@ -83,6 +84,7 @@ class IngestService(
     /**
      * On startup, books stuck mid-pipeline go back to PENDING. Passages are replaced in one transaction, so a stuck
      * book still has its previous ones (if any), complete; they stay searchable until it is indexed again.
+     * PDFs skipped for want of a text layer while OCR was off or unavailable go back to PENDING once it is available.
      */
     @EventListener(ApplicationReadyEvent::class)
     fun recoverStuckBooks() {
@@ -90,6 +92,10 @@ class IngestService(
         val stuck = books.stuckIds()
         books.requeue(stuck)
         if (stuck.isNotEmpty()) log.info("Reset {} interrupted books to PENDING", stuck.size)
+        if (extractor.ocrUnavailable() == null) {
+            val scanned = books.requeueWithoutTextLayer()
+            if (scanned.isNotEmpty()) log.info("Queued {} PDFs without a text layer for OCR", scanned.size)
+        }
     }
 
     /**
@@ -261,7 +267,10 @@ class IngestService(
         try {
             val file = paths.resolve(row.formatPaths.getValue(format))
             val started = System.nanoTime()
-            when (val ex = extractor.extract(file, format)) {
+            val ocrProgress = OcrProgress { done, total ->
+                active[id] = ActiveBook(id, title, "OCR", null, OcrPages(done, total))
+            }
+            when (val ex = extractor.extract(file, format, row.book.languages, ocrProgress)) {
                 is Extraction.NoText -> {
                     active.remove(id)
                     finish(id) { empty(id, BookStatus.SKIPPED, ex.reason, format) }
@@ -269,7 +278,8 @@ class IngestService(
                 }
                 is Extraction.Text -> {
                     val chunkList = chunker.chunk(ex.paragraphs)
-                    log.info("Extracted book {} '{}' ({}): {} chunks in {} ms", id, title.take(60), format, chunkList.size,
+                    log.info("Extracted book {} '{}' ({}{}): {} chunks in {} ms", id, title.take(60), format,
+                        if (ex.ocrPages > 0) ", ${ex.ocrPages} pages by OCR" else "", chunkList.size,
                         (System.nanoTime() - started) / 1_000_000)
                     if (chunkList.isEmpty()) {
                         active.remove(id)
@@ -277,7 +287,7 @@ class IngestService(
                         return null
                     }
                     active[id] = ActiveBook(id, title, "EXTRACTING", chunkList.size)
-                    return Extracted(row, format, chunkList)
+                    return Extracted(row, format, chunkList, ex.ocrPages)
                 }
             }
         } catch (e: Exception) {
@@ -355,7 +365,7 @@ class IngestService(
         tx.executeWithoutResult {
             chunks.deleteForBookExcept(id, keep)
             chunks.insert(id, row.book.title, row.book.authors, toWrite, all)
-            books.markIndexed(id, ex.chunks.size, ex.format)
+            books.markIndexed(id, ex.chunks.size, ex.format, ex.ocrPages)
         }
         log.debug("Stored book {} in {} ms", id, (System.nanoTime() - storeStart) / 1_000_000)
         sessionChunks.addAndGet(ex.chunks.size.toLong())

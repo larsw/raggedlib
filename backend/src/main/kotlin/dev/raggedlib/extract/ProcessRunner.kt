@@ -17,7 +17,12 @@ class ProcessTimeoutException(message: String) : RuntimeException(message)
 @Component
 class ProcessRunner(private val props: RaggedlibProperties) {
 
-    fun run(command: List<String>, timeout: Duration, workDir: Path? = null): ProcessResult {
+    fun run(
+        command: List<String>,
+        timeout: Duration,
+        workDir: Path? = null,
+        env: Map<String, String> = emptyMap(),
+    ): ProcessResult {
         Files.createDirectories(props.tmpDir)
         val out = Files.createTempFile(props.tmpDir, "raggedlib-out-", ".txt")
         val err = Files.createTempFile(props.tmpDir, "raggedlib-err-", ".txt")
@@ -27,6 +32,7 @@ class ProcessRunner(private val props: RaggedlibProperties) {
                 .redirectError(err.toFile())
                 .redirectInput(ProcessBuilder.Redirect.from(java.io.File("/dev/null")))
             if (workDir != null) pb.directory(workDir.toFile())
+            pb.environment().putAll(env)
             val process = pb.start()
             val finished = try {
                 process.waitFor(timeout.toMillis(), TimeUnit.MILLISECONDS)
