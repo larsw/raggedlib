@@ -55,6 +55,8 @@ claude mcp add --transport http raggedlib http://localhost:8080/mcp --header "Au
 
 Other harnesses take the same URL and header, for example as JSON: `{"type": "http", "url": "http://localhost:8080/mcp", "headers": {"Authorization": "Bearer <key>"}}`.
 
+**Agent skill.** [`skills/raggedlib/`](skills/raggedlib/SKILL.md) is an [Agent Skill](https://agentskills.io) that tells an agent when to reach for these tools and how to use them well: `search_library` first, retrying with other words before concluding the books don't cover something, narrowing to books and tags, reading scores, and citing pages or sections. It also has setup notes for Claude Code, Codex and other harnesses, and `scripts/raggedlib_mcp.py`, which calls the tools over plain HTTP where no MCP client is connected (`RAGGEDLIB_MCP_KEY` holds the key). Install it by linking or copying the folder into the harness's skills directory (`~/.claude/skills/`, `~/.agents/skills/`, …), or with `npx skills add larsw/raggedlib`.
+
 Keys are configured in `raggedlib.mcp.api-keys`, as a list of `{name, key}`. The name only identifies the client in logs. A key can be stored as `sha256:<hex>` instead of in plain text; `printf %s "$KEY" | sha256sum` gives the hex. Clients still send the plain key. In docker-compose, `MCP_API_KEY` (and `MCP_API_KEY_NAME`) fill entry 0. For more keys, add `RAGGEDLIB_MCP_API_KEYS_1_NAME` / `RAGGEDLIB_MCP_API_KEYS_1_KEY` and so on to the backend's environment.
 
 ## How it works
@@ -76,6 +78,7 @@ Keys are configured in `raggedlib.mcp.api-keys`, as a list of `{name, key}`. The
 backend/    Spring Boot app (dev.raggedlib.{calibre,extract,ingest,search,chat,library,system})
 frontend/   Bun server (server.ts: static, /api proxy, /vendor/foliate-js) and React app (src/{api,views,components,hooks,lib})
 docs/API.md HTTP contract
+skills/     Agent Skill for the MCP tools (skills/raggedlib/SKILL.md)
 ```
 
 ## Troubleshooting
