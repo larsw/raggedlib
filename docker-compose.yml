@@ -44,8 +44,16 @@ services:
     # a running container can silently lose the GPU after host events such as `systemctl daemon-reload`
     # ("Failed to initialize NVML: Unknown Error"), and Ollama then falls back to the CPU.
     # One-time host setup if missing: sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
-    devices:
-      - nvidia.com/gpu=all
+    # Docker < 28.2 also needs CDI enabled: sudo nvidia-ctk runtime configure --runtime=docker --cdi.enabled
+    # Requested as a `driver: cdi` reservation rather than `devices: [nvidia.com/gpu=all]`: older Compose
+    # releases pass a CDI name under `devices:` to the daemon as a host path ("no such file or directory").
+    deploy: &gpu
+      resources:
+        reservations:
+          devices:
+            - driver: cdi
+              device_ids: [nvidia.com/gpu=all]
+              capabilities: [gpu]
 
   # Cross-encoder reranker: bge-reranker-v2-m3 (Q8_0, ~0.7 GB VRAM) behind llama.cpp's /v1/rerank. The GGUF is
   # downloaded on first start into the reranker volume. Search falls back to the fused order while it is down,
@@ -63,8 +71,7 @@ services:
       test: ["CMD", "curl", "-fs", "http://localhost:8080/health"]
       interval: 10s
       retries: 60
-    devices:
-      - nvidia.com/gpu=all
+    deploy: *gpu
 
   # One-shot: pull the embedding + chat models only if missing, so a registry hiccup can't block startup.
   models:
