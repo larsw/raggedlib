@@ -266,6 +266,49 @@ html.app-sepia .bp6-toast.bp6-intent-primary .bp6-button:hover {
 html.app-sepia .bp6-toast.bp6-intent-primary .bp6-button:active {
   background-color: var(--bp-intent-primary-active) !important;
 }
+/* Success / warning / danger toasts: Blueprint fills them with the intent color and white text, but the sepia
+ * surface above replaces the fill, which left white text on paper. Keep the paper, use dark text, and show the
+ * intent as the icon's color and a stripe on the left. */
+html.app-sepia .bp6-toast.bp6-intent-success,
+html.app-sepia .bp6-toast.bp6-intent-warning,
+html.app-sepia .bp6-toast.bp6-intent-danger {
+  color: var(--sepia-text);
+}
+html.app-sepia .bp6-toast.bp6-intent-success {
+  box-shadow: inset 4px 0 0 #238551, 0 0 0 1px var(--app-border-strong), 0 2px 8px rgba(74, 52, 30, 0.18);
+}
+html.app-sepia .bp6-toast.bp6-intent-warning {
+  box-shadow: inset 4px 0 0 #c87619, 0 0 0 1px var(--app-border-strong), 0 2px 8px rgba(74, 52, 30, 0.18);
+}
+html.app-sepia .bp6-toast.bp6-intent-danger {
+  box-shadow: inset 4px 0 0 #cd4246, 0 0 0 1px var(--app-border-strong), 0 2px 8px rgba(74, 52, 30, 0.18);
+}
+html.app-sepia .bp6-toast.bp6-intent-success > .bp6-icon {
+  color: #1c6e42;
+}
+html.app-sepia .bp6-toast.bp6-intent-warning > .bp6-icon {
+  color: #935610;
+}
+html.app-sepia .bp6-toast.bp6-intent-danger > .bp6-icon {
+  color: #ac2f33;
+}
+html.app-sepia .bp6-toast.bp6-intent-success .bp6-button,
+html.app-sepia .bp6-toast.bp6-intent-warning .bp6-button,
+html.app-sepia .bp6-toast.bp6-intent-danger .bp6-button {
+  background-color: transparent !important;
+  color: var(--sepia-muted) !important;
+}
+html.app-sepia .bp6-toast.bp6-intent-success .bp6-button .bp6-icon,
+html.app-sepia .bp6-toast.bp6-intent-warning .bp6-button .bp6-icon,
+html.app-sepia .bp6-toast.bp6-intent-danger .bp6-button .bp6-icon {
+  color: inherit !important;
+}
+html.app-sepia .bp6-toast.bp6-intent-success .bp6-button:hover,
+html.app-sepia .bp6-toast.bp6-intent-warning .bp6-button:hover,
+html.app-sepia .bp6-toast.bp6-intent-danger .bp6-button:hover {
+  background-color: var(--app-accent-soft) !important;
+  color: var(--sepia-text) !important;
+}
 /* Tooltips stay dark (as in Blueprint's light theme), but warm. */
 html.app-sepia .bp6-tooltip .bp6-popover-content {
   background: var(--bp-palette-dark-gray-5);
