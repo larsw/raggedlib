@@ -112,6 +112,7 @@ interface SystemInfo {
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s), always covering every configured library: one background run indexes all of them together. |
 | POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
+| GET | `/api/vectors?method=pca\|umap\|tsne&size=1000&seed=1` | `VectorSpace`: a seeded sample of passages from `vector_store`, projected to 2-D. `size` 1..2000 (default 1000); the same seed gives the same sample and layout. Coordinates are only comparable within one response. `t-SNE` is O(n²) per iteration, so it is the slowest at large sizes. |
 
 ```ts
 interface SearchRequest {
@@ -133,6 +134,30 @@ interface SearchResponse {
 interface ChatRequest extends SearchRequest {
   history?: { role: "user" | "assistant"; content: string }[]; // previous turns, oldest first
   model?: string;           // override chat model (one of availableChatModels)
+}
+```
+
+```ts
+interface VectorSpace {
+  method: "pca" | "umap" | "tsne";
+  seed: number;
+  size: number;                        // passages projected (≤ totalPassages)
+  totalPassages: number;
+  dimensions: number;                  // embedding dimensions before projection
+  explainedVariance: number[] | null;  // PCA only: variance share of the two axes
+  elapsedMs: number;
+  points: VectorPoint[];
+}
+
+interface VectorPoint {
+  id: string;
+  bookId: number;
+  title: string;
+  page: number | null;
+  section: string | null;
+  snippet: string;   // leading part of the passage
+  x: number;
+  y: number;
 }
 ```
 
