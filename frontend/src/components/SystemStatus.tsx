@@ -48,7 +48,9 @@ export function SystemStatus() {
                   : `UNREACHABLE (${system.rerankerUrl})`
             }
           />
-          <Row label="Library" value={system.libraryPath} />
+          {system.libraries.map((l) => (
+            <Row key={l.path} label={system.libraries.length > 1 ? `Library: ${l.name}` : "Library"} value={l.path} />
+          ))}
         </tbody>
       </table>
     );

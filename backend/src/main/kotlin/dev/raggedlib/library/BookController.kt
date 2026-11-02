@@ -38,6 +38,7 @@ class BookController(
         @RequestParam(required = false) q: String?,
         @RequestParam(required = false) status: String?,
         @RequestParam(required = false) tag: String?,
+        @RequestParam(required = false) libraryId: Long?,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "50") size: Int,
         @RequestParam(defaultValue = "title") sort: String,
@@ -46,7 +47,7 @@ class BookController(
         val st = status?.takeIf { it.isNotBlank() }?.let {
             runCatching { BookStatus.valueOf(it.uppercase()) }.getOrElse { badRequest("unknown status '$status'") }
         }
-        return books.search(q, st, tag, page.coerceAtLeast(0), size.coerceIn(1, 500), sort)
+        return books.search(q, st, tag, page.coerceAtLeast(0), size.coerceIn(1, 500), sort, libraryId)
     }
 
     @GetMapping("/books/{id}")
@@ -59,12 +60,13 @@ class BookController(
     fun reindex(@PathVariable id: Long): Book = library.reindex(id)
 
     @GetMapping("/tags")
-    fun tags(): List<TagCount> = books.tags()
+    fun tags(@RequestParam(required = false) libraryId: Long?): List<TagCount> = books.tags(libraryId)
 
     @GetMapping("/books/{id}/cover")
     fun cover(@PathVariable id: Long): ResponseEntity<Resource> {
         val row = books.find(id) ?: notFound("book $id not found")
-        val file = row.coverPath?.let(paths::resolve)?.takeIf { Files.isRegularFile(it) } ?: notFound("book $id has no cover")
+        val file = row.coverPath?.let { paths.resolve(row.book.libraryId, it) }?.takeIf { Files.isRegularFile(it) }
+            ?: notFound("book $id has no cover")
         return ResponseEntity.ok()
             .contentType(MediaType.IMAGE_JPEG)
             .cacheControl(CacheControl.maxAge(Duration.ofHours(1)))
@@ -81,7 +83,8 @@ class BookController(
             ?: row.formatPaths.keys.firstOrNull()
             ?: notFound("book $id has no files")
         val rel = row.formatPaths[fmt] ?: notFound("book $id has no $fmt file (available: ${row.formatPaths.keys.joinToString()})")
-        val file = paths.resolve(rel).takeIf { Files.isRegularFile(it) } ?: notFound("file for book $id ($fmt) is missing on disk")
+        val file = paths.resolve(row.book.libraryId, rel).takeIf { Files.isRegularFile(it) }
+            ?: notFound("file for book $id ($fmt) is missing on disk")
         return ResponseEntity.ok()
             .header(HttpHeaders.CONTENT_TYPE, Formats.contentType(fmt))
             .header(

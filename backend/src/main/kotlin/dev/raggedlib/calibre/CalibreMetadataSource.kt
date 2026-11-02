@@ -6,6 +6,7 @@ import dev.raggedlib.extract.ProcessRunner
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Component
 import tools.jackson.databind.ObjectMapper
+import java.nio.file.Path
 
 data class CalibreSnapshot(val records: List<CalibreRecord>, val source: String)
 
@@ -18,22 +19,22 @@ class CalibreMetadataSource(
     private val log = LoggerFactory.getLogger(javaClass)
     private val parser = CalibredbParser(mapper)
 
-    fun load(): CalibreSnapshot = when (props.metadataSource) {
-        MetadataSource.CALIBREDB -> CalibreSnapshot(viaCalibredb(), "calibredb")
-        MetadataSource.SQLITE -> CalibreSnapshot(viaSqlite(), "metadata.db")
+    fun load(libraryRoot: Path): CalibreSnapshot = when (props.metadataSource) {
+        MetadataSource.CALIBREDB -> CalibreSnapshot(viaCalibredb(libraryRoot), "calibredb")
+        MetadataSource.SQLITE -> CalibreSnapshot(viaSqlite(libraryRoot), "metadata.db")
         MetadataSource.AUTO -> try {
-            CalibreSnapshot(viaCalibredb(), "calibredb")
+            CalibreSnapshot(viaCalibredb(libraryRoot), "calibredb")
         } catch (e: Exception) {
             log.warn("calibredb failed ({}); falling back to reading metadata.db read-only", e.message?.lineSequence()?.firstOrNull())
-            CalibreSnapshot(viaSqlite(), "metadata.db")
+            CalibreSnapshot(viaSqlite(libraryRoot), "metadata.db")
         }
     }
 
-    private fun viaCalibredb(): List<CalibreRecord> {
+    private fun viaCalibredb(libraryRoot: Path): List<CalibreRecord> {
         val result = processRunner.run(
             listOf(
                 props.tools.calibredb, "list",
-                "--library-path", props.libraryPath.toString(),
+                "--library-path", libraryRoot.toString(),
                 "--for-machine",
                 "--fields", "id,title,authors,formats,tags,languages,pubdate,series,series_index,cover,last_modified",
             ),
@@ -42,8 +43,8 @@ class CalibreMetadataSource(
         if (result.exitCode != 0) {
             error("calibredb exited with ${result.exitCode}: ${result.stderr.take(300)}")
         }
-        return parser.parse(result.stdout, props.libraryPath)
+        return parser.parse(result.stdout, libraryRoot)
     }
 
-    private fun viaSqlite(): List<CalibreRecord> = MetadataDbReader(props.libraryPath).read()
+    private fun viaSqlite(libraryRoot: Path): List<CalibreRecord> = MetadataDbReader(libraryRoot).read()
 }

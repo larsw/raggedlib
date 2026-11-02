@@ -1,9 +1,10 @@
 import { createContext, useCallback, useContext, useMemo, type ReactNode } from "react";
 import { api } from "./api/client";
-import type { SystemInfo } from "./api/types";
+import type { Library, SystemInfo } from "./api/types";
 import type { TabId } from "./hooks/useHashTab";
 import type { ReaderRequest } from "./lib/reader";
 import { usePolling } from "./hooks/usePolling";
+import { useLibraries } from "./hooks/useLibraries";
 import { useScope, type BookRef, type Scope } from "./hooks/useScope";
 
 interface AppContextValue {
@@ -18,6 +19,14 @@ interface AppContextValue {
   navigate: (tab: TabId) => void;
   /** Opens a book in the in-app reader (ebook formats), at a cited passage or section if given. */
   openReader: (request: ReaderRequest) => void;
+  /** Every configured library. */
+  libraries: Library[];
+  librariesLoading: boolean;
+  refreshLibraries: () => void;
+  /** The library chosen in the navbar's chooser; null = every library (the union view). */
+  library: Library | null;
+  libraryId: number | null;
+  setLibraryId: (id: number | null) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -33,6 +42,7 @@ export function AppProvider({
 }) {
   const sys = usePolling((signal) => api.system(signal), 30_000);
   const [scope, setScope] = useScope();
+  const { libraries, library, libraryId, setLibraryId, librariesLoading, refreshLibraries } = useLibraries();
 
   const addBookToScope = useCallback(
     (book: BookRef) =>
@@ -55,8 +65,17 @@ export function AppProvider({
       addBookToScope,
       navigate,
       openReader,
+      libraries,
+      librariesLoading,
+      refreshLibraries,
+      library,
+      libraryId,
+      setLibraryId,
     }),
-    [sys.data, sys.error, sys.loading, sys.refresh, scope, setScope, addBookToScope, navigate, openReader],
+    [
+      sys.data, sys.error, sys.loading, sys.refresh, scope, setScope, addBookToScope, navigate, openReader,
+      libraries, librariesLoading, refreshLibraries, library, libraryId, setLibraryId,
+    ],
   );
   return <AppContext value={value}>{children}</AppContext>;
 }

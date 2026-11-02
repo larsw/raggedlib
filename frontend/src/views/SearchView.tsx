@@ -10,7 +10,7 @@ import { queryTerms } from "../lib/highlight";
 
 /** Plain hybrid passage search (no LLM). */
 export function SearchView() {
-  const { scope, system } = useApp();
+  const { scope, system, library } = useApp();
   const [query, setQuery] = useState("");
   const [submitted, setSubmitted] = useState<string | null>(null);
   /** whether the reranker took part in the search being shown (the toggle may have changed since) */
@@ -46,6 +46,7 @@ export function SearchView() {
       topK: scope.topK,
       ...(scope.books.length ? { bookIds: scope.books.map((b) => b.id) } : {}),
       ...(scope.tags.length ? { tags: scope.tags } : {}),
+      ...(library ? { libraryIds: [library.id] } : {}),
       rerank: scope.rerank,
       ...(correct ? {} : { correct: false }),
     };

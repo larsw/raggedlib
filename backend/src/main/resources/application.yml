@@ -72,7 +72,12 @@ management:
         enabled: true
 
 raggedlib:
+  # One Calibre library (legacy, kept for a single-library setup and to backfill books indexed before multi-library
+  # support). Ignored once `libraries` below has entries.
   library-path: ${user.home}/Documents/CalibreLibrary
+  # Multiple Calibre libraries, searched as their union by default. Env: RAGGEDLIB_LIBRARIES_0_NAME=NonFiction
+  # RAGGEDLIB_LIBRARIES_0_PATH=/path/one RAGGEDLIB_LIBRARIES_1_NAME=Misc RAGGEDLIB_LIBRARIES_1_PATH=/path/two
+  libraries: []
   tmp-dir: ${java.io.tmpdir}
   metadata-source: auto          # auto (calibredb, fallback metadata.db) | calibredb | sqlite
   cors-origins: http://localhost:3000

@@ -171,8 +171,12 @@ class IngestService(
 
     fun isRunning() = run != null
 
-    fun status(): IngestStatus {
-        val counts = books.statusCounts()
+    /**
+     * [libraryId] scopes what's *displayed* (counts, totalChunks, active, recentErrors) to one library; the run
+     * itself (running/startedAt/session totals/throughput/ETA) is shared across every configured library regardless.
+     */
+    fun status(libraryId: Long? = null): IngestStatus {
+        val counts = books.statusCounts(libraryId)
         val r = run
         val perSec = if (r != null) rate.perSecond() else 0.0
         val done = if (r != null) progress.perSecond() else 0.0
@@ -188,14 +192,14 @@ class IngestService(
             startedAt = startedAt,
             counts = counts,
             totalBooks = counts.values.sum(),
-            totalChunks = books.totalChunks(),
+            totalChunks = books.totalChunks(libraryId),
             sessionProcessed = sessionProcessed.get(),
             sessionChunks = sessionChunks.get(),
             parallelBooks = settings.parallelBooks,
             chunksPerSecond = Math.round(perSec * 10) / 10.0,
             etaSeconds = eta,
-            active = active.values.sortedBy { it.bookId },
-            recentErrors = recentErrors.toList(),
+            active = active.values.filter { libraryId == null || it.libraryId == libraryId }.sortedBy { it.bookId },
+            recentErrors = if (libraryId == null) recentErrors.toList() else recentErrors.filter { it.libraryId == libraryId },
         )
     }
 
@@ -277,13 +281,13 @@ class IngestService(
             finish(id) { empty(id, BookStatus.SKIPPED, "no supported format (${row.formatPaths.keys.joinToString()})") }
             return null
         }
-        active[id] = ActiveBook(id, title, "EXTRACTING", null)
+        active[id] = ActiveBook(id, row.book.libraryId, title, "EXTRACTING", null)
         books.setStatus(id, BookStatus.EXTRACTING, null, format)
         try {
-            val file = paths.resolve(row.formatPaths.getValue(format))
+            val file = paths.resolve(row.book.libraryId, row.formatPaths.getValue(format))
             val started = System.nanoTime()
             val ocrProgress = OcrProgress { done, total ->
-                active[id] = ActiveBook(id, title, "OCR", null, OcrPages(done, total))
+                active[id] = ActiveBook(id, row.book.libraryId, title, "OCR", null, OcrPages(done, total))
             }
             when (val ex = extractor.extract(file, format, row.book.languages, ocrProgress)) {
                 is Extraction.NoText -> {
@@ -301,7 +305,7 @@ class IngestService(
                         finish(id) { empty(id, BookStatus.SKIPPED, "no usable text after cleanup", format) }
                         return null
                     }
-                    active[id] = ActiveBook(id, title, "EXTRACTING", chunkList.size)
+                    active[id] = ActiveBook(id, row.book.libraryId, title, "EXTRACTING", chunkList.size)
                     return Extracted(row, format, chunkList, ex.ocrPages)
                 }
             }
@@ -332,7 +336,7 @@ class IngestService(
     private fun embedAndStore(ex: Extracted) {
         val row = ex.row
         val id = row.book.id
-        active[id] = ActiveBook(id, row.book.title, "EMBEDDING", ex.chunks.size)
+        active[id] = ActiveBook(id, row.book.libraryId, row.book.title, "EMBEDDING", ex.chunks.size)
         books.setStatus(id, BookStatus.EMBEDDING, null, ex.format)
         if (storeAsDuplicate(ex)) return
 
@@ -487,7 +491,7 @@ class IngestService(
             log.error("Could not mark book {} as failed", row.book.id, dbErr)
         }
         sessionProcessed.incrementAndGet()
-        recentErrors.addFirst(IngestError(row.book.id, row.book.title, msg, Instant.now()))
+        recentErrors.addFirst(IngestError(row.book.id, row.book.libraryId, row.book.title, msg, Instant.now()))
         while (recentErrors.size > 50) recentErrors.pollLast()
     }
 

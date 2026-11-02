@@ -6,12 +6,12 @@ import java.time.Instant
 data class IngestStartRequest(val bookIds: List<Long>? = null, val retryFailed: Boolean? = false)
 
 /** [stage]: EXTRACTING, OCR (with [ocr] progress) or EMBEDDING. */
-data class ActiveBook(val bookId: Long, val title: String, val stage: String, val chunks: Int?, val ocr: OcrPages? = null)
+data class ActiveBook(val bookId: Long, val libraryId: Long, val title: String, val stage: String, val chunks: Int?, val ocr: OcrPages? = null)
 
 /** OCR progress of a book: [done] of [total] pages read. */
 data class OcrPages(val done: Int, val total: Int)
 
-data class IngestError(val bookId: Long, val title: String, val error: String, val at: Instant)
+data class IngestError(val bookId: Long, val libraryId: Long, val title: String, val error: String, val at: Instant)
 
 data class IngestStatus(
     val running: Boolean,

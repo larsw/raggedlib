@@ -8,6 +8,9 @@ enum class BookStatus { PENDING, EXTRACTING, EMBEDDING, INDEXED, FAILED, SKIPPED
 /** API representation (see docs/API.md). */
 data class Book(
     val id: Long,
+    val libraryId: Long,
+    /** The id this book has in its own Calibre library (unique only within that library). */
+    val calibreId: Long,
     val title: String,
     val authors: List<String>,
     val tags: List<String>,
@@ -41,3 +44,6 @@ data class Page<T>(val items: List<T>, val total: Long, val page: Int, val size:
 data class TagCount(val name: String, val count: Int)
 
 data class SyncResult(val added: Int, val updated: Int, val removed: Int, val total: Int, val source: String)
+
+/** GET /api/libraries: one configured Calibre library. */
+data class Library(val id: Long, val name: String, val path: String, val bookCount: Int)

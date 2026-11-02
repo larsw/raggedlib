@@ -7,6 +7,7 @@ import type {
   ChatRequest,
   IngestStartRequest,
   IngestStatus,
+  Library,
   Page,
   SearchRequest,
   SearchResponse,
@@ -105,11 +106,13 @@ export function bookFileUrl(id: number, format: string, page?: number | null): s
 export const api = {
   system: (signal?: AbortSignal) => getJson<SystemInfo>("/system", signal),
 
+  libraries: (signal?: AbortSignal) => getJson<Library[]>("/libraries", signal),
+
   syncLibrary: () => postJson<SyncResult>("/library/sync"),
 
   books: (q: BookQuery = {}, signal?: AbortSignal) =>
     getJson<Page<Book>>(
-      `/books${queryString({ q: q.q, status: q.status, tag: q.tag, page: q.page, size: q.size, sort: q.sort })}`,
+      `/books${queryString({ q: q.q, status: q.status, tag: q.tag, libraryId: q.libraryId, page: q.page, size: q.size, sort: q.sort })}`,
       signal,
     ),
 
@@ -123,11 +126,12 @@ export const api = {
   bookFile: async (id: number, format: string, signal?: AbortSignal) =>
     (await send(`/books/${id}/file?format=${encodeURIComponent(format)}`, { signal })).blob(),
 
-  tags: (signal?: AbortSignal) => getJson<TagCount[]>("/tags", signal),
+  tags: (libraryId?: number, signal?: AbortSignal) => getJson<TagCount[]>(`/tags${queryString({ libraryId })}`, signal),
 
   ingestStart: (body?: IngestStartRequest) => postJson<IngestStatus>("/ingest/start", body ?? {}),
   ingestStop: () => postJson<IngestStatus>("/ingest/stop"),
-  ingestStatus: (signal?: AbortSignal) => getJson<IngestStatus>("/ingest/status", signal),
+  ingestStatus: (libraryId?: number, signal?: AbortSignal) =>
+    getJson<IngestStatus>(`/ingest/status${queryString({ libraryId })}`, signal),
 
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/settings", signal),
   updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) =>

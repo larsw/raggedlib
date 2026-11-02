@@ -13,6 +13,7 @@ import org.springframework.transaction.support.TransactionTemplate
 class LibraryService(
     private val calibre: CalibreMetadataSource,
     private val books: BookRepository,
+    private val registry: LibraryRegistry,
     private val ingest: IngestService,
     private val tx: TransactionTemplate,
     private val events: ApplicationEventPublisher,
@@ -20,9 +21,28 @@ class LibraryService(
     private val log = LoggerFactory.getLogger(javaClass)
     private val syncLock = Any()
 
+    /** Syncs every configured library; one library's failure (calibredb down, path unmounted) doesn't block the rest. */
     fun sync(): SyncResult = synchronized(syncLock) {
-        val snapshot = calibre.load()
-        val existing = books.findAll().associateBy { it.book.id }
+        var added = 0
+        var updated = 0
+        var removed = 0
+        var total = 0
+        val sources = LinkedHashSet<String>()
+        for (lib in registry.all) {
+            try {
+                val (a, u, r, t, source) = syncOne(lib)
+                added += a; updated += u; removed += r; total += t
+                sources += source
+            } catch (e: Exception) {
+                log.warn("Sync failed for library '{}' ({}): {}", lib.name, lib.root, e.message)
+            }
+        }
+        SyncResult(added, updated, removed, total, sources.joinToString("+").ifEmpty { "none" })
+    }
+
+    private fun syncOne(lib: LibraryInfo): SyncResult {
+        val snapshot = calibre.load(lib.root)
+        val existing = books.findAllByLibrary(lib.id).associateBy { it.book.calibreId }
         var added = 0
         var updated = 0
         tx.executeWithoutResult {
@@ -30,7 +50,7 @@ class LibraryService(
                 val old = existing[r.id]
                 val preferred = Formats.choose(r.formats.keys)
                 if (old == null) {
-                    books.insert(r, preferred)
+                    books.insert(lib.id, r, preferred)
                     added++
                     continue
                 }
@@ -38,22 +58,22 @@ class LibraryService(
                 val pathsMoved = old.formatPaths != r.formats || old.coverPath != r.coverPath
                 if (changed) {
                     // passages stay searchable until re-indexing replaces them (reusing unchanged embeddings)
-                    books.updateMetadata(r, preferred, reset = true)
+                    books.updateMetadata(old.book.id, r, preferred, reset = true)
                     updated++
                 } else if (pathsMoved) {
-                    books.updateMetadata(r, old.book.sourceFormat ?: preferred, reset = false)
+                    books.updateMetadata(old.book.id, r, old.book.sourceFormat ?: preferred, reset = false)
                 }
             }
         }
         val seen = snapshot.records.mapTo(HashSet()) { it.id }
-        val gone = existing.keys.filter { it !in seen }
+        val gone = existing.values.filter { it.book.calibreId !in seen }.map { it.book.id }
         val removed = books.delete(gone) // chunks go via ON DELETE CASCADE, duplicate_of via SET NULL
         // duplicates of removed books need passages of their own now (also catches one marked while deleting)
         val orphaned = books.requeueOrphanedDuplicates()
         if (orphaned.isNotEmpty()) log.info("Duplicates {} of removed books are pending again", orphaned)
-        log.info("Library sync via {}: +{} ~{} -{} (total {})", snapshot.source, added, updated, removed, snapshot.records.size)
+        log.info("Library '{}' sync via {}: +{} ~{} -{} (total {})", lib.name, snapshot.source, added, updated, removed, snapshot.records.size)
         if (removed > 0) events.publishEvent(BooksRemoved(removed))
-        SyncResult(added, updated, removed, snapshot.records.size, snapshot.source)
+        return SyncResult(added, updated, removed, snapshot.records.size, snapshot.source)
     }
 
     fun reindex(id: Long): Book {

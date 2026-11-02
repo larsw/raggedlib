@@ -5,6 +5,8 @@ data class SearchRequest(
     val topK: Int? = null,
     val bookIds: List<Long>? = null,
     val tags: List<String>? = null,
+    /** Restrict to books in these libraries (see GET /api/libraries); default: every configured library. */
+    val libraryIds: List<Long>? = null,
     /** Cross-encoder reranking (default on when the server has a reranker); false = fused order only. */
     val rerank: Boolean? = null,
     /** Correct misspelled words before searching (default true); false searches for the query exactly as written. */

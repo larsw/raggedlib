@@ -57,7 +57,8 @@ export function BookDetailsPanel(props: Props) {
 
 function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk, onSearchIn, onReindex }: Props & { details: BookDetails }) {
   const { book, calibre, duplicateOf, sections } = details;
-  const { openReader } = useApp();
+  const { openReader, libraries } = useApp();
+  const libraryName = libraries.find((l) => l.id === book.libraryId)?.name;
   const year = formatYear(book.pubdate);
   const isPdf = book.sourceFormat === "PDF";
   const readable = readerFormat(book.formats, book.sourceFormat);
@@ -117,7 +118,8 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk,
               <span className="book-identifier">{v}</span>
             </Fact>
           ))}
-        <Fact label="Calibre id">{book.id}</Fact>
+        {libraries.length > 1 && <Fact label="Library">{libraryName ?? "—"}</Fact>}
+        <Fact label="Calibre id">{book.calibreId}</Fact>
       </dl>
 
       {book.tags.length > 0 && (
