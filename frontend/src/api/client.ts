@@ -3,6 +3,8 @@ import type {
   Book,
   BookDetails,
   BookQuery,
+  VectorMethod,
+  VectorSpace,
   ChatEvent,
   ChatRequest,
   IngestStartRequest,
@@ -127,6 +129,9 @@ export const api = {
   ingestStart: (body?: IngestStartRequest) => postJson<IngestStatus>("/ingest/start", body ?? {}),
   ingestStop: () => postJson<IngestStatus>("/ingest/stop"),
   ingestStatus: (signal?: AbortSignal) => getJson<IngestStatus>("/ingest/status", signal),
+
+  vectors: (q: { method: VectorMethod; size: number; seed: number }, signal?: AbortSignal) =>
+    getJson<VectorSpace>(`/vectors${queryString(q)}`, signal),
 
   search: (req: SearchRequest, signal?: AbortSignal) => postJson<SearchResponse>("/search", req, signal),
 

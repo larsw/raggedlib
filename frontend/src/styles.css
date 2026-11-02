@@ -1771,3 +1771,123 @@ body.is-resizing-x * {
     padding: 2px 12px 8px;
   }
 }
+
+/* Vectors tab: scatter plot with a side panel for details and the book legend */
+.vectors-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+.vectors-body {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+}
+.vectors-canvas-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.vectors-hint {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  right: 8px;
+  z-index: 1;
+  pointer-events: none;
+  opacity: 0.9;
+}
+.vectors-canvas {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.vectors-canvas canvas {
+  display: block;
+  user-select: none;
+}
+.vectors-tooltip {
+  position: absolute;
+  max-width: 250px;
+  padding: 6px 8px;
+  border-radius: 3px;
+  background: var(--app-surface, #fff);
+  border: 1px solid var(--app-border);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  pointer-events: none;
+}
+.vectors-reset {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+}
+.vectors-busy {
+  position: absolute;
+  right: 16px;
+  bottom: 16px;
+}
+.vectors-side {
+  width: 300px;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-left: 1px solid var(--app-border);
+  padding: 12px;
+}
+.vectors-detail {
+  margin-bottom: 16px;
+}
+.vectors-detail-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.vectors-snippet {
+  font-size: 13px;
+  line-height: 1.4;
+  margin: 8px 0 0;
+}
+.vectors-legend-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 6px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.vectors-legend-item:hover,
+.vectors-legend-item.is-active {
+  background: var(--app-hover, rgba(127, 127, 127, 0.15));
+}
+.vectors-legend-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vectors-swatch {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+@media (max-width: 720px) {
+  .vectors-body {
+    flex-direction: column;
+  }
+  .vectors-side {
+    width: auto;
+    max-height: 40%;
+    border-left: 0;
+    border-top: 1px solid var(--app-border);
+  }
+}
