@@ -420,6 +420,15 @@ body {
 .settings-menu .bp6-form-group:last-of-type {
   margin-bottom: 8px;
 }
+.settings-menu-section {
+  margin: 4px 0 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--app-border);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .settings-menu-footer {
   display: flex;
   justify-content: flex-end;

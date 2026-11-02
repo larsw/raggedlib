@@ -11,6 +11,7 @@ import dev.raggedlib.library.BookRepository
 import dev.raggedlib.library.BookRow
 import dev.raggedlib.library.BookStatus
 import dev.raggedlib.library.LibraryPaths
+import dev.raggedlib.settings.AppSettings
 import org.slf4j.LoggerFactory
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -25,7 +26,6 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.Executors
-import java.util.concurrent.Semaphore
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -44,8 +44,17 @@ class IngestService(
     private val paths: LibraryPaths,
     private val tx: TransactionTemplate,
     private val events: ApplicationEventPublisher,
+    private val settings: AppSettings,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
+
+    /** The running coordinator's extraction limit, to wake it when "books indexed in parallel" changes. */
+    @Volatile private var permitsOfRun: AdjustableLimit? = null
+
+    /** Applies a changed "books indexed in parallel" to the running indexing at once. */
+    fun parallelBooksChanged() {
+        permitsOfRun?.refresh()
+    }
 
     private class Extracted(val row: BookRow, val format: String, val chunks: List<Chunk>, val ocrPages: Int)
     private data class Queued(val extracted: Extracted, val run: Run)
@@ -182,6 +191,7 @@ class IngestService(
             totalChunks = books.totalChunks(),
             sessionProcessed = sessionProcessed.get(),
             sessionChunks = sessionChunks.get(),
+            parallelBooks = settings.parallelBooks,
             chunksPerSecond = Math.round(perSec * 10) / 10.0,
             etaSeconds = eta,
             active = active.values.sortedBy { it.bookId },
@@ -194,7 +204,9 @@ class IngestService(
     private fun coordinate(r: Run) {
         val queue = ArrayBlockingQueue<Any>(props.ingest.queueCapacity.coerceAtLeast(1))
         val consumer = Thread.ofPlatform().name("ingest-embedder").daemon(true).start { consume(queue) }
-        val permits = Semaphore(props.ingest.extractConcurrency.coerceAtLeast(1))
+        // "books indexed in parallel" can change while the run goes on (Settings)
+        val permits = AdjustableLimit { settings.parallelBooks }
+        permitsOfRun = permits
         val workers = Executors.newVirtualThreadPerTaskExecutor()
         try {
             while (!stopRequested) {
@@ -237,6 +249,7 @@ class IngestService(
         } catch (e: Throwable) {
             log.error("Ingestion coordinator failed", e)
         } finally {
+            permitsOfRun = null
             active.clear()
             log.info("Ingestion finished: {} books, {} chunks", sessionProcessed.get(), sessionChunks.get())
             try {

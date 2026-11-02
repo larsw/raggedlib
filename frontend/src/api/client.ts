@@ -10,6 +10,7 @@ import type {
   Page,
   SearchRequest,
   SearchResponse,
+  ServerSettings,
   SourceChunk,
   SyncResult,
   SystemInfo,
@@ -73,9 +74,9 @@ async function getJson<T>(path: string, signal?: AbortSignal): Promise<T> {
   return (await res.json()) as T;
 }
 
-async function postJson<T>(path: string, body?: unknown, signal?: AbortSignal): Promise<T> {
+async function postJson<T>(path: string, body?: unknown, signal?: AbortSignal, method = "POST"): Promise<T> {
   const res = await send(path, {
-    method: "POST",
+    method,
     signal,
     headers: { accept: "application/json", ...(body !== undefined ? { "content-type": "application/json" } : {}) },
     body: body !== undefined ? JSON.stringify(body) : undefined,
@@ -127,6 +128,10 @@ export const api = {
   ingestStart: (body?: IngestStartRequest) => postJson<IngestStatus>("/ingest/start", body ?? {}),
   ingestStop: () => postJson<IngestStatus>("/ingest/stop"),
   ingestStatus: (signal?: AbortSignal) => getJson<IngestStatus>("/ingest/status", signal),
+
+  settings: (signal?: AbortSignal) => getJson<ServerSettings>("/settings", signal),
+  updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) =>
+    postJson<ServerSettings>("/settings", body, undefined, "PUT"),
 
   search: (req: SearchRequest, signal?: AbortSignal) => postJson<SearchResponse>("/search", req, signal),
 

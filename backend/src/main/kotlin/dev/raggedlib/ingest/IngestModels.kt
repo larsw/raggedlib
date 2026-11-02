@@ -22,6 +22,8 @@ data class IngestStatus(
     val totalChunks: Long,
     val sessionProcessed: Int,
     val sessionChunks: Long,
+    /** Books extracted at the same time (Settings → "Books indexed in parallel"). */
+    val parallelBooks: Int,
     val chunksPerSecond: Double,
     val etaSeconds: Long?,
     val active: List<ActiveBook>,

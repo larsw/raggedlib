@@ -42,8 +42,13 @@ data class RaggedlibProperties(
          * read-only instance sharing the database with one that is indexing — it would wipe that run's work.
          */
         val recoverOnStartup: Boolean = true,
-        /** Parallel extraction workers (external processes, CPU bound). */
+        /**
+         * Parallel extraction workers (external processes, CPU bound): the default for "books indexed in parallel",
+         * which can be changed at runtime (Settings; stored in app_settings).
+         */
         val extractConcurrency: Int = 3,
+        /** Upper bound for that setting; 0 = the number of cores, at most 16. */
+        val maxExtractConcurrency: Int = 0,
         /** Extracted books waiting for the embedder (bounds memory). */
         val queueCapacity: Int = 3,
         /** Texts per Ollama /api/embed call. */
