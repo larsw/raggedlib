@@ -104,6 +104,8 @@ class IngestService(
      * changed ones cost GPU time; books turn out DUPLICATE (or stop being one) along the way.
      */
     fun reprocess(bookIds: List<Long>?, formats: List<String>?): IngestStatus {
+        // an explicit empty list selects nothing; only a missing one means every book
+        if (bookIds != null && bookIds.isEmpty()) return status()
         val wanted = formats?.map { it.uppercase() }?.toSet()
         val ids = books.idsWithStatus(listOf(BookStatus.INDEXED, BookStatus.DUPLICATE), bookIds?.distinct()?.takeIf { it.isNotEmpty() })
             .filter { id -> wanted == null || books.find(id)?.book?.sourceFormat?.uppercase() in wanted }

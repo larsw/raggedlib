@@ -21,6 +21,42 @@ class StructureTest {
     }
 
     @Test
+    fun `running heads with the page number are dropped even when they recur only a few times`() {
+        // a 200-page book: the part's running head appears on 5 even pages, far below 1 in 20 pages
+        val pages = (0 until 200).map { i ->
+            val head = if (i in 50..58 && i % 2 == 0) "${i - 42} Part 1 A Bit of Background\n" else ""
+            "${head}Body text of page $i, which goes on.\nMore text here."
+        }.toMutableList()
+        pages[60] = "4 Basics\nA real numbered heading on its own page."
+        val cleaned = Structure.stripPageFurniture(pages)
+        assertTrue(cleaned.none { "A Bit of Background" in it })
+        assertTrue("4 Basics" in cleaned[60])
+    }
+
+    @Test
+    fun `a running head split over two lines is dropped, the same text without a number is kept`() {
+        // 400 pages: the head recurs too rarely for the book-wide repeat filter (1 in 20 pages)
+        val pages = (0 until 400).map { i ->
+            if (i in 40..50 && i % 2 == 0) "Body of page $i.\n\n${i - 17}\nSTOCHASTICS AND AVERAGES\n\nMore body."
+            else if (i == 39) "Chapter opener.\n\nStochastics and Averages\n\nThe chapter starts here."
+            else "Body of page $i. Nothing else."
+        }
+        val cleaned = Structure.stripPageFurniture(pages)
+        assertTrue((40..50 step 2).none { "STOCHASTICS" in cleaned[it] })
+        // a section's own heading has the running head's text: it stays
+        assertTrue("Stochastics and Averages" in cleaned[39])
+    }
+
+    @Test
+    fun `a page-numbered running head in the middle of the page is dropped too`() {
+        val pages = (0 until 100).map { i ->
+            val head = if (i in 38..46 && i % 2 == 0) "\n${i - 16} A Passion for Mathematics\n\n" else "\n"
+            "Sidebar text on page $i.\nIt goes on.\n$head" + "More body text. The end."
+        }
+        assertTrue(Structure.stripPageFurniture(pages).none { "A Passion for Mathematics" in it })
+    }
+
+    @Test
     fun `merges paragraphs broken mid-sentence`() {
         val merged = Structure.mergeBroken(
             listOf(Paragraph("The purpose of this book is to explain the use of the GNU C and C++", 1, null),
@@ -45,6 +81,9 @@ class StructureTest {
         // letter-spaced display type
         assertEquals("Chapter 8", Structure.headingOf("C h apter 8"))
         assertEquals("Chapter 10", Structure.headingOf("C h apter 1 0"))
+        // units in figures aren't headings
+        assertNull(Structure.headingOf("16 MB"))
+        assertEquals("4 Basics", Structure.headingOf("4 Basics"))
         assertNull(Structure.headingOf("a b c 8"))
     }
 
