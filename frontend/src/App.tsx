@@ -1,13 +1,17 @@
 import { BlueprintProvider } from "@blueprintjs/core";
-import { useState } from "react";
+import { lazy, Suspense, useCallback, useState } from "react";
 import { AppProvider } from "./AppContext";
 import { AppNavbar } from "./components/AppNavbar";
 import { TABS, useHashTab, type TabId } from "./hooks/useHashTab";
 import { useTheme } from "./hooks/useTheme";
+import type { ReaderRequest } from "./lib/reader";
 import { AskView } from "./views/AskView";
 import { IndexingView } from "./views/IndexingView";
 import { LibraryView } from "./views/LibraryView";
 import { SearchView } from "./views/SearchView";
+
+// The reader (and foliate-js with it) loads on first use only.
+const ReaderDrawer = lazy(() => import("./components/reader/ReaderDrawer"));
 
 export function App() {
   const [tab, setTab] = useHashTab();
@@ -16,6 +20,11 @@ export function App() {
   // search results and library filters survive tab switches.
   const [visited, setVisited] = useState<Set<TabId>>(() => new Set([tab]));
   if (!visited.has(tab)) setVisited(new Set(visited).add(tab));
+
+  // The reader is a drawer over whichever view opened it; the request stays while it closes (exit transition).
+  const [reader, setReader] = useState<{ request: ReaderRequest; open: boolean } | null>(null);
+  const openReader = useCallback((request: ReaderRequest) => setReader({ request, open: true }), []);
+  const closeReader = useCallback(() => setReader((r) => r && { ...r, open: false }), []);
 
   const render = (id: TabId) => {
     const active = id === tab;
@@ -33,7 +42,7 @@ export function App() {
 
   return (
     <BlueprintProvider>
-      <AppProvider navigate={setTab}>
+      <AppProvider navigate={setTab} openReader={openReader}>
         <div className="app">
           <AppNavbar tab={tab} onTabChange={setTab} theme={theme} onToggleTheme={toggleTheme} />
           <main className="app-main">
@@ -44,6 +53,11 @@ export function App() {
             ))}
           </main>
         </div>
+        {reader && (
+          <Suspense fallback={null}>
+            <ReaderDrawer request={reader.request} isOpen={reader.open} theme={theme} onClose={closeReader} />
+          </Suspense>
+        )}
       </AppProvider>
     </BlueprintProvider>
   );

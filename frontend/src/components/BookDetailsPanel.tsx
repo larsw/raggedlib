@@ -2,7 +2,9 @@ import { AnchorButton, Button, ButtonGroup, Classes, NonIdealState, Spinner, Tag
 import { useState } from "react";
 import { api, bookFileUrl } from "../api/client";
 import type { Book, BookDetails } from "../api/types";
+import { useApp } from "../AppContext";
 import { useAsync } from "../hooks/useAsync";
+import { isReaderFormat, readerFormat, type ReaderTarget } from "../lib/reader";
 import { formatBytes, formatDate, formatDateTime, formatNumber, formatYear } from "../lib/format";
 import { BookCover } from "./BookCover";
 import { ErrorState } from "./ErrorState";
@@ -55,8 +57,11 @@ export function BookDetailsPanel(props: Props) {
 
 function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk, onSearchIn, onReindex }: Props & { details: BookDetails }) {
   const { book, calibre, duplicateOf, sections } = details;
+  const { openReader } = useApp();
   const year = formatYear(book.pubdate);
   const isPdf = book.sourceFormat === "PDF";
+  const readable = readerFormat(book.formats, book.sourceFormat);
+  const read = (format?: string, target?: ReaderTarget) => openReader({ bookId: book.id, title: book.title, format, target });
 
   return (
     <>
@@ -81,6 +86,13 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk,
       </div>
 
       <ButtonGroup className="book-panel-actions" fill>
+        {readable ? (
+          <Button icon="book" text="Read" onClick={() => read()} />
+        ) : (
+          book.formats.includes("PDF") && (
+            <AnchorButton icon="document-open" text="Read" href={bookFileUrl(book.id, "PDF")} target="_blank" rel="noopener" />
+          )
+        )}
         <Button icon="chat" text="Ask" onClick={() => onAsk(book)} />
         <Button icon="search" text="Search in" onClick={() => onSearchIn(book)} />
         <Button
@@ -147,26 +159,43 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk,
         <section className="book-panel-section">
           <h4 className="book-panel-subheading">Files</h4>
           <ul className="book-files">
-            {book.formats.map((f) => (
-              <li key={f}>
-                <AnchorButton
-                  variant="minimal"
-                  size="small"
-                  icon="document-open"
-                  text={f}
-                  href={bookFileUrl(book.id, f)}
-                  target="_blank"
-                  rel="noopener"
-                  aria-label={`Open ${f} file`}
-                />
-                <span className={Classes.TEXT_MUTED}>{formatBytes(calibre?.fileSizes[f])}</span>
-              </li>
-            ))}
+            {book.formats.map((f) =>
+              isReaderFormat(f) ? (
+                <li key={f}>
+                  <Button variant="minimal" size="small" icon="book" text={f} aria-label={`Read the ${f} file`} onClick={() => read(f)} />
+                  <span className={Classes.TEXT_MUTED}>{formatBytes(calibre?.fileSizes[f])}</span>
+                  <Tooltip content={`Download ${f}`} placement="top">
+                    <AnchorButton variant="minimal" size="small" icon="download" href={bookFileUrl(book.id, f)} download aria-label={`Download the ${f} file`} />
+                  </Tooltip>
+                </li>
+              ) : (
+                <li key={f}>
+                  <AnchorButton
+                    variant="minimal"
+                    size="small"
+                    icon="document-open"
+                    text={f}
+                    href={bookFileUrl(book.id, f)}
+                    target="_blank"
+                    rel="noopener"
+                    aria-label={`Open ${f} file`}
+                  />
+                  <span className={Classes.TEXT_MUTED}>{formatBytes(calibre?.fileSizes[f])}</span>
+                </li>
+              ),
+            )}
           </ul>
         </section>
       )}
 
-      {sections.length > 0 && <Outline bookId={book.id} sections={sections} linkPages={isPdf} />}
+      {sections.length > 0 && (
+        <Outline
+          bookId={book.id}
+          sections={sections}
+          linkPages={isPdf}
+          onOpenSection={!isPdf && readable ? (title) => read(undefined, { kind: "section", title }) : undefined}
+        />
+      )}
     </>
   );
 }
@@ -193,7 +222,18 @@ function Description({ text }: { text: string }) {
   );
 }
 
-function Outline({ bookId, sections, linkPages }: { bookId: number; sections: BookDetails["sections"]; linkPages: boolean }) {
+function Outline({
+  bookId,
+  sections,
+  linkPages,
+  onOpenSection,
+}: {
+  bookId: number;
+  sections: BookDetails["sections"];
+  linkPages: boolean;
+  /** ebooks: open the reader at a section */
+  onOpenSection?: (title: string) => void;
+}) {
   const [all, setAll] = useState(false);
   const shown = all ? sections : sections.slice(0, SECTIONS_SHOWN);
   return (
@@ -204,9 +244,15 @@ function Outline({ bookId, sections, linkPages }: { bookId: number; sections: Bo
       <ol className="book-outline">
         {shown.map((s) => (
           <li key={s.title}>
-            <span className="book-outline-title" title={s.title}>
-              {s.title}
-            </span>
+            {onOpenSection ? (
+              <button type="button" className="link-button book-outline-title" title={`Read “${s.title}”`} onClick={() => onOpenSection(s.title)}>
+                {s.title}
+              </button>
+            ) : (
+              <span className="book-outline-title" title={s.title}>
+                {s.title}
+              </span>
+            )}
             {s.firstPage != null &&
               (linkPages ? (
                 <a href={bookFileUrl(bookId, "PDF", s.firstPage)} target="_blank" rel="noopener" className="book-outline-page">

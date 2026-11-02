@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useMemo, type ReactNode } from 
 import { api } from "./api/client";
 import type { SystemInfo } from "./api/types";
 import type { TabId } from "./hooks/useHashTab";
+import type { ReaderRequest } from "./lib/reader";
 import { usePolling } from "./hooks/usePolling";
 import { useScope, type BookRef, type Scope } from "./hooks/useScope";
 
@@ -15,11 +16,21 @@ interface AppContextValue {
   /** Adds a book to the retrieval scope (no-op if already present). */
   addBookToScope: (book: BookRef) => void;
   navigate: (tab: TabId) => void;
+  /** Opens a book in the in-app reader (ebook formats), at a cited passage or section if given. */
+  openReader: (request: ReaderRequest) => void;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
 
-export function AppProvider({ navigate, children }: { navigate: (tab: TabId) => void; children: ReactNode }) {
+export function AppProvider({
+  navigate,
+  openReader,
+  children,
+}: {
+  navigate: (tab: TabId) => void;
+  openReader: (request: ReaderRequest) => void;
+  children: ReactNode;
+}) {
   const sys = usePolling((signal) => api.system(signal), 30_000);
   const [scope, setScope] = useScope();
 
@@ -43,8 +54,9 @@ export function AppProvider({ navigate, children }: { navigate: (tab: TabId) => 
       setScope,
       addBookToScope,
       navigate,
+      openReader,
     }),
-    [sys.data, sys.error, sys.loading, sys.refresh, scope, setScope, addBookToScope, navigate],
+    [sys.data, sys.error, sys.loading, sys.refresh, scope, setScope, addBookToScope, navigate, openReader],
   );
   return <AppContext value={value}>{children}</AppContext>;
 }

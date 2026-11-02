@@ -28,6 +28,7 @@ import { STORAGE_KEYS } from "../lib/storage";
 import { usePageVisible } from "../hooks/usePageVisible";
 import { useSyncLibrary } from "../hooks/useSyncLibrary";
 import { formatAuthors, formatDateTime, formatNumber, formatYear } from "../lib/format";
+import { readerFormat } from "../lib/reader";
 
 const PAGE_SIZE = 50;
 const SORTS: { value: BookSort; label: string }[] = [
@@ -54,7 +55,7 @@ function TagList({ tags }: { tags: string[] }) {
 }
 
 export function LibraryView({ active }: { active: boolean }) {
-  const { setScope, navigate } = useApp();
+  const { setScope, navigate, openReader } = useApp();
   const visible = usePageVisible();
   const [q, setQ] = useState("");
   const query = useDebounced(q.trim(), 300);
@@ -273,7 +274,11 @@ export function LibraryView({ active }: { active: boolean }) {
                         <Tooltip content="Ask about this book" placement="top">
                           <Button icon="chat" aria-label={`Ask about ${b.title}`} onClick={() => askAbout(b)} />
                         </Tooltip>
-                        {b.formats.includes("PDF") && (
+                        {readerFormat(b.formats, b.sourceFormat) ? (
+                          <Tooltip content="Read" placement="top">
+                            <Button icon="book" aria-label={`Read ${b.title}`} onClick={() => openReader({ bookId: b.id, title: b.title })} />
+                          </Tooltip>
+                        ) : b.formats.includes("PDF") && (
                           <Tooltip content="Open PDF" placement="top">
                             <Button
                               icon="document-open"

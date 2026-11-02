@@ -1,3 +1,4 @@
+import path from "node:path";
 import index from "./index.html";
 
 const BACKEND_URL = (process.env.BACKEND_URL ?? "http://localhost:8080").replace(/\/+$/, "");
@@ -71,12 +72,35 @@ async function proxy(req: Request, server: Bun.Server<undefined>): Promise<Respo
   });
 }
 
+// The ebook reader's engine, foliate-js, is plain ES modules that import one another lazily (a format's parser only
+// for books in that format, PDF.js only for PDFs). It is served as-is rather than bundled, because the bundler would
+// inline all of it, PDF.js included, into the app's single script. See src/components/reader/foliate.ts.
+const FOLIATE_PREFIX = "/vendor/foliate-js/";
+const FOLIATE_DIR = path.join(import.meta.dir, "node_modules", "foliate-js");
+const FOLIATE_TYPES: Record<string, string> = {
+  ".js": "text/javascript; charset=utf-8",
+  ".mjs": "text/javascript; charset=utf-8",
+  ".css": "text/css; charset=utf-8",
+};
+
+async function foliate(req: Request): Promise<Response> {
+  const rel = decodeURIComponent(new URL(req.url).pathname.slice(FOLIATE_PREFIX.length));
+  const file = path.join(FOLIATE_DIR, rel);
+  const type = FOLIATE_TYPES[path.extname(file)];
+  if (!type || !file.startsWith(FOLIATE_DIR + path.sep) || !(await Bun.file(file).exists())) {
+    return new Response("not found", { status: 404 });
+  }
+  // revalidated on every load, so a new foliate-js version is picked up right away
+  return new Response(Bun.file(file), { headers: { "content-type": type, "cache-control": "no-cache" } });
+}
+
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
   routes: {
     "/healthz": new Response("ok", { headers: { "content-type": "text/plain" } }),
     "/api/*": proxy,
+    [`${FOLIATE_PREFIX}*`]: foliate,
     "/*": index,
   },
   development: !isProduction && { hmr: true, console: true },
