@@ -2,11 +2,11 @@ package dev.raggedlib.library
 
 import dev.raggedlib.calibre.CalibreExtras
 import dev.raggedlib.calibre.MetadataDbReader
-import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.config.notFound
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Service
+import java.util.concurrent.ConcurrentHashMap
 
 /** GET /api/books/{id}/details: everything the Library's detail panel shows. */
 data class BookDetails(
@@ -27,15 +27,16 @@ data class SectionInfo(val title: String, val firstPage: Int?, val passages: Int
 class BookDetailsService(
     private val books: BookRepository,
     private val jdbc: NamedParameterJdbcTemplate,
-    props: RaggedlibProperties,
+    private val registry: LibraryRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val metadataDb = MetadataDbReader(props.libraryPath)
+    private val metadataDbByLibrary = ConcurrentHashMap<Long, MetadataDbReader>()
 
     fun details(id: Long): BookDetails {
         val book = (books.find(id) ?: notFound("book $id not found")).book
+        val metadataDb = metadataDbByLibrary.getOrPut(book.libraryId) { MetadataDbReader(registry.byId(book.libraryId).root) }
         val extras = try {
-            metadataDb.extras(id)
+            metadataDb.extras(book.calibreId)
         } catch (e: Exception) {
             log.debug("No Calibre extras for book {}: {}", id, e.message)
             null

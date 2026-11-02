@@ -9,7 +9,9 @@ Base URL: `http://localhost:8080/api`. All bodies JSON (camelCase). Errors: HTTP
 type BookStatus = "PENDING" | "EXTRACTING" | "EMBEDDING" | "INDEXED" | "FAILED" | "SKIPPED" | "DUPLICATE";
 
 interface Book {
-  id: number;                 // calibre id
+  id: number;                 // internal id, unique across every configured library
+  libraryId: number;           // which configured library (see GET /api/libraries)
+  calibreId: number;           // this book's id within its own Calibre library (not unique across libraries)
   title: string;
   authors: string[];
   tags: string[];
@@ -67,8 +69,15 @@ interface IngestStatus {
   recentErrors: { bookId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }
 
+interface Library {
+  id: number;
+  name: string;
+  path: string;
+  bookCount: number;
+}
+
 interface SystemInfo {
-  libraryPath: string;
+  libraries: { name: string; path: string }[];
   ollamaUrl: string;
   ollamaReachable: boolean;
   chatModel: string;
@@ -86,20 +95,21 @@ interface SystemInfo {
 | Method | Path | Description |
 |---|---|---|
 | GET  | `/api/system` | `SystemInfo` |
-| POST | `/api/library/sync` | Run `calibredb list` and upsert books table. Returns `{ added, updated, removed, total }`. Books whose calibre `last_modified` changed are reset to PENDING. |
-| GET  | `/api/books?q=&status=&tag=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `sort` ∈ `title`,`author`,`pubdate`,`indexedAt`,`id`. |
+| GET  | `/api/libraries` | `Library[]`: every configured Calibre library with its book count. |
+| POST | `/api/library/sync` | Runs `calibredb list` (or reads `metadata.db`) for every configured library and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
+| GET  | `/api/books?q=&status=&tag=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `libraryId` restricts to one library (default: every library). `sort` ∈ `title`,`author`,`pubdate`,`indexedAt`,`id`. |
 | GET  | `/api/books/{id}` | `Book` |
 | GET  | `/api/books/{id}/cover` | `image/jpeg` (404 if none) |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
 | GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: description as plain text, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, and `sections: {title, firstPage, passages}[]`, the indexed outline in reading order. |
 | POST | `/api/books/{id}/reindex` | Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
-| GET  | `/api/tags` | `{ name: string, count: number }[]` sorted by count desc |
+| GET  | `/api/tags?libraryId=` | `{ name: string, count: number }[]` sorted by count desc; `libraryId` restricts to one library |
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
 | POST | `/api/ingest/reprocess` | Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books again (all when `bookIds` is absent; an empty list selects none; or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
 | POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
 | GET  | `/api/settings` | `ServerSettings` (below): settings changed at runtime, stored on the server. |
 | PUT  | `/api/settings` | Body `{ "parallelBooks"?: number }` → `ServerSettings`. `parallelBooks` (1–`parallelBooksMax`) applies to a running indexing at once; `400` outside the range. |
-| GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s) |
+| GET  | `/api/ingest/status?libraryId=` | `IngestStatus` (frontend polls every 2s). `libraryId` scopes `counts`/`totalBooks`/`totalChunks`/`active`/`recentErrors` to one library; the run itself (`running`, session totals, throughput, ETA) is always the one shared background run across every library. |
 | POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
 
@@ -109,6 +119,7 @@ interface SearchRequest {
   topK?: number;            // default 8, max 50
   bookIds?: number[];       // restrict to these books
   tags?: string[];          // restrict to books having ANY of these tags
+  libraryIds?: number[];    // restrict to these libraries (see GET /api/libraries); default: every library
   rerank?: boolean;         // cross-encoder reranking, default true; ignored (fused order) if the server has none
   correct?: boolean;        // spelling correction, default true; false searches for the query exactly as written
 }
@@ -128,10 +139,12 @@ interface ChatRequest extends SearchRequest {
 ### MCP
 
 `/mcp` is an MCP server (streamable HTTP, stateless, protocol handled by Spring AI) with the tools `search_library`,
-`ask_library`, `list_books`, `list_tags` and `library_status`. Tool results are JSON text: `search_library` returns
-`{query, correctedQuery, passages: Passage[], note}`, where a `Passage` is a `SourceChunk` without `chunkId`. `ask_library`
-returns `{answer, sources: Passage[], searchQuery, corrections, model, elapsedMs}`, `searchQuery` being the (rewritten,
-spell-corrected) query the passages were retrieved with. Both take `correctSpelling: false` to use the query as written.
+`ask_library`, `list_books`, `list_tags`, `list_libraries` and `library_status`. Tool results are JSON text:
+`search_library` returns `{query, correctedQuery, passages: Passage[], note}`, where a `Passage` is a `SourceChunk`
+without `chunkId`. `ask_library` returns `{answer, sources: Passage[], searchQuery, corrections, model, elapsedMs}`,
+`searchQuery` being the (rewritten, spell-corrected) query the passages were retrieved with. Both take
+`correctSpelling: false` to use the query as written, and an optional `libraryIds` to restrict to particular
+libraries (ids from `list_libraries`).
 
 Each request needs `Authorization: Bearer <key>` or `X-API-Key: <key>` matching one of `raggedlib.mcp.api-keys`.
 Otherwise the server responds `401` with `WWW-Authenticate: Bearer realm="raggedlib-mcp"` and a JSON `{error, message}`.

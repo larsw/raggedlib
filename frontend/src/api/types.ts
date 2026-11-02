@@ -20,7 +20,9 @@ export const BOOK_STATUSES: readonly BookStatus[] = [
 ];
 
 export interface Book {
-  id: number; // calibre id
+  id: number; // internal id, unique across every configured library
+  libraryId: number; // which configured library (see GET /api/libraries)
+  calibreId: number; // this book's id within its own Calibre library (not unique across libraries)
   title: string;
   authors: string[];
   tags: string[];
@@ -111,8 +113,15 @@ export interface IngestStatus {
   recentErrors: { bookId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }
 
+export interface Library {
+  id: number;
+  name: string;
+  path: string;
+  bookCount: number;
+}
+
 export interface SystemInfo {
-  libraryPath: string;
+  libraries: { name: string; path: string }[];
   ollamaUrl: string;
   ollamaReachable: boolean;
   chatModel: string;
@@ -142,6 +151,7 @@ export interface BookQuery {
   q?: string;
   status?: BookStatus;
   tag?: string;
+  libraryId?: number;
   page?: number;
   size?: number;
   sort?: BookSort;
@@ -157,6 +167,7 @@ export interface SearchRequest {
   topK?: number; // default 8, max 50
   bookIds?: number[]; // restrict to these books
   tags?: string[]; // restrict to books having ANY of these tags
+  libraryIds?: number[]; // restrict to these libraries; default: every configured library
   rerank?: boolean; // cross-encoder reranking; default on when the server has a reranker
   correct?: boolean; // spelling correction of words the library doesn't contain; default true
 }

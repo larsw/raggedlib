@@ -37,6 +37,7 @@ export const STORAGE_KEYS = {
   theme: "raggedlib.theme",
   conversation: "raggedlib.conversation.v1",
   scope: "raggedlib.scope.v1",
+  libraryId: "raggedlib.libraryId.v1",
   sourcesPanel: "raggedlib.sourcesPanel.v1",
   bookPanel: "raggedlib.bookPanel.v1",
   readerPrefs: "raggedlib.reader.prefs.v1",

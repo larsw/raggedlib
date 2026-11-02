@@ -25,6 +25,7 @@ data class ChatRequest(
     val topK: Int? = null,
     val bookIds: List<Long>? = null,
     val tags: List<String>? = null,
+    val libraryIds: List<Long>? = null,
     val history: List<HistoryMessage>? = null,
     val model: String? = null,
     val rerank: Boolean? = null,
@@ -79,7 +80,7 @@ class ChatService(
      * the response also says whether the search query was spell-corrected.
      */
     fun retrieve(req: ChatRequest, query: String): SearchResponse {
-        val found = search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.rerank, req.correct))
+        val found = search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.libraryIds, req.rerank, req.correct))
         return found.copy(results = withinBudget(found.results, props.chat.maxContextChars))
     }
 

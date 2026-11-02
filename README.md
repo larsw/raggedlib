@@ -20,6 +20,19 @@ open http://localhost:3000          # Indexing tab → Start
 
 The library is mounted **read-only** from `~/Documents/CalibreLibrary`. Set `CALIBRE_LIBRARY` to use another path, and `CHAT_MODEL` or `EMBED_MODEL` to swap models (see `.env.example`). Changing the embedding model also means changing `vector(1024)` in the migration and re-indexing. Scanned PDFs are OCR'd in English; set `OCR_LANGUAGES` to read others too, e.g. `OCR_LANGUAGES=eng+nor+deu` (Tesseract's language codes), and rebuild the backend, which installs them.
 
+### Multiple libraries
+
+raggedlib can index and search several Calibre libraries at once, as their union by default; a chooser in the navbar
+narrows the UI (and search/ask) to one. In docker-compose, add a second library by uncommenting its volume line in
+`docker-compose.yml` and setting `CALIBRE_LIBRARY_1` (and optionally `CALIBRE_LIBRARY_1_NAME`) in `.env`; a third
+library repeats the pattern at index 2, and so on — the same indexed-environment-variable style as `MCP_API_KEY`
+(see below). Developing on the host needs no Docker volumes at all: set
+`RAGGEDLIB_LIBRARIES_0_PATH=/path/to/library/one` and `RAGGEDLIB_LIBRARIES_1_PATH=/path/to/library/two` (plus
+`_0_NAME` / `_1_NAME`) directly. Each library is synced, ingested and deduplicated independently, but a sync, an
+indexing run or a sweep for duplicate text across libraries always covers every configured library; the chooser only
+changes what's displayed. A library already indexed under the single-library `CALIBRE_LIBRARY`/`RAGGEDLIB_LIBRARY_PATH`
+setting keeps its books when you add more libraries, as long as its path doesn't change.
+
 ### Develop on the host
 
 ```bash
@@ -36,10 +49,11 @@ The backend serves an [MCP](https://modelcontextprotocol.io) endpoint at `http:/
 
 | Tool | What it does |
 |---|---|
-| `search_library` | Reranked passage search (about 1 s, no LLM). Takes `query`, and optionally `topK`, `bookIds`, `tags`, `rerank` and `correctSpelling`. An empty result means the books don't cover it. |
-| `ask_library` | A cited answer from the local chat model (20–90 s; cut off at 150 s), with its sources as short excerpts. Takes `question`, and optionally `topK`, `bookIds`, `tags`, `model` and `correctSpelling`. |
-| `list_books` | Find books by title/author substring, tag or status, to get ids for `bookIds` |
+| `search_library` | Reranked passage search (about 1 s, no LLM). Takes `query`, and optionally `topK`, `bookIds`, `tags`, `libraryIds`, `rerank` and `correctSpelling`. An empty result means the books don't cover it. |
+| `ask_library` | A cited answer from the local chat model (20–90 s; cut off at 150 s), with its sources as short excerpts. Takes `question`, and optionally `topK`, `bookIds`, `tags`, `libraryIds`, `model` and `correctSpelling`. |
+| `list_books` | Find books by title/author substring, tag, status or library, to get ids for `bookIds` |
 | `list_tags` | Calibre tags by number of books |
+| `list_libraries` | The configured libraries, with how many books each has, to get ids for `libraryIds` |
 | `library_status` | How many books are indexed and searchable |
 
 Every MCP request needs an API key, sent as `Authorization: Bearer <key>` or `X-API-Key: <key>`. With no key configured, the endpoint refuses everything. The rest of the API (`/api`, used by the web UI) doesn't need a key; like the UI, it's published on localhost only.

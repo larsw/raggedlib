@@ -2,6 +2,7 @@ import { MenuItem } from "@blueprintjs/core";
 import { MultiSelect, type ItemPredicate, type ItemRenderer } from "@blueprintjs/select";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../../api/client";
+import { useApp } from "../../AppContext";
 import type { TagCount } from "../../api/types";
 
 interface Props {
@@ -9,29 +10,35 @@ interface Props {
   onChange: (tags: string[]) => void;
 }
 
-let tagCache: Promise<TagCount[]> | undefined;
+const tagCache = new Map<number | "all", Promise<TagCount[]>>();
 
-/** Tags rarely change; fetch once per page load (retry on failure). */
-export function loadTags(): Promise<TagCount[]> {
-  tagCache ??= api.tags().catch((err) => {
-    tagCache = undefined;
-    throw err;
-  });
-  return tagCache;
+/** Tags rarely change; fetch once per (library, page load) (retry on failure). */
+export function loadTags(libraryId?: number): Promise<TagCount[]> {
+  const key = libraryId ?? "all";
+  let cached = tagCache.get(key);
+  if (!cached) {
+    cached = api.tags(libraryId).catch((err) => {
+      tagCache.delete(key);
+      throw err;
+    });
+    tagCache.set(key, cached);
+  }
+  return cached;
 }
 
 export function useTags() {
+  const { library } = useApp();
   const [tags, setTags] = useState<TagCount[]>([]);
   const [error, setError] = useState<string>();
   useEffect(() => {
     let alive = true;
-    loadTags()
+    loadTags(library?.id)
       .then((t) => alive && setTags(t))
       .catch((err) => alive && setError(errorMessage(err)));
     return () => {
       alive = false;
     };
-  }, []);
+  }, [library?.id]);
   return { tags, error };
 }
 

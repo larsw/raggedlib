@@ -4,6 +4,7 @@ import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
+import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 @RestController
@@ -23,5 +24,5 @@ class IngestController(private val ingest: IngestService) {
     fun stop(): IngestStatus = ingest.stop()
 
     @GetMapping("/status")
-    fun status(): IngestStatus = ingest.status()
+    fun status(@RequestParam(required = false) libraryId: Long?): IngestStatus = ingest.status(libraryId)
 }

@@ -9,7 +9,14 @@ enum class MetadataSource { AUTO, CALIBREDB, SQLITE }
 /** All settings are env-overridable via relaxed binding, e.g. RAGGEDLIB_LIBRARY_PATH, RAGGEDLIB_INGEST_EXTRACT_CONCURRENCY. */
 @ConfigurationProperties("raggedlib")
 data class RaggedlibProperties(
-    val libraryPath: Path,
+    /**
+     * Legacy single-library path (deprecated): used as the one configured library only while [libraries] is empty,
+     * and as the match target for the one-time backfill of books indexed before multi-library support (see
+     * LibraryRegistry) even once [libraries] is in use.
+     */
+    val libraryPath: Path? = null,
+    /** The Calibre libraries to index and search, in order. Overrides [libraryPath] when non-empty. */
+    val libraries: List<LibraryConfig> = emptyList(),
     /** Where ebook-convert / pdftotext write their temporary output. */
     val tmpDir: Path,
     val metadataSource: MetadataSource = MetadataSource.AUTO,
@@ -24,6 +31,16 @@ data class RaggedlibProperties(
     val mcp: Mcp = Mcp(),
     val ocr: Ocr = Ocr(),
 ) {
+    /** One configured Calibre library. [name] is just a display label; blank defaults to the path's last segment. */
+    data class LibraryConfig(val name: String = "", val path: Path = Path.of(""))
+
+    /** [libraries] if configured, else one library from the legacy [libraryPath]; never empty once validated. */
+    fun effectiveLibraries(): List<LibraryConfig> = when {
+        libraries.isNotEmpty() -> libraries.map { if (it.name.isNotBlank()) it else it.copy(name = it.path.fileName?.toString() ?: it.path.toString()) }
+        libraryPath != null -> listOf(LibraryConfig("default", libraryPath))
+        else -> error("configure raggedlib.libraries (one or more {name, path}) or the legacy raggedlib.library-path")
+    }
+
     data class Tools(
         val calibredb: String = "calibredb",
         val ebookConvert: String = "ebook-convert",

@@ -1,6 +1,7 @@
 import { Alignment, Button, Navbar, NavbarDivider, NavbarGroup, NavbarHeading, Tab, Tabs, Tooltip } from "@blueprintjs/core";
 import type { TabId } from "../hooks/useHashTab";
 import { nextTheme, THEME_META, type Theme } from "../hooks/useTheme";
+import { LibrarySelect } from "./LibrarySelect";
 import { SettingsMenu } from "./SettingsMenu";
 import { SystemStatus } from "./SystemStatus";
 
@@ -33,6 +34,7 @@ export function AppNavbar({ tab, onTabChange, theme, onToggleTheme }: Props) {
         </Tabs>
       </NavbarGroup>
       <NavbarGroup align={Alignment.END}>
+        <LibrarySelect />
         <SystemStatus />
         <NavbarDivider />
         <ThemeButton theme={theme} onClick={onToggleTheme} />

@@ -1,6 +1,7 @@
 package dev.raggedlib.system
 
 import dev.raggedlib.config.RaggedlibProperties
+import dev.raggedlib.library.LibraryRegistry
 import dev.raggedlib.search.Reranker
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.client.SimpleClientHttpRequestFactory
@@ -10,8 +11,10 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.client.RestClient
 import tools.jackson.databind.JsonNode
 
+data class LibraryStatusInfo(val name: String, val path: String)
+
 data class SystemInfo(
-    val libraryPath: String,
+    val libraries: List<LibraryStatusInfo>,
     val ollamaUrl: String,
     val ollamaReachable: Boolean,
     val chatModel: String,
@@ -27,6 +30,7 @@ data class SystemInfo(
 @RequestMapping("/api")
 class SystemController(
     private val props: RaggedlibProperties,
+    private val libraries: LibraryRegistry,
     @Value("\${spring.ai.ollama.base-url}") private val ollamaUrl: String,
     @Value("\${spring.ai.ollama.chat.model}") private val chatModel: String,
     @Value("\${spring.ai.ollama.embedding.model}") private val embeddingModel: String,
@@ -54,7 +58,7 @@ class SystemController(
             "embedding" !in caps && !name.contains("embed", ignoreCase = true)
         }?.map { it.path("name").asString() }?.sorted() ?: emptyList()
         return SystemInfo(
-            libraryPath = props.libraryPath.toString(),
+            libraries = libraries.all.map { LibraryStatusInfo(it.name, it.root.toString()) },
             ollamaUrl = ollamaUrl,
             ollamaReachable = models != null,
             chatModel = chatModel,

@@ -11,7 +11,7 @@ import {
   Tag,
   Tooltip,
 } from "@blueprintjs/core";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, bookFileUrl } from "../api/client";
 import { BOOK_STATUSES, type Book, type BookSort, type BookStatus } from "../api/types";
 import { useApp } from "../AppContext";
@@ -36,7 +36,7 @@ const SORTS: { value: BookSort; label: string }[] = [
   { value: "author", label: "Author" },
   { value: "pubdate", label: "Published" },
   { value: "indexedAt", label: "Indexed at" },
-  { value: "id", label: "Calibre id" },
+  { value: "id", label: "ID" },
 ];
 
 function TagList({ tags }: { tags: string[] }) {
@@ -55,7 +55,7 @@ function TagList({ tags }: { tags: string[] }) {
 }
 
 export function LibraryView({ active }: { active: boolean }) {
-  const { setScope, navigate, openReader } = useApp();
+  const { setScope, navigate, openReader, library, libraries } = useApp();
   const visible = usePageVisible();
   const [q, setQ] = useState("");
   const query = useDebounced(q.trim(), 300);
@@ -73,11 +73,15 @@ export function LibraryView({ active }: { active: boolean }) {
   const { sync, syncing } = useSyncLibrary();
 
   // back to the first page whenever the filter changes
-  useEffect(() => setPage(0), [query, status, tag, sort]);
+  useEffect(() => setPage(0), [query, status, tag, sort, library?.id]);
 
   const books = useAsync(
-    (signal) => api.books({ q: query || undefined, status: status || undefined, tag: tag || undefined, sort, page, size: PAGE_SIZE }, signal),
-    [query, status, tag, sort, page],
+    (signal) =>
+      api.books(
+        { q: query || undefined, status: status || undefined, tag: tag || undefined, libraryId: library?.id, sort, page, size: PAGE_SIZE },
+        signal,
+      ),
+    [query, status, tag, sort, page, library?.id],
   );
 
   // Refresh when coming back to the tab (statuses change while indexing runs).
@@ -102,6 +106,9 @@ export function LibraryView({ active }: { active: boolean }) {
   const total = books.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const filtered = !!(query || status || tag);
+  // provenance only matters when books from more than one library can appear side by side
+  const showLibraryColumn = !library && libraries.length > 1;
+  const libraryNames = useMemo(() => new Map(libraries.map((l) => [l.id, l.name])), [libraries]);
 
   const reindex = async (book: Book) => {
     setReindexing((s) => new Set(s).add(book.id));
@@ -213,6 +220,7 @@ export function LibraryView({ active }: { active: boolean }) {
                 <th aria-label="Cover" />
                 <th>Title</th>
                 <th>Authors</th>
+                {showLibraryColumn && <th>Library</th>}
                 <th>Tags</th>
                 <th>Format</th>
                 <th>Status</th>
@@ -252,6 +260,9 @@ export function LibraryView({ active }: { active: boolean }) {
                     <td className="authors-cell" title={b.authors.join(", ")}>
                       {formatAuthors(b.authors)}
                     </td>
+                    {showLibraryColumn && (
+                      <td className={Classes.TEXT_SMALL}>{libraryNames.get(b.libraryId) ?? "—"}</td>
+                    )}
                     <td className="tags-cell">
                       <TagList tags={b.tags} />
                     </td>

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, ApiError, errorMessage, isAbortError } from "../api/client";
-import type { ChatHistoryMessage, ChatRequest, SourceChunk } from "../api/types";
+import type { ChatHistoryMessage, ChatRequest, Library, SourceChunk } from "../api/types";
+import { useApp } from "../AppContext";
 import { loadJson, saveJson, STORAGE_KEYS } from "../lib/storage";
 import { splitThinking } from "../lib/thinking";
 import type { Scope } from "./useScope";
@@ -55,8 +56,9 @@ export function buildHistory(turns: ChatTurn[]): ChatHistoryMessage[] {
     ]);
 }
 
-function scopeLabel(scope: Scope): string | undefined {
+function scopeLabel(scope: Scope, library: Library | null): string | undefined {
   const parts: string[] = [];
+  if (library) parts.push(library.name);
   if (scope.books.length === 1) parts.push(scope.books[0]!.title);
   else if (scope.books.length > 1) parts.push(`${scope.books.length} books`);
   if (scope.tags.length) parts.push(scope.tags.map((t) => `#${t}`).join(" "));
@@ -64,6 +66,7 @@ function scopeLabel(scope: Scope): string | undefined {
 }
 
 export function useChat() {
+  const { library } = useApp();
   const [turns, setTurns] = useState<ChatTurn[]>(restore);
   const ctrlRef = useRef<AbortController | null>(null);
   const turnsRef = useRef(turns);
@@ -102,7 +105,7 @@ export function useChat() {
             sources: [],
             status: "pending",
             model: scope.model || undefined,
-            scopeLabel: scopeLabel(scope),
+            scopeLabel: scopeLabel(scope, library),
             rerank: scope.rerank,
             createdAt: new Date().toISOString(),
           },
@@ -113,6 +116,7 @@ export function useChat() {
         topK: scope.topK,
         ...(scope.books.length ? { bookIds: scope.books.map((b) => b.id) } : {}),
         ...(scope.tags.length ? { tags: scope.tags } : {}),
+        ...(library ? { libraryIds: [library.id] } : {}),
         rerank: scope.rerank,
         ...(history.length ? { history } : {}),
         ...(scope.model ? { model: scope.model } : {}),
@@ -175,7 +179,7 @@ export function useChat() {
         if (ctrlRef.current === ctrl) ctrlRef.current = null;
       }
     },
-    [update],
+    [update, library],
   );
 
   const stop = useCallback(() => ctrlRef.current?.abort(), []);

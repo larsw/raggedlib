@@ -406,6 +406,13 @@ body {
   transform-origin: bottom;
 }
 
+.library-select {
+  max-width: 180px;
+}
+.library-select select {
+  text-overflow: ellipsis;
+}
+
 /* ---------- settings menu (navbar gear) ---------- */
 
 .settings-menu {
@@ -1625,6 +1632,9 @@ body.is-resizing-x * {
   .app-navbar .bp6-navbar-divider,
   .app-navbar .system-status-label {
     display: none;
+  }
+  .library-select {
+    max-width: 88px;
   }
   .app-navbar .app-title {
     margin-right: 10px;

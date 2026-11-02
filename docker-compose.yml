@@ -109,14 +109,23 @@ services:
       SPRING_AI_OLLAMA_BASE_URL: http://ollama:11434
       SPRING_AI_OLLAMA_CHAT_MODEL: ${CHAT_MODEL:-qwen3.5:9b}
       SPRING_AI_OLLAMA_EMBEDDING_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
-      RAGGEDLIB_LIBRARY_PATH: /library
+      # Library 0 (default); add more by uncommenting a matching volume below and adding
+      # RAGGEDLIB_LIBRARIES_1_NAME / RAGGEDLIB_LIBRARIES_1_PATH (see README), same pattern as MCP_API_KEY_1 etc.
+      RAGGEDLIB_LIBRARIES_0_NAME: ${CALIBRE_LIBRARY_NAME:-default}
+      RAGGEDLIB_LIBRARIES_0_PATH: /library/0
+      RAGGEDLIB_LIBRARIES_1_NAME: ${CALIBRE_LIBRARY_1_NAME:-}
+      RAGGEDLIB_LIBRARIES_1_PATH: /library/1
+      RAGGEDLIB_LIBRARIES_2_NAME: ${CALIBRE_LIBRARY_2_NAME:-}
+      RAGGEDLIB_LIBRARIES_2_PATH: /library/2
       RAGGEDLIB_RERANK_BASE_URL: http://reranker:8080
       # MCP endpoint http://localhost:8080/mcp — clients send "Authorization: Bearer $MCP_API_KEY" (unset = MCP refused)
       RAGGEDLIB_MCP_API_KEYS_0_NAME: ${MCP_API_KEY_NAME:-default}
       RAGGEDLIB_MCP_API_KEYS_0_KEY: ${MCP_API_KEY:-}
       RAGGEDLIB_OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}
     volumes:
-      - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library:ro
+      - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library/0:ro
+      - ${CALIBRE_LIBRARY_1:-${HOME}/Documents/CalibreLibraryNonFiction}:/library/1:ro
+      - ${CALIBRE_LIBRARY_2:-${HOME}/Documents/CalibreLibraryMisc}:/library/2:ro
     ports:
       - "127.0.0.1:8080:8080"
 

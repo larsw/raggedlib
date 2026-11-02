@@ -6,6 +6,7 @@ import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.ingest.IngestService
 import dev.raggedlib.library.BookRepository
 import dev.raggedlib.library.BookStatus
+import dev.raggedlib.library.LibraryRegistry
 import dev.raggedlib.search.ScoreKind
 import dev.raggedlib.search.SearchRequest
 import dev.raggedlib.search.SearchService
@@ -29,6 +30,7 @@ class LibraryTools(
     private val books: BookRepository,
     private val ingest: IngestService,
     private val props: RaggedlibProperties,
+    private val libraries: LibraryRegistry,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -66,6 +68,8 @@ class LibraryTools(
 
     data class BookInfo(
         val id: Long,
+        val libraryId: Long,
+        val libraryName: String,
         val title: String,
         val authors: List<String>,
         val tags: List<String>,
@@ -80,6 +84,8 @@ class LibraryTools(
     data class BookList(val total: Long, val page: Int, val size: Int, val books: List<BookInfo>)
 
     data class TagInfo(val name: String, val books: Int)
+
+    data class LibraryInfo(val id: Long, val name: String, val books: Int)
 
     data class LibraryStatus(
         val totalBooks: Int,
@@ -108,13 +114,15 @@ Use list_books or list_tags first to restrict a search to particular books or ta
         bookIds: List<Long>?,
         @McpToolParam(description = "Only search books having ANY of these tags (names from list_tags).", required = false)
         tags: List<String>?,
+        @McpToolParam(description = "Only search these libraries (ids from list_libraries); default: every configured library.", required = false)
+        libraryIds: List<Long>?,
         @McpToolParam(description = "Cross-encoder reranking with a relevance cutoff (default true). false = raw hybrid order, never empty while anything matches.", required = false)
         rerank: Boolean?,
         @McpToolParam(description = "Correct misspelled words (default true): words the library lacks, or has only rarely next to a far more common spelling. false searches for the query exactly as written.", required = false)
         correctSpelling: Boolean?,
     ): SearchResult {
         log.info("MCP search_library: '{}'", query.take(200))
-        val response = search.search(SearchRequest(query, topK, bookIds, tags, rerank, correctSpelling))
+        val response = search.search(SearchRequest(query, topK, bookIds, tags, libraryIds, rerank, correctSpelling))
         val found = response.results.map(::passage)
         // MCP clients cap tool output (Claude Code: ~25K tokens); keep whole passages up to a character budget
         var used = 0
@@ -151,6 +159,8 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
         bookIds: List<Long>?,
         @McpToolParam(description = "Only use books having ANY of these tags.", required = false)
         tags: List<String>?,
+        @McpToolParam(description = "Only use these libraries (ids from list_libraries); default: every configured library.", required = false)
+        libraryIds: List<Long>?,
         @McpToolParam(description = "Chat model override (an installed Ollama model); default is the server's.", required = false)
         model: String?,
         @McpToolParam(description = "Correct misspelled words for retrieval (default true); false retrieves for the question exactly as written.", required = false)
@@ -158,7 +168,7 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
     ): AnswerResult {
         require(question.isNotBlank()) { "question must not be empty" }
         log.info("MCP ask_library: '{}'", question.take(200))
-        val req = ChatRequest(query = question, topK = topK, bookIds = bookIds, tags = tags, model = model, correct = correctSpelling)
+        val req = ChatRequest(query = question, topK = topK, bookIds = bookIds, tags = tags, libraryIds = libraryIds, model = model, correct = correctSpelling)
         val a = try {
             chat.answer(req, props.mcp.answerTimeout)
         } catch (e: Exception) {
@@ -191,6 +201,8 @@ the same text as another (duplicateOf), which is searched in its place.""",
         tag: String?,
         @McpToolParam(description = "Only books in this status: PENDING, INDEXED, DUPLICATE, FAILED, SKIPPED, EXTRACTING or EMBEDDING.", required = false)
         status: String?,
+        @McpToolParam(description = "Only books in this library (id from list_libraries).", required = false)
+        libraryId: Long?,
         @McpToolParam(description = "Page number, from 0 (default 0).", required = false)
         page: Int?,
         @McpToolParam(description = "Page size (1-100, default 25).", required = false)
@@ -200,11 +212,25 @@ the same text as another (duplicateOf), which is searched in its place.""",
             BookStatus.entries.firstOrNull { it.name.equals(s.trim(), ignoreCase = true) }
                 ?: throw IllegalArgumentException("unknown status '$s'; use one of ${BookStatus.entries.joinToString()}")
         }
-        val p = books.search(query, st, tag, (page ?: 0).coerceAtLeast(0), (size ?: 25).coerceIn(1, 100), "title")
+        val p = books.search(query, st, tag, (page ?: 0).coerceAtLeast(0), (size ?: 25).coerceIn(1, 100), "title", libraryId)
+        val names = libraries.all.associate { it.id to it.name }
         return BookList(p.total, p.page, p.size, p.items.map { b ->
-            BookInfo(b.id, b.title, b.authors, b.tags, b.languages, b.pubdate?.atZone(java.time.ZoneOffset.UTC)?.year,
-                b.status, b.chunkCount, b.duplicateOf)
+            BookInfo(b.id, b.libraryId, names[b.libraryId] ?: "?", b.title, b.authors, b.tags, b.languages,
+                b.pubdate?.atZone(java.time.ZoneOffset.UTC)?.year, b.status, b.chunkCount, b.duplicateOf)
         })
+    }
+
+    @McpTool(
+        name = "list_libraries",
+        title = "List configured libraries",
+        description = "List the Calibre libraries configured on this server, with how many books each has. Use their ids to restrict search_library, ask_library or list_books to one library.",
+        annotations = McpAnnotations(title = "List libraries", readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false),
+    )
+    fun listLibraries(): List<LibraryInfo> {
+        // libraries.all first: it backfills pre-existing books' library_id on first access, which the count must see
+        val infos = libraries.all
+        val counts = books.countsByLibrary()
+        return infos.map { LibraryInfo(it.id, it.name, counts[it.id] ?: 0) }
     }
 
     @McpTool(

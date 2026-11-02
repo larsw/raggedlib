@@ -16,8 +16,9 @@ class BookRepository(
     private val mapper: ObjectMapper,
 ) {
     private val columns = """
-        id, title, authors, tags, series, series_index, languages, pubdate, formats, source_format, cover_path,
-        calibre_last_modified, status, chunk_count, error, indexed_at, duplicate_of, ocr_pages
+        id, library_id, calibre_id, title, authors, tags, series, series_index, languages, pubdate, formats,
+        source_format, cover_path, calibre_last_modified, status, chunk_count, error, indexed_at, duplicate_of,
+        ocr_pages
     """.trimIndent()
 
     private val rowMapper = RowMapper { rs, _ -> mapRow(rs) }
@@ -28,6 +29,8 @@ class BookRepository(
         return BookRow(
             book = Book(
                 id = rs.getLong("id"),
+                libraryId = rs.getLong("library_id"),
+                calibreId = rs.getLong("calibre_id"),
                 title = rs.getString("title"),
                 authors = rs.strings("authors"),
                 tags = rs.strings("tags"),
@@ -56,7 +59,10 @@ class BookRepository(
 
     fun findAll(): List<BookRow> = jdbc.query("select $columns from books", rowMapper)
 
-    fun search(q: String?, status: BookStatus?, tag: String?, page: Int, size: Int, sort: String): Page<Book> {
+    fun findAllByLibrary(libraryId: Long): List<BookRow> =
+        jdbc.query("select $columns from books where library_id = :libraryId", mapOf("libraryId" to libraryId), rowMapper)
+
+    fun search(q: String?, status: BookStatus?, tag: String?, page: Int, size: Int, sort: String, libraryId: Long? = null): Page<Book> {
         val where = mutableListOf<String>()
         val params = MapSqlParameterSource()
         if (!q.isNullOrBlank()) {
@@ -70,6 +76,10 @@ class BookRepository(
         if (!tag.isNullOrBlank()) {
             where += ":tag = any(tags)"
             params.addValue("tag", tag)
+        }
+        if (libraryId != null) {
+            where += "library_id = :libraryId"
+            params.addValue("libraryId", libraryId)
         }
         val whereSql = if (where.isEmpty()) "" else "where " + where.joinToString(" and ")
         val desc = sort.startsWith("-")
@@ -89,37 +99,45 @@ class BookRepository(
 
     private fun dir(desc: Boolean) = if (desc) "desc" else "asc"
 
-    fun tags(): List<TagCount> = jdbc.query(
-        "select t, count(*) c from books, unnest(tags) t group by t order by c desc, t",
-        emptyMap<String, Any>(),
-    ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
-
-    fun insert(r: CalibreRecord, sourceFormat: String?) {
-        jdbc.update(
-            """
-            insert into books (id, title, authors, tags, series, series_index, languages, pubdate, formats, source_format,
-                               cover_path, calibre_last_modified, status)
-            values (:id, :title, :authors, :tags, :series, :seriesIndex, :languages, :pubdate, cast(:formats as jsonb),
-                    :sourceFormat, :cover, :lastModified, 'PENDING')
-            """.trimIndent(),
-            recordParams(r, sourceFormat),
-        )
+    fun tags(libraryId: Long? = null): List<TagCount> {
+        val filter = if (libraryId != null) "where library_id = :libraryId" else ""
+        return jdbc.query(
+            "select t, count(*) c from books, unnest(tags) t $filter group by t order by c desc, t",
+            mapOf("libraryId" to libraryId),
+        ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
     }
+
+    fun countsByLibrary(): Map<Long, Int> = jdbc.query(
+        "select library_id, count(*) from books group by library_id", emptyMap<String, Any>(),
+    ) { rs, _ -> rs.getLong(1) to rs.getInt(2) }.toMap()
+
+    /** Inserts a newly-seen book of [libraryId]; the surrogate id is assigned by the database. */
+    fun insert(libraryId: Long, r: CalibreRecord, sourceFormat: String?): Long = jdbc.queryForObject(
+        """
+        insert into books (library_id, calibre_id, title, authors, tags, series, series_index, languages, pubdate,
+                           formats, source_format, cover_path, calibre_last_modified, status)
+        values (:libraryId, :id, :title, :authors, :tags, :series, :seriesIndex, :languages, :pubdate,
+                cast(:formats as jsonb), :sourceFormat, :cover, :lastModified, 'PENDING')
+        returning id
+        """.trimIndent(),
+        recordParams(r, sourceFormat).addValue("libraryId", libraryId),
+        Long::class.java,
+    )!!
 
     /**
      * Updates calibre metadata; when [reset] the book goes back to PENDING. Its passages stay searchable until the
      * re-index replaces them (and lends their embeddings where nothing changed).
      */
-    fun updateMetadata(r: CalibreRecord, sourceFormat: String?, reset: Boolean) {
+    fun updateMetadata(id: Long, r: CalibreRecord, sourceFormat: String?, reset: Boolean) {
         val resetSql = if (reset) ", status = 'PENDING', error = null" else ""
         jdbc.update(
             """
             update books set title = :title, authors = :authors, tags = :tags, series = :series, series_index = :seriesIndex,
                    languages = :languages, pubdate = :pubdate, formats = cast(:formats as jsonb), source_format = :sourceFormat,
                    cover_path = :cover, calibre_last_modified = :lastModified, updated_at = now() $resetSql
-            where id = :id
+            where id = :bookId
             """.trimIndent(),
-            recordParams(r, sourceFormat),
+            recordParams(r, sourceFormat).addValue("bookId", id),
         )
     }
 
@@ -273,16 +291,21 @@ class BookRepository(
         "select status from books where id = :id", mapOf("id" to id), String::class.java,
     ).firstOrNull()?.let(BookStatus::valueOf)
 
-    fun statusCounts(): Map<BookStatus, Int> {
+    fun statusCounts(libraryId: Long? = null): Map<BookStatus, Int> {
         val counts = BookStatus.entries.associateWith { 0 }.toMutableMap()
-        jdbc.query("select status, count(*) from books group by status", emptyMap<String, Any>()) { rs ->
-            counts[BookStatus.valueOf(rs.getString(1))] = rs.getInt(2)
-        }
+        val filter = if (libraryId != null) "where library_id = :libraryId" else ""
+        jdbc.query(
+            "select status, count(*) from books $filter group by status", mapOf("libraryId" to libraryId),
+        ) { rs -> counts[BookStatus.valueOf(rs.getString(1))] = rs.getInt(2) }
         return counts
     }
 
-    fun totalChunks(): Long =
-        jdbc.queryForObject("select coalesce(sum(chunk_count), 0) from books", emptyMap<String, Any>(), Long::class.java) ?: 0L
+    fun totalChunks(libraryId: Long? = null): Long {
+        val filter = if (libraryId != null) "where library_id = :libraryId" else ""
+        return jdbc.queryForObject(
+            "select coalesce(sum(chunk_count), 0) from books $filter", mapOf("libraryId" to libraryId), Long::class.java,
+        ) ?: 0L
+    }
 
     /**
      * Passages still to process for [ids], for the indexing ETA: a book's last known count (kept while it is queued

@@ -10,9 +10,10 @@ import {
   Spinner,
   Tag,
 } from "@blueprintjs/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { api } from "../api/client";
 import { BOOK_STATUSES, type IngestStatus } from "../api/types";
+import { useApp } from "../AppContext";
 import { ErrorState } from "../components/ErrorState";
 import { statusIntent } from "../components/StatusTag";
 import { toastError, toastSuccess } from "../components/toaster";
@@ -38,8 +39,12 @@ function sessionTotal(s: IngestStatus): number {
 }
 
 export function IndexingView({ active }: { active: boolean }) {
-  // Polls only while this tab is active; usePolling also pauses while the browser tab is hidden.
-  const status = usePolling((signal) => api.ingestStatus(signal), POLL_MS, active);
+  const { library } = useApp();
+  // Polls only while this tab is active; usePolling also pauses while the browser tab is hidden. Scoped to the
+  // chosen library (display only — Start/Stop/Retry/Sync below always act on every configured library).
+  const status = usePolling((signal) => api.ingestStatus(library?.id, signal), POLL_MS, active);
+  // the fetcher closure updates immediately, but the in-flight poll's timer wouldn't pick it up for a while
+  useEffect(() => status.refresh(), [library?.id, status.refresh]);
   const { sync, syncing } = useSyncLibrary();
   const [busy, setBusy] = useState<"start" | "stop" | "retry" | null>(null);
 

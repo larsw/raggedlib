@@ -2,6 +2,7 @@ import { MenuItem, Spinner } from "@blueprintjs/core";
 import { MultiSelect, type ItemRenderer } from "@blueprintjs/select";
 import { useEffect, useState } from "react";
 import { api, errorMessage, isAbortError } from "../../api/client";
+import { useApp } from "../../AppContext";
 import type { BookRef } from "../../hooks/useScope";
 import { useDebounced } from "../../hooks/useDebounced";
 import { formatAuthors } from "../../lib/format";
@@ -17,6 +18,7 @@ function truncate(s: string, n: number) {
 
 /** Book picker with server-side search (GET /api/books?q=&size=20). */
 export function BookMultiSelect({ selected, onChange }: Props) {
+  const { library } = useApp();
   const [query, setQuery] = useState("");
   const debounced = useDebounced(query, 250);
   const [items, setItems] = useState<BookRef[]>([]);
@@ -29,7 +31,7 @@ export function BookMultiSelect({ selected, onChange }: Props) {
     const ctrl = new AbortController();
     setLoading(true);
     api
-      .books({ q: debounced.trim() || undefined, size: 20, sort: "title" }, ctrl.signal)
+      .books({ q: debounced.trim() || undefined, libraryId: library?.id, size: 20, sort: "title" }, ctrl.signal)
       .then((page) => {
         setItems(page.items.map((b) => ({ id: b.id, title: b.title, authors: b.authors })));
         setError(undefined);
@@ -41,7 +43,7 @@ export function BookMultiSelect({ selected, onChange }: Props) {
         if (!ctrl.signal.aborted) setLoading(false);
       });
     return () => ctrl.abort();
-  }, [debounced, open]);
+  }, [debounced, open, library?.id]);
 
   const isSelected = (b: BookRef) => selected.some((s) => s.id === b.id);
 

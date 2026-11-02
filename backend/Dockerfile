@@ -20,7 +20,7 @@ RUN langs=$(echo "$OCR_LANGUAGES" | tr '+, ' '\n\n\n' | tr 'A-Z_' 'a-z-' | grep 
 ENV RAGGEDLIB_OCR_LANGUAGES=$OCR_LANGUAGES \
     QT_QPA_PLATFORM=offscreen \
     CALIBRE_CONFIG_DIRECTORY=/tmp/calibre-config \
-    RAGGEDLIB_LIBRARY_PATH=/library \
+    RAGGEDLIB_LIBRARY_PATH=/library/0 \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseZGC"
 RUN useradd --uid 1001 --create-home app
 USER app
