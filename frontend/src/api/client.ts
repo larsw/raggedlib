@@ -3,6 +3,8 @@ import type {
   Book,
   BookDetails,
   BookQuery,
+  VectorMethod,
+  VectorSpace,
   ChatEvent,
   ChatRequest,
   IngestStartRequest,
@@ -136,7 +138,8 @@ export const api = {
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/settings", signal),
   updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) =>
     postJson<ServerSettings>("/settings", body, undefined, "PUT"),
-
+  vectors: (q: { method: VectorMethod; size: number; seed: number }, signal?: AbortSignal) =>
+    getJson<VectorSpace>(`/vectors${queryString(q)}`, signal),
   search: (req: SearchRequest, signal?: AbortSignal) => postJson<SearchResponse>("/search", req, signal),
 
   /**

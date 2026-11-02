@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export const TABS = ["ask", "search", "library", "indexing"] as const;
+export const TABS = ["ask", "search", "library", "vectors", "indexing"] as const;
 export type TabId = (typeof TABS)[number];
 
 function parseHash(): TabId {

@@ -9,6 +9,7 @@ import { AskView } from "./views/AskView";
 import { IndexingView } from "./views/IndexingView";
 import { LibraryView } from "./views/LibraryView";
 import { SearchView } from "./views/SearchView";
+import { VectorSpaceView } from "./views/VectorSpaceView";
 
 // The reader (and foliate-js with it) loads on first use only.
 const ReaderDrawer = lazy(() => import("./components/reader/ReaderDrawer"));
@@ -35,6 +36,8 @@ export function App() {
         return <SearchView />;
       case "library":
         return <LibraryView active={active} />;
+      case "vectors":
+        return <VectorSpaceView active={active} />;
       case "indexing":
         return <IndexingView active={active} />;
     }
