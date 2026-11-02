@@ -89,7 +89,11 @@ services:
     restart: "no"
 
   backend:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        # OCR languages installed in the image (and used for every scanned PDF), e.g. eng+nor+deu
+        OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}
     restart: unless-stopped
     depends_on:
       postgres:
@@ -110,6 +114,7 @@ services:
       # MCP endpoint http://localhost:8080/mcp — clients send "Authorization: Bearer $MCP_API_KEY" (unset = MCP refused)
       RAGGEDLIB_MCP_API_KEYS_0_NAME: ${MCP_API_KEY_NAME:-default}
       RAGGEDLIB_MCP_API_KEYS_0_KEY: ${MCP_API_KEY:-}
+      RAGGEDLIB_OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}
     volumes:
       - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library:ro
     ports:

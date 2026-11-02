@@ -26,6 +26,7 @@ interface Book {
   indexedAt: string | null;
   duplicateOf: number | null; // status DUPLICATE: the book whose passages stand in for this one (searches restricted
                               // to this book, or to a tag only it has, use that book)
+  ocrPages: number;           // pages of the indexed text that came from OCR (scanned PDF pages); 0 = none
 }
 
 interface Page<T> { items: T[]; total: number; page: number; size: number; }
@@ -56,7 +57,12 @@ interface IngestStatus {
   chunksPerSecond: number;              // passages embedded per second, rolling over the last ~60s
   etaSeconds: number | null;            // remaining passages / passages of books finished per second (last ~10 min),
                                         // embedded or reused; null until a book has finished
-  active: { bookId: number; title: string; stage: "EXTRACTING" | "EMBEDDING"; chunks: number | null }[];
+  active: {
+    bookId: number; title: string;
+    stage: "EXTRACTING" | "OCR" | "EMBEDDING";
+    chunks: number | null;
+    ocr: { done: number; total: number } | null;  // stage OCR: pages read so far
+  }[];
   recentErrors: { bookId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }
 

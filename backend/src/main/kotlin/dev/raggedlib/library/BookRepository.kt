@@ -17,7 +17,7 @@ class BookRepository(
 ) {
     private val columns = """
         id, title, authors, tags, series, series_index, languages, pubdate, formats, source_format, cover_path,
-        calibre_last_modified, status, chunk_count, error, indexed_at, duplicate_of
+        calibre_last_modified, status, chunk_count, error, indexed_at, duplicate_of, ocr_pages
     """.trimIndent()
 
     private val rowMapper = RowMapper { rs, _ -> mapRow(rs) }
@@ -43,6 +43,7 @@ class BookRepository(
                 error = rs.getString("error"),
                 indexedAt = rs.getTimestamp("indexed_at")?.toInstant(),
                 duplicateOf = rs.getObject("duplicate_of") as Long?,
+                ocrPages = rs.getInt("ocr_pages"),
             ),
             formatPaths = formatPaths,
             coverPath = cover,
@@ -151,16 +152,25 @@ class BookRepository(
         )
     }
 
-    fun markIndexed(id: Long, chunkCount: Int, sourceFormat: String) {
+    fun markIndexed(id: Long, chunkCount: Int, sourceFormat: String, ocrPages: Int = 0) {
         jdbc.update(
             """
             update books set status = 'INDEXED', chunk_count = :n, error = null, indexed_at = now(), updated_at = now(),
-                   source_format = :fmt, duplicate_of = null
+                   source_format = :fmt, duplicate_of = null, ocr_pages = :ocr
             where id = :id
             """.trimIndent(),
-            mapOf("id" to id, "n" to chunkCount, "fmt" to sourceFormat),
+            mapOf("id" to id, "n" to chunkCount, "fmt" to sourceFormat, "ocr" to ocrPages),
         )
     }
+
+    /** PDFs SKIPPED for want of a text layer while OCR was off or unavailable go back to PENDING. Returns their ids. */
+    fun requeueWithoutTextLayer(): List<Long> = jdbc.queryForList(
+        """
+        update books set status = 'PENDING', error = null, updated_at = now()
+        where status = 'SKIPPED' and (error = 'no text layer' or error like 'no text layer (%') returning id
+        """.trimIndent(),
+        emptyMap<String, Any>(), Long::class.java,
+    ).filterNotNull()
 
     /**
      * Back to PENDING for re-indexing; existing passages stay (searchable) until the new ones replace them, and a
@@ -178,7 +188,7 @@ class BookRepository(
         jdbc.update(
             """
             update books set status = :status, error = :error, chunk_count = 0, indexed_at = null, duplicate_of = null,
-                   source_format = coalesce(:sourceFormat, source_format), updated_at = now()
+                   ocr_pages = 0, source_format = coalesce(:sourceFormat, source_format), updated_at = now()
             where id = :id
             """.trimIndent(),
             MapSqlParameterSource().addValue("id", id).addValue("status", status.name).addValue("error", error)

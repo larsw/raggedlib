@@ -8,12 +8,17 @@ RUN --mount=type=cache,target=/root/.m2 mvn -B -q -DskipTests package \
  && cp "$(ls target/*.jar | grep -v -- '-plain' | head -1)" /app.jar
 
 FROM eclipse-temurin:25-jre-noble
-# calibre (calibredb, ebook-convert) + poppler (pdftotext) for metadata and text extraction
-RUN apt-get update \
+# Tesseract languages for OCR, '+'-separated as in tesseract's -l (eng+nor+deu); each installs tesseract-ocr-<lang>.
+# eng and osd (orientation detection) always come with tesseract-ocr.
+ARG OCR_LANGUAGES=eng
+# calibre (calibredb, ebook-convert) + poppler (pdftotext, pdftoppm) for metadata and text extraction, tesseract for OCR
+RUN langs=$(echo "$OCR_LANGUAGES" | tr '+, ' '\n\n\n' | tr 'A-Z_' 'a-z-' | grep -vxE 'eng|osd|' | sed 's/^/tesseract-ocr-/') \
+ && apt-get update \
  && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-      calibre poppler-utils curl ca-certificates \
+      calibre poppler-utils tesseract-ocr $langs curl ca-certificates \
  && rm -rf /var/lib/apt/lists/*
-ENV QT_QPA_PLATFORM=offscreen \
+ENV RAGGEDLIB_OCR_LANGUAGES=$OCR_LANGUAGES \
+    QT_QPA_PLATFORM=offscreen \
     CALIBRE_CONFIG_DIRECTORY=/tmp/calibre-config \
     RAGGEDLIB_LIBRARY_PATH=/library \
     JAVA_TOOL_OPTIONS="-XX:MaxRAMPercentage=75 -XX:+UseZGC"

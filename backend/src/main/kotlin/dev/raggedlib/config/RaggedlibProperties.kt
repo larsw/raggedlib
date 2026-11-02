@@ -22,11 +22,16 @@ data class RaggedlibProperties(
     val embedding: Embedding = Embedding(),
     val rerank: Rerank = Rerank(),
     val mcp: Mcp = Mcp(),
+    val ocr: Ocr = Ocr(),
 ) {
     data class Tools(
         val calibredb: String = "calibredb",
         val ebookConvert: String = "ebook-convert",
         val pdftotext: String = "pdftotext",
+        val pdftoppm: String = "pdftoppm",
+        val pdfinfo: String = "pdfinfo",
+        val pdfimages: String = "pdfimages",
+        val tesseract: String = "tesseract",
         val calibredbTimeout: Duration = Duration.ofMinutes(2),
         val convertTimeout: Duration = Duration.ofMinutes(10),
     )
@@ -52,6 +57,35 @@ data class RaggedlibProperties(
          * least as long becomes DUPLICATE of it instead of being embedded (see Duplicates). 0 turns this off.
          */
         val duplicateMinShare: Double = 0.9,
+    )
+
+    /**
+     * OCR of PDF pages that have no text layer (see PdfOcr): scanned books, and scanned pages bound into a
+     * born-digital PDF. Needs Tesseract with the traineddata of [languages] (the Docker image installs them).
+     */
+    data class Ocr(
+        val enabled: Boolean = true,
+        /**
+         * Tesseract languages, `+`-separated (`eng+nor`), used for every book in addition to its Calibre languages.
+         * Each one is a traineddata file that must be installed; uninstalled ones are left out.
+         */
+        val languages: String = "eng",
+        /** Pages OCR'd at once, across all books; each runs one single-threaded Tesseract. */
+        val concurrency: Int = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(1, 8),
+        /** Resolution pages are rendered at; Tesseract is tuned for about 300. */
+        val dpi: Int = 300,
+        /** Per page, for rendering and for recognition each. */
+        val pageTimeout: Duration = Duration.ofMinutes(3),
+        /**
+         * A page whose mean word confidence is lower keeps its (lack of) text: what Tesseract reads off photos and
+         * diagrams scores far lower than text, even poorly scanned text.
+         */
+        val minConfidence: Double = 50.0,
+        /**
+         * In a PDF with a text layer, a page without text is OCR'd only if raster images cover this share of it:
+         * a scanned page, not a blank one or a figure.
+         */
+        val minImageCoverage: Double = 0.5,
     )
 
     data class Chunking(

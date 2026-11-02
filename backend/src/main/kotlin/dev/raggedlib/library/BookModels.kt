@@ -24,6 +24,8 @@ data class Book(
     val indexedAt: Instant?,
     /** Status DUPLICATE: the book whose passages stand in for this one. */
     val duplicateOf: Long? = null,
+    /** Pages of the indexed text that came from OCR (a scanned PDF, or scanned pages in one); 0 = none. */
+    val ocrPages: Int = 0,
 )
 
 /** Internal row with the relative file paths. */

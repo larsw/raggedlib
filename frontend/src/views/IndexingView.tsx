@@ -195,10 +195,16 @@ export function IndexingView({ active }: { active: boolean }) {
                       </td>
                       <td className="nowrap">
                         <Tag intent={Intent.PRIMARY} minimal icon={<Spinner size={10} />}>
-                          {a.stage.toLowerCase()}
+                          {a.stage === "OCR" ? "OCR" : a.stage.toLowerCase()}
                         </Tag>
                       </td>
-                      <td className="num nowrap">{a.chunks != null ? `${formatNumber(a.chunks)} chunks` : ""}</td>
+                      <td className="num nowrap">
+                        {a.chunks != null
+                          ? `${formatNumber(a.chunks)} chunks`
+                          : a.ocr
+                            ? `page ${formatNumber(a.ocr.done)} of ${formatNumber(a.ocr.total)}`
+                            : ""}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
