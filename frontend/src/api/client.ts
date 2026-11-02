@@ -118,6 +118,10 @@ export const api = {
 
   reindex: (id: number) => postJson<Book>(`/books/${id}/reindex`),
 
+  /** The book file itself, for the in-app reader. */
+  bookFile: async (id: number, format: string, signal?: AbortSignal) =>
+    (await send(`/books/${id}/file?format=${encodeURIComponent(format)}`, { signal })).blob(),
+
   tags: (signal?: AbortSignal) => getJson<TagCount[]>("/tags", signal),
 
   ingestStart: (body?: IngestStartRequest) => postJson<IngestStatus>("/ingest/start", body ?? {}),

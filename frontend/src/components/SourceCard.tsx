@@ -22,7 +22,7 @@ interface Props {
 const CLAMP_CHARS = 320;
 
 export function SourceCard({ source, id, highlighted, dimmed, terms, defaultExpanded, showScore }: Props) {
-  const { scope, addBookToScope } = useApp();
+  const { scope, addBookToScope, openReader } = useApp();
   const [expanded, setExpanded] = useState(!!defaultExpanded);
   // Jumping here from a citation expands the passage (user can still collapse it).
   useEffect(() => {
@@ -87,6 +87,23 @@ export function SourceCard({ source, id, highlighted, dimmed, terms, defaultExpa
                 target="_blank"
                 rel="noreferrer"
               />
+            )}
+            {source.page == null && (
+              <Tooltip content="Open the book at this passage" placement="top">
+                <Button
+                  size="small"
+                  variant="minimal"
+                  icon="book"
+                  text="Read"
+                  onClick={() =>
+                    openReader({
+                      bookId: source.bookId,
+                      title: source.title,
+                      target: { kind: "passage", text: source.text, section: source.section },
+                    })
+                  }
+                />
+              </Tooltip>
             )}
             <Tooltip content={inScope ? "Already in scope" : "Restrict retrieval to this book"} placement="top">
               <Button
