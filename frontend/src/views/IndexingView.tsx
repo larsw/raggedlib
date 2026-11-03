@@ -9,6 +9,7 @@ import {
   ProgressBar,
   Spinner,
   Tag,
+  Tooltip,
 } from "@blueprintjs/core";
 import { useMemo, useState } from "react";
 import { api } from "../api/client";
@@ -46,25 +47,29 @@ export function IndexingView({ active }: { active: boolean }) {
   const { sync, syncing } = useSyncLibrary();
   const libraryNames = useMemo(() => new Map(libraries.map((l) => [l.id, l.name])), [libraries]);
   const showLibraryColumn = libraries.length > 1;
-  const [busy, setBusy] = useState<"start" | "stop" | "retry" | null>(null);
+  const [busy, setBusy] = useState<"start" | "stop" | "forceStop" | "retry" | null>(null);
 
-  const act = async (kind: "start" | "stop" | "retry") => {
+  const act = async (kind: "start" | "stop" | "forceStop" | "retry") => {
     setBusy(kind);
     try {
       const s =
-        kind === "stop" ? await api.ingestStop() : await api.ingestStart(kind === "retry" ? { retryFailed: true } : {});
+        kind === "stop" ? await api.ingestStop() :
+        kind === "forceStop" ? await api.ingestStop(true) :
+        await api.ingestStart(kind === "retry" ? { retryFailed: true } : {});
       status.setData(s);
       toastSuccess(
         kind === "stop"
           ? "Stopping after the books in flight finish"
-          : kind === "retry"
-            ? "Retrying failed books"
-            : s.running
-              ? "Indexing started"
-              : "Nothing to index",
+          : kind === "forceStop"
+            ? "Stopping now — books in flight go back to pending"
+            : kind === "retry"
+              ? "Retrying failed books"
+              : s.running
+                ? "Indexing started"
+                : "Nothing to index",
       );
     } catch (err) {
-      toastError(kind === "stop" ? "Stop failed" : "Start failed", err);
+      toastError(kind === "stop" || kind === "forceStop" ? "Stop failed" : "Start failed", err);
     } finally {
       setBusy(null);
     }
@@ -114,13 +119,24 @@ export function IndexingView({ active }: { active: boolean }) {
           loading={busy === "start"}
           onClick={() => act("start")}
         />
-        <Button
-          icon="stop"
-          text="Stop"
-          disabled={!s.running || s.stopRequested}
-          loading={busy === "stop"}
-          onClick={() => act("stop")}
-        />
+        <Tooltip
+          content={
+            s.stopRequested
+              ? "Interrupt the books still being extracted (e.g. OCR) right now and put them back to pending, instead of waiting for them to finish"
+              : "Stop after the books currently being extracted/embedded finish"
+          }
+          placement="top"
+          disabled={!s.running}
+        >
+          <Button
+            icon={s.stopRequested ? "trash" : "stop"}
+            intent={s.stopRequested ? Intent.DANGER : Intent.NONE}
+            text={s.stopRequested ? "Discard & stop now" : "Stop"}
+            disabled={!s.running}
+            loading={busy === "stop" || busy === "forceStop"}
+            onClick={() => act(s.stopRequested ? "forceStop" : "stop")}
+          />
+        </Tooltip>
         <Button
           icon="repeat"
           text={`Retry failed${s.counts.FAILED ? ` (${s.counts.FAILED})` : ""}`}
