@@ -291,21 +291,16 @@ class BookRepository(
         "select status from books where id = :id", mapOf("id" to id), String::class.java,
     ).firstOrNull()?.let(BookStatus::valueOf)
 
-    fun statusCounts(libraryId: Long? = null): Map<BookStatus, Int> {
+    fun statusCounts(): Map<BookStatus, Int> {
         val counts = BookStatus.entries.associateWith { 0 }.toMutableMap()
-        val filter = if (libraryId != null) "where library_id = :libraryId" else ""
-        jdbc.query(
-            "select status, count(*) from books $filter group by status", mapOf("libraryId" to libraryId),
-        ) { rs -> counts[BookStatus.valueOf(rs.getString(1))] = rs.getInt(2) }
+        jdbc.query("select status, count(*) from books group by status", emptyMap<String, Any>()) { rs ->
+            counts[BookStatus.valueOf(rs.getString(1))] = rs.getInt(2)
+        }
         return counts
     }
 
-    fun totalChunks(libraryId: Long? = null): Long {
-        val filter = if (libraryId != null) "where library_id = :libraryId" else ""
-        return jdbc.queryForObject(
-            "select coalesce(sum(chunk_count), 0) from books $filter", mapOf("libraryId" to libraryId), Long::class.java,
-        ) ?: 0L
-    }
+    fun totalChunks(): Long =
+        jdbc.queryForObject("select coalesce(sum(chunk_count), 0) from books", emptyMap<String, Any>(), Long::class.java) ?: 0L
 
     /**
      * Passages still to process for [ids], for the indexing ETA: a book's last known count (kept while it is queued

@@ -130,8 +130,7 @@ export const api = {
 
   ingestStart: (body?: IngestStartRequest) => postJson<IngestStatus>("/ingest/start", body ?? {}),
   ingestStop: () => postJson<IngestStatus>("/ingest/stop"),
-  ingestStatus: (libraryId?: number, signal?: AbortSignal) =>
-    getJson<IngestStatus>(`/ingest/status${queryString({ libraryId })}`, signal),
+  ingestStatus: (signal?: AbortSignal) => getJson<IngestStatus>("/ingest/status", signal),
 
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/settings", signal),
   updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) =>

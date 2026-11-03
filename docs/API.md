@@ -61,12 +61,12 @@ interface IngestStatus {
   etaSeconds: number | null;            // remaining passages / passages of books finished per second (last ~10 min),
                                         // embedded or reused; null until a book has finished
   active: {
-    bookId: number; title: string;
+    bookId: number; libraryId: number; title: string;
     stage: "EXTRACTING" | "OCR" | "EMBEDDING";
     chunks: number | null;
     ocr: { done: number; total: number } | null;  // stage OCR: pages read so far
   }[];
-  recentErrors: { bookId: number; title: string; error: string; at: string }[]; // newest first, max 50
+  recentErrors: { bookId: number; libraryId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }
 
 interface Library {
@@ -109,7 +109,7 @@ interface SystemInfo {
 | POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
 | GET  | `/api/settings` | `ServerSettings` (below): settings changed at runtime, stored on the server. |
 | PUT  | `/api/settings` | Body `{ "parallelBooks"?: number }` → `ServerSettings`. `parallelBooks` (1–`parallelBooksMax`) applies to a running indexing at once; `400` outside the range. |
-| GET  | `/api/ingest/status?libraryId=` | `IngestStatus` (frontend polls every 2s). `libraryId` scopes `counts`/`totalBooks`/`totalChunks`/`active`/`recentErrors` to one library; the run itself (`running`, session totals, throughput, ETA) is always the one shared background run across every library. |
+| GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s), always covering every configured library: one background run indexes all of them together. |
 | POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
 

@@ -105,12 +105,13 @@ export interface IngestStatus {
   etaSeconds: number | null; // from passages of books finished in the last ~10 min (embedded or reused)
   active: {
     bookId: number;
+    libraryId: number;
     title: string;
     stage: IngestStage;
     chunks: number | null;
     ocr: { done: number; total: number } | null; // stage OCR: pages read so far
   }[];
-  recentErrors: { bookId: number; title: string; error: string; at: string }[]; // newest first, max 50
+  recentErrors: { bookId: number; libraryId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }
 
 export interface Library {

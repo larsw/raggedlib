@@ -171,12 +171,9 @@ class IngestService(
 
     fun isRunning() = run != null
 
-    /**
-     * [libraryId] scopes what's *displayed* (counts, totalChunks, active, recentErrors) to one library; the run
-     * itself (running/startedAt/session totals/throughput/ETA) is shared across every configured library regardless.
-     */
-    fun status(libraryId: Long? = null): IngestStatus {
-        val counts = books.statusCounts(libraryId)
+    /** Always covers every configured library: one background run indexes all of them together. */
+    fun status(): IngestStatus {
+        val counts = books.statusCounts()
         val r = run
         val perSec = if (r != null) rate.perSecond() else 0.0
         val done = if (r != null) progress.perSecond() else 0.0
@@ -192,14 +189,14 @@ class IngestService(
             startedAt = startedAt,
             counts = counts,
             totalBooks = counts.values.sum(),
-            totalChunks = books.totalChunks(libraryId),
+            totalChunks = books.totalChunks(),
             sessionProcessed = sessionProcessed.get(),
             sessionChunks = sessionChunks.get(),
             parallelBooks = settings.parallelBooks,
             chunksPerSecond = Math.round(perSec * 10) / 10.0,
             etaSeconds = eta,
-            active = active.values.filter { libraryId == null || it.libraryId == libraryId }.sortedBy { it.bookId },
-            recentErrors = if (libraryId == null) recentErrors.toList() else recentErrors.filter { it.libraryId == libraryId },
+            active = active.values.sortedBy { it.bookId },
+            recentErrors = recentErrors.toList(),
         )
     }
 

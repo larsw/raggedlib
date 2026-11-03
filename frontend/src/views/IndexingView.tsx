@@ -10,7 +10,7 @@ import {
   Spinner,
   Tag,
 } from "@blueprintjs/core";
-import { useEffect, useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "../api/client";
 import { BOOK_STATUSES, type IngestStatus } from "../api/types";
 import { useApp } from "../AppContext";
@@ -39,13 +39,13 @@ function sessionTotal(s: IngestStatus): number {
 }
 
 export function IndexingView({ active }: { active: boolean }) {
-  const { library } = useApp();
-  // Polls only while this tab is active; usePolling also pauses while the browser tab is hidden. Scoped to the
-  // chosen library (display only — Start/Stop/Retry/Sync below always act on every configured library).
-  const status = usePolling((signal) => api.ingestStatus(library?.id, signal), POLL_MS, active);
-  // the fetcher closure updates immediately, but the in-flight poll's timer wouldn't pick it up for a while
-  useEffect(() => status.refresh(), [library?.id, status.refresh]);
+  const { libraries } = useApp();
+  // Always every configured library: one background run covers all of them, so filtering the view by the
+  // navbar's chooser would only hide what's happening, not change it.
+  const status = usePolling((signal) => api.ingestStatus(signal), POLL_MS, active);
   const { sync, syncing } = useSyncLibrary();
+  const libraryNames = useMemo(() => new Map(libraries.map((l) => [l.id, l.name])), [libraries]);
+  const showLibraryColumn = libraries.length > 1;
   const [busy, setBusy] = useState<"start" | "stop" | "retry" | null>(null);
 
   const act = async (kind: "start" | "stop" | "retry") => {
@@ -199,6 +199,11 @@ export function IndexingView({ active }: { active: boolean }) {
                           {a.title}
                         </div>
                       </td>
+                      {showLibraryColumn && (
+                        <td className={`nowrap ${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                          {libraryNames.get(a.libraryId) ?? "—"}
+                        </td>
+                      )}
                       <td className="nowrap">
                         <Tag intent={Intent.PRIMARY} minimal icon={<Spinner size={10} />}>
                           {a.stage === "OCR" ? "OCR" : a.stage.toLowerCase()}
@@ -229,6 +234,7 @@ export function IndexingView({ active }: { active: boolean }) {
                     <div className="error-head">
                       <span className="book-title" title={e.title}>
                         {e.title}
+                        {showLibraryColumn && ` · ${libraryNames.get(e.libraryId) ?? "—"}`}
                       </span>
                       <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} nowrap`}>{formatRelative(e.at)}</span>
                     </div>
