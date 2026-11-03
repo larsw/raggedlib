@@ -106,7 +106,7 @@ interface SystemInfo {
 | GET  | `/api/tags?libraryId=` | `{ name: string, count: number }[]` sorted by count desc; `libraryId` restricts to one library |
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
 | POST | `/api/ingest/reprocess` | Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books again (all when `bookIds` is absent; an empty list selects none; or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
-| POST | `/api/ingest/stop` | Graceful stop after in-flight books. Returns `IngestStatus`. |
+| POST | `/api/ingest/stop?force=` | Graceful by default: waits for books in flight. `force=true` interrupts them right away (killing e.g. an OCR process) and puts them back to PENDING instead of letting them finish. Returns `IngestStatus`. |
 | GET  | `/api/settings` | `ServerSettings` (below): settings changed at runtime, stored on the server. |
 | PUT  | `/api/settings` | Body `{ "parallelBooks"?: number }` → `ServerSettings`. `parallelBooks` (1–`parallelBooksMax`) applies to a running indexing at once; `400` outside the range. |
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s), always covering every configured library: one background run indexes all of them together. |

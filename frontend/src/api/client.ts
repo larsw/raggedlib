@@ -129,7 +129,8 @@ export const api = {
   tags: (libraryId?: number, signal?: AbortSignal) => getJson<TagCount[]>(`/tags${queryString({ libraryId })}`, signal),
 
   ingestStart: (body?: IngestStartRequest) => postJson<IngestStatus>("/ingest/start", body ?? {}),
-  ingestStop: () => postJson<IngestStatus>("/ingest/stop"),
+  /** `force`: interrupt books currently being extracted (killing e.g. OCR) and put them back to PENDING, instead of waiting for them to finish. */
+  ingestStop: (force = false) => postJson<IngestStatus>(`/ingest/stop${queryString({ force: force ? "true" : undefined })}`),
   ingestStatus: (signal?: AbortSignal) => getJson<IngestStatus>("/ingest/status", signal),
 
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/settings", signal),

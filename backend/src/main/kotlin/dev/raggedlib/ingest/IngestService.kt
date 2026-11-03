@@ -25,6 +25,7 @@ import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
@@ -50,6 +51,8 @@ class IngestService(
 
     /** The running coordinator's extraction limit, to wake it when "books indexed in parallel" changes. */
     @Volatile private var permitsOfRun: AdjustableLimit? = null
+    /** The current run's extraction workers, so [forceStop] can interrupt them directly. */
+    @Volatile private var currentWorkers: ExecutorService? = null
 
     /** Applies a changed "books indexed in parallel" to the running indexing at once. */
     fun parallelBooksChanged() {
@@ -169,6 +172,25 @@ class IngestService(
         return status()
     }
 
+    /**
+     * Unlike [stop], doesn't wait for the books currently being extracted: interrupts their extraction right away
+     * (killing any external process it's blocked on, e.g. OCR) instead of letting it run to completion, and puts
+     * every book currently in flight back to PENDING rather than waiting to see what it finishes with. A book whose
+     * embedding was already underway and finishes anyway in the meantime just ends up INDEXED moments later, which
+     * overwrites this PENDING harmlessly; this only ever discards work, never a result.
+     */
+    fun forceStop(): IngestStatus {
+        if (run == null) return status()
+        stopRequested = true
+        val abandoned = active.keys.toList()
+        currentWorkers?.shutdownNow()
+        if (abandoned.isNotEmpty()) {
+            books.requeue(abandoned)
+            log.info("Force-stopped: {} books in flight put back to PENDING", abandoned.size)
+        }
+        return status()
+    }
+
     fun isRunning() = run != null
 
     /** Always covers every configured library: one background run indexes all of them together. */
@@ -209,6 +231,7 @@ class IngestService(
         val permits = AdjustableLimit { settings.parallelBooks }
         permitsOfRun = permits
         val workers = Executors.newVirtualThreadPerTaskExecutor()
+        currentWorkers = workers
         try {
             while (!stopRequested) {
                 permits.acquire()
@@ -234,7 +257,7 @@ class IngestService(
                 workers.submit {
                     try {
                         val extracted = extractOne(id, r.eligible)
-                        if (extracted != null) queue.put(Queued(extracted, r)) else r.inFlight.decrementAndGet()
+                        if (extracted != null) handOff(queue, Queued(extracted, r)) else r.inFlight.decrementAndGet()
                     } catch (e: Throwable) {
                         r.inFlight.decrementAndGet()
                         log.error("Extraction worker failed for book {}", id, e)
@@ -251,6 +274,7 @@ class IngestService(
             log.error("Ingestion coordinator failed", e)
         } finally {
             permitsOfRun = null
+            currentWorkers = null
             active.clear()
             log.info("Ingestion finished: {} books, {} chunks", sessionProcessed.get(), sessionChunks.get())
             try {
@@ -267,6 +291,24 @@ class IngestService(
                 if (again.isNotEmpty()) start(again, false)
             }
         }
+    }
+
+    /**
+     * Puts [item] on the embedding [queue], retrying if interrupted (a [forceStop] arriving exactly while blocked
+     * here shouldn't discard an extraction that already succeeded — only the retry's wait is allowed to block, not
+     * the interrupt itself being reasserted, or it would just throw again immediately without ever blocking).
+     */
+    private fun handOff(queue: ArrayBlockingQueue<Any>, item: Queued) {
+        var wasInterrupted = false
+        while (true) {
+            try {
+                queue.put(item)
+                break
+            } catch (e: InterruptedException) {
+                wasInterrupted = true
+            }
+        }
+        if (wasInterrupted) Thread.currentThread().interrupt()
     }
 
     private fun extractOne(id: Long, eligible: Set<BookStatus>): Extracted? {
@@ -306,6 +348,13 @@ class IngestService(
                     return Extracted(row, format, chunkList, ex.ocrPages)
                 }
             }
+        } catch (e: InterruptedException) {
+            // force-stopped: the external process was killed; back to PENDING, not FAILED (forceStop also does this
+            // directly, since the interrupt doesn't always surface this cleanly through every extraction path)
+            active.remove(id)
+            books.requeue(id)
+            Thread.currentThread().interrupt()
+            return null
         } catch (e: Exception) {
             active.remove(id)
             fail(row, e)
@@ -321,6 +370,10 @@ class IngestService(
             val id = ex.row.book.id
             try {
                 embedAndStore(ex)
+            } catch (e: InterruptedException) {
+                // force-stopped mid-embedding: back to PENDING, not FAILED (see extractOne)
+                books.requeue(id)
+                Thread.currentThread().interrupt()
             } catch (e: Exception) {
                 fail(ex.row, e)
             } finally {
