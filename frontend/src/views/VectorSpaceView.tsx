@@ -3,6 +3,7 @@ import {
   ButtonGroup,
   Callout,
   Classes,
+  HTMLSelect,
   Intent,
   NonIdealState,
   Spinner,
@@ -11,6 +12,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { VectorMethod, VectorPoint, VectorSpace } from "../api/types";
+import { useApp } from "../AppContext";
 import { ErrorState } from "../components/ErrorState";
 import { useAsync } from "../hooks/useAsync";
 import { formatNumber } from "../lib/format";
@@ -60,20 +62,32 @@ interface View {
 const IDENTITY: View = { scale: 1, offsetX: 0, offsetY: 0 };
 
 export function VectorSpaceView({ active }: { active: boolean }) {
+  const { library, libraries } = useApp();
+  // One library at a time: the navbar's choice, or — with "All libraries" chosen there — a pick of this view's own.
+  const [ownLibraryId, setOwnLibraryId] = useState<number | null>(null);
+  const libraryId = library?.id ?? libraries.find((l) => l.id === ownLibraryId)?.id ?? libraries[0]?.id;
   const [method, setMethod] = useState<VectorMethod>("umap");
   const [size, setSize] = useState(1000);
   const [seed, setSeed] = useState(1);
   const [highlightBook, setHighlightBook] = useState<number | null>(null);
   const [pinned, setPinned] = useState<VectorPoint | null>(null);
 
-  const space = useAsync<VectorSpace>(
-    (signal) => api.vectors({ method, size, seed }, signal),
-    [method, size, seed],
+  const space = useAsync<VectorSpace | undefined>(
+    (signal) =>
+      libraryId == null ? Promise.resolve(undefined) : api.vectors({ libraryId, method, size, seed }, signal),
+    [libraryId, method, size, seed],
   );
+
+  // a new library's passages are different points: drop the selection and highlight of the previous one
+  useEffect(() => {
+    setPinned(null);
+    setHighlightBook(null);
+  }, [libraryId]);
 
   const reshuffle = () => setSeed(1 + Math.floor(Math.random() * 1_000_000));
 
-  const data = space.data;
+  // the last layout stays up while the next loads, but not across libraries
+  const data = space.data?.libraryId === libraryId ? space.data : undefined;
   const books = useMemo(() => {
     const byId = new Map<number, { bookId: number; title: string; count: number }>();
     for (const p of data?.points ?? []) {
@@ -89,6 +103,14 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   return (
     <div className="vectors-view">
       <div className="view-toolbar">
+        {library == null && libraries.length > 1 && libraryId != null && (
+          <HTMLSelect
+            aria-label="Library to plot"
+            value={libraryId}
+            onChange={(e) => setOwnLibraryId(Number(e.currentTarget.value))}
+            options={libraries.map((l) => ({ value: l.id, label: l.name }))}
+          />
+        )}
         <ButtonGroup>
           {METHODS.map((m) => (
             <Button
@@ -120,7 +142,11 @@ export function VectorSpaceView({ active }: { active: boolean }) {
       ) : !data ? (
         <NonIdealState icon={<Spinner />} description="Projecting embeddings…" />
       ) : data.points.length === 0 ? (
-        <NonIdealState icon="scatter-plot" title="No embeddings yet" description="Index some books to see them here." />
+        <NonIdealState
+          icon="scatter-plot"
+          title="No embeddings yet"
+          description="Index some books of this library to see them here."
+        />
       ) : (
         <div className="vectors-body">
           <div className="vectors-canvas-wrap">

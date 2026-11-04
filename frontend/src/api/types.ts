@@ -219,6 +219,7 @@ export interface VectorPoint {
 }
 
 export interface VectorSpace {
+  libraryId: number;
   method: VectorMethod;
   seed: number;
   size: number;
