@@ -22,6 +22,7 @@ import { isBusyStatus, StatusTag } from "../components/StatusTag";
 import { FacetFilterSelect } from "../components/FacetFilterSelect";
 import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
+import { columnWidth, tableMinWidth, useColumnWidths, type ColumnSpec } from "../hooks/useColumnWidths";
 import { useDebounced } from "../hooks/useDebounced";
 import { useSidePanel } from "../hooks/useSidePanel";
 import { STORAGE_KEYS } from "../lib/storage";
@@ -39,6 +40,21 @@ const SORTS: { value: BookSort; label: string }[] = [
   { value: "indexedAt", label: "Indexed at" },
   { value: "id", label: "ID" },
 ];
+
+/** Resizable columns, between the cover and the actions (which aren't). */
+const COLUMNS: (ColumnSpec & { className?: string })[] = [
+  { id: "title", label: "Title", defaultWidth: 420, flexible: true },
+  { id: "authors", label: "Authors", defaultWidth: 200 },
+  { id: "publisher", label: "Publisher", defaultWidth: 170 },
+  { id: "library", label: "Library", defaultWidth: 110 },
+  { id: "tags", label: "Tags", defaultWidth: 240 },
+  { id: "format", label: "Format", defaultWidth: 80 },
+  { id: "status", label: "Status", defaultWidth: 100 },
+  { id: "chunks", label: "Chunks", defaultWidth: 80, className: "num" },
+  { id: "indexed", label: "Indexed", defaultWidth: 170 },
+];
+const COVER_WIDTH = 36;
+const ACTIONS_WIDTH = 112;
 
 function TagList({ tags }: { tags: string[] }) {
   if (tags.length === 0) return <span className={Classes.TEXT_MUTED}>—</span>;
@@ -73,6 +89,7 @@ export function LibraryView({ active }: { active: boolean }) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const panel = useSidePanel(bodyRef, { storageKey: STORAGE_KEYS.bookPanel, onSnapClose: () => setSelectedId(null) });
   const { sync, syncing } = useSyncLibrary();
+  const columns = useColumnWidths(STORAGE_KEYS.libraryColumns, COLUMNS);
 
   // back to the first page whenever the filter changes
   useEffect(() => setPage(0), [query, status, tag, publisher, sort, library?.id]);
@@ -120,6 +137,10 @@ export function LibraryView({ active }: { active: boolean }) {
   // provenance only matters when books from more than one library can appear side by side
   const showLibraryColumn = !library && libraries.length > 1;
   const libraryNames = useMemo(() => new Map(libraries.map((l) => [l.id, l.name])), [libraries]);
+  const shownColumns = COLUMNS.filter((c) => c.id !== "library" || showLibraryColumn);
+  // Until the title column is sized by hand it takes the room left over; after that, the actions column does
+  // (a table narrower than the view still fills it), and one wider than the view scrolls sideways.
+  const titleFlexible = columnWidth(columns.widths, COLUMNS[0]!) === undefined;
 
   const reindex = async (book: Book) => {
     setReindexing((s) => new Set(s).add(book.id));
@@ -168,7 +189,7 @@ export function LibraryView({ active }: { active: boolean }) {
 
   return (
     <div
-      className={`library-view${panel.dragging ? " is-resizing" : ""}`}
+      className={`library-view${panel.dragging || columns.dragging ? " is-resizing" : ""}`}
       onKeyDown={(e) => {
         if (e.key === "Escape" && selectedId != null && !e.defaultPrevented) setSelectedId(null);
       }}
@@ -227,19 +248,29 @@ export function LibraryView({ active }: { active: boolean }) {
             />
           )
         ) : (
-          <HTMLTable compact striped interactive className={`library-table${books.loading ? " is-stale" : ""}`}>
+          <HTMLTable
+            compact
+            striped
+            interactive
+            className={`library-table${books.loading ? " is-stale" : ""}`}
+            style={{ minWidth: tableMinWidth(columns.widths, shownColumns, COVER_WIDTH + ACTIONS_WIDTH) }}
+          >
+            <colgroup>
+              <col style={{ width: COVER_WIDTH }} />
+              {shownColumns.map((c) => (
+                <col key={c.id} style={{ width: columnWidth(columns.widths, c) }} />
+              ))}
+              <col style={{ width: titleFlexible ? ACTIONS_WIDTH : undefined }} />
+            </colgroup>
             <thead>
               <tr>
                 <th aria-label="Cover" />
-                <th>Title</th>
-                <th>Authors</th>
-                <th>Publisher</th>
-                {showLibraryColumn && <th>Library</th>}
-                <th>Tags</th>
-                <th>Format</th>
-                <th>Status</th>
-                <th className="num">Chunks</th>
-                <th>Indexed</th>
+                {shownColumns.map((c) => (
+                  <th key={c.id} className={c.className}>
+                    {c.label}
+                    <span className="col-resize-handle" {...columns.handleProps(c)} />
+                  </th>
+                ))}
                 <th aria-label="Actions" />
               </tr>
             </thead>

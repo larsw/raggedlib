@@ -1438,7 +1438,52 @@ body.is-resizing-x * {
 }
 .library-table {
   width: 100%;
+  table-layout: fixed; /* column widths come from the <colgroup>: the user's, or the defaults */
   transition: opacity 150ms;
+}
+.library-table th,
+.library-table td {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.library-table .title-cell,
+.library-table .authors-cell,
+.library-table .publisher-cell,
+.library-table .tags-cell {
+  max-width: none;
+}
+/* a wide, invisible grab area on a header cell's right edge; its line shows on header hover, focus and drag */
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 0;
+  width: 9px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.col-resize-handle::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  right: 3px;
+  width: 2px;
+  border-radius: 1px;
+  background: transparent;
+  transition: background-color 120ms;
+}
+.library-table thead tr:hover .col-resize-handle::after {
+  background: var(--app-border-strong);
+}
+.col-resize-handle:hover::after,
+.col-resize-handle:focus-visible::after,
+.is-resizing .col-resize-handle:hover::after {
+  background: var(--app-accent);
+}
+.col-resize-handle:focus-visible {
+  outline: none;
 }
 .library-table thead th {
   position: sticky;
