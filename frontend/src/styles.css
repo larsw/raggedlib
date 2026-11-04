@@ -1924,6 +1924,10 @@ body.is-resizing-x * {
   min-width: 0;
   min-height: 0;
 }
+.vectors-missing {
+  margin: 8px 16px 0;
+  width: auto;
+}
 .vectors-hint {
   position: absolute;
   top: 8px;

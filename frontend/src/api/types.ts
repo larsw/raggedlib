@@ -209,6 +209,7 @@ export type ChatEvent =
   | { type: "error"; error: string };
 
 export type VectorMethod = "pca" | "umap" | "tsne";
+export type VectorLevel = "passages" | "books"; // one point per passage, or per book (its passages' average)
 
 export interface VectorPoint {
   id: string;
@@ -223,10 +224,12 @@ export interface VectorPoint {
 
 export interface VectorSpace {
   libraryId: number;
+  level: VectorLevel;
   method: VectorMethod;
   seed: number;
   size: number;
-  totalPassages: number;
+  total: number; // passages (or books) with a vector in this library
+  missingBookVectors: number; // books with passages but no book vector yet
   dimensions: number;
   explainedVariance: number[] | null;
   elapsedMs: number; // how long computing it took (also when served from the cache)

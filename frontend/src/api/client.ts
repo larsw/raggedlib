@@ -3,6 +3,7 @@ import type {
   Book,
   BookDetails,
   BookQuery,
+  VectorLevel,
   VectorMethod,
   VectorSpace,
   ChatEvent,
@@ -140,8 +141,12 @@ export const api = {
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/settings", signal),
   updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) =>
     postJson<ServerSettings>("/settings", body, undefined, "PUT"),
-  vectors: (q: { libraryId: number; method: VectorMethod; size: number; seed?: number }, signal?: AbortSignal) =>
-    getJson<VectorSpace>(`/vectors${queryString(q)}`, signal),
+  vectors: (
+    q: { libraryId: number; level: VectorLevel; method: VectorMethod; size: number; seed?: number },
+    signal?: AbortSignal,
+  ) => getJson<VectorSpace>(`/vectors${queryString(q)}`, signal),
+  computeBookVectors: (libraryId?: number) =>
+    postJson<{ computed: number; missing: number }>(`/vectors/book-vectors${queryString({ libraryId })}`),
   search: (req: SearchRequest, signal?: AbortSignal) => postJson<SearchResponse>("/search", req, signal),
 
   /**

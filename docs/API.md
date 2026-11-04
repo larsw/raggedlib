@@ -114,7 +114,8 @@ interface SystemInfo {
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s), always covering every configured library: one background run indexes all of them together. |
 | POST | `/api/search` | Body `SearchRequest` → `SearchResponse` (hybrid vector + full-text, reranked by a cross-encoder; no chat model). With reranking, passages below the relevance cutoff are dropped, so `results` can be shorter than `topK` or empty. |
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
-| GET | `/api/vectors?libraryId=&method=pca\|umap\|tsne&size=1000&seed=` | `VectorSpace`: a seeded sample of the passages of one library's books (`libraryId` required; `404` if unknown), projected to 2-D. `size` 1..2000 (default 1000); the same seed gives the same sample and layout. Without `seed`, the library's current sample (seed 1 until reshuffled); a `seed` (Reshuffle) becomes the library's current sample. The last layout per library, method and size is cached in memory until the library's passages change (a book indexed, re-indexed or removed) or it is reshuffled; `cached` says whether it came from there. Coordinates are only comparable within one response. `t-SNE` is O(n²) per iteration, so it is the slowest at large sizes. |
+| GET | `/api/vectors?libraryId=&level=passages\|books&method=pca\|umap\|tsne&size=1000&seed=` | `VectorSpace`: a seeded sample of the passages (`level=passages`, default) or book vectors (`level=books`: one per book, the normalized average of its passages' embeddings) of one library's books (`libraryId` required; `404` if unknown), projected to 2-D. `size` 1..2000 (default 1000); the same seed gives the same sample and layout. Without `seed`, the library's current sample (seed 1 until reshuffled); a `seed` (Reshuffle) becomes the library's current sample. The last layout per library, level, method and size is cached in memory until the library's passages or book vectors change (a book indexed, re-indexed or removed; book vectors computed) or it is reshuffled; `cached` says whether it came from there. Coordinates are only comparable within one response. `t-SNE` is O(n²) per iteration, so it is the slowest at large sizes. |
+| POST | `/api/vectors/book-vectors?libraryId=` | Computes book vectors for books (of `libraryId`, default every library) that have passages but no book vector, or one older than their last indexing: averaged from the stored passage embeddings, nothing re-indexed (about 3 s for ~1,800 books). Indexing computes a book's vector itself; this is for books indexed before book vectors existed. Returns `{ computed, missing }`. |
 
 ```ts
 interface SearchRequest {
@@ -143,24 +144,26 @@ interface ChatRequest extends SearchRequest {
 ```ts
 interface VectorSpace {
   libraryId: number;
+  level: "passages" | "books";
   method: "pca" | "umap" | "tsne";
   seed: number;
-  size: number;                        // passages projected (≤ totalPassages)
-  totalPassages: number;               // passages with an embedding in this library
+  size: number;                        // points projected (≤ total)
+  total: number;                       // passages (or books) with a vector in this library
+  missingBookVectors: number;          // books with passages but no book vector yet (POST /api/vectors/book-vectors)
   dimensions: number;                  // embedding dimensions before projection
   explainedVariance: number[] | null;  // PCA only: variance share of the two axes
-  elapsedMs: number;                    // how long computing it took (also when served from the cache)
+  elapsedMs: number;                   // how long computing it took (also when served from the cache)
   points: VectorPoint[];
   cached: boolean;                     // served from the cache rather than computed for this request
 }
 
 interface VectorPoint {
-  id: string;
+  id: string;        // the passage's id, or (books) the book's
   bookId: number;
   title: string;
   page: number | null;
-  section: string | null;
-  snippet: string;   // leading part of the passage
+  section: string | null; // the passage's section; for a book, "N passages"
+  snippet: string;   // leading part of the passage; for a book, its authors · publisher · year
   x: number;
   y: number;
 }

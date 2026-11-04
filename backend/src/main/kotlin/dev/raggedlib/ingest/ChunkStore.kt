@@ -19,7 +19,11 @@ class ChunkStore(
     @Value("\${spring.ai.ollama.embedding.model}") private val embeddingModel: String,
     @Value("\${raggedlib.embedding.legacy-model:qwen3-embedding:0.6b}") private val legacyModel: String,
 ) {
-    fun deleteForBook(bookId: Long): Int = jdbc.update("delete from vector_store where book_id = ?", bookId)
+    /** Deletes the book's passages, and with them its book vector (the average of them). */
+    fun deleteForBook(bookId: Long): Int {
+        jdbc.update("delete from book_vectors where book_id = ?", bookId)
+        return jdbc.update("delete from vector_store where book_id = ?", bookId)
+    }
 
     fun insert(bookId: Long, title: String, authors: List<String>, chunks: List<Chunk>, embeddings: List<FloatArray>) {
         require(chunks.size == embeddings.size)
