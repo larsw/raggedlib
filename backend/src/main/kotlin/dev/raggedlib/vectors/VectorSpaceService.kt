@@ -3,6 +3,7 @@ package dev.raggedlib.vectors
 import com.fasterxml.jackson.annotation.JsonValue
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.ingest.ChunkStore
+import dev.raggedlib.search.TermStatistics
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -100,6 +101,7 @@ class VectorSpaceService(
     private val named: NamedParameterJdbcTemplate,
     private val props: RaggedlibProperties,
     private val bookVectors: BookVectors,
+    private val termStats: TermStatistics,
 ) {
     private val cache = SampleCache<LayoutSpec, VectorSpace>(::compute, { it.copy(cached = true) }, ::fingerprint)
     private val topicCache = SampleCache<TopicSpec, TopicSpace>(::computeTopics, { it.copy(cached = true) }, ::fingerprint)
@@ -221,7 +223,7 @@ class VectorSpaceService(
         val minClusterSize = (spec.size / 40).coerceIn(5, 50)
         val labels = Hdbscan.cluster(dist, n, minClusterSize)
 
-        val wordCounts = wordCountsByCluster(spec.level, rows, labels)
+        val wordCounts = dropCommonWords(wordCountsByCluster(spec.level, rows, labels))
         val keywords = TopicLabels.label(wordCounts)
         val sizeByCluster = labels.filter { it >= 0 }.groupingBy { it }.eachCount()
         val topics = sizeByCluster.entries.sortedByDescending { it.value }.map { (id, clusterSize) ->
@@ -230,6 +232,21 @@ class VectorSpaceService(
         }
         val pointTopics = rows.indices.associate { i -> rows[i].id to labels[i] }
         return TopicSpace(libraryId, spec.level, seed, n, total, spec.space, elapsedMs(started), topics, pointTopics)
+    }
+
+    /**
+     * Drops words common across the whole library (same threshold as the search keyword fallback,
+     * [RaggedlibProperties.Search.fallbackCommonTermFrequency]): real English words like "use" or "system" are no
+     * more a stopword than "data" or "process" is, but in a technical-book library they occur in nearly every
+     * passage regardless of subject, so c-TF-IDF's per-cluster count alone doesn't discount them enough — they'd
+     * otherwise win every topic's label on raw frequency despite saying nothing about what makes it distinct.
+     */
+    private fun dropCommonWords(wordCounts: Map<Int, Map<String, Int>>): Map<Int, Map<String, Int>> {
+        val words = wordCounts.values.flatMapTo(HashSet()) { it.keys }
+        if (words.isEmpty()) return wordCounts
+        val frequency = termStats.frequencies(words)
+        val threshold = props.search.fallbackCommonTermFrequency
+        return wordCounts.mapValues { (_, counts) -> counts.filterKeys { (frequency[it] ?: 0.0) < threshold } }
     }
 
     /**
