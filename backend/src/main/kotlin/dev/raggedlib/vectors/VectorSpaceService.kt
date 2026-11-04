@@ -29,8 +29,11 @@ data class VectorSpace(
     val dimensions: Int,
     /** PCA only: the share of total variance of each axis */
     val explainedVariance: List<Double>?,
+    /** how long computing it took (also when served from the cache) */
     val elapsedMs: Long,
     val points: List<VectorPoint>,
+    /** served from the cache rather than computed for this request */
+    val cached: Boolean = false,
 )
 
 @Service
@@ -38,12 +41,33 @@ class VectorSpaceService(
     private val jdbc: JdbcTemplate,
     private val props: RaggedlibProperties,
 ) {
+    private val cache = ProjectionCache(::compute, ::fingerprint)
+
+    /**
+     * The 2-D layout of the library's current sample (or, given a [seed], of that one, which a reshuffle makes the
+     * current sample), from the cache while the library's passages are unchanged. See [ProjectionCache].
+     */
+    fun space(libraryId: Long, method: VectorMethod, size: Int, seed: Long?): VectorSpace =
+        cache.get(libraryId, method, size, seed)
+
+    /**
+     * Changes whenever passages of the library's books may have: a book indexed or re-indexed (indexed_at, chunk
+     * count), losing its passages (no indexed_at), or removed. Cheap: one pass over the books table, not the vectors.
+     */
+    private fun fingerprint(libraryId: Long): String = jdbc.queryForObject(
+        """
+        select count(*) || ':' || coalesce(sum(chunk_count), 0) || ':' || count(indexed_at) || ':' || coalesce(max(indexed_at)::text, '')
+        from books where library_id = ?
+        """.trimIndent(),
+        String::class.java, libraryId,
+    )!!
+
     /**
      * A 2-D layout of [size] passages drawn from the vector store, from the books of library [libraryId] only. The
      * sample is the rows with the smallest md5(id, seed), so the same seed gives the same passages and a new seed a
      * new sample.
      */
-    fun space(libraryId: Long, method: VectorMethod, size: Int, seed: Long): VectorSpace {
+    private fun compute(libraryId: Long, method: VectorMethod, size: Int, seed: Long): VectorSpace {
         val started = System.nanoTime()
         val total = jdbc.queryForObject(COUNT_SQL, Long::class.java, libraryId) ?: 0L
         val rows = jdbc.query(SAMPLE_SQL, { rs, _ ->

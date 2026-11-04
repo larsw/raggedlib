@@ -229,6 +229,7 @@ export interface VectorSpace {
   totalPassages: number;
   dimensions: number;
   explainedVariance: number[] | null;
-  elapsedMs: number;
+  elapsedMs: number; // how long computing it took (also when served from the cache)
   points: VectorPoint[];
+  cached: boolean; // served from the server's cache
 }
