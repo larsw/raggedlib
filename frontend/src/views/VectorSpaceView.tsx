@@ -12,7 +12,7 @@ import {
 } from "@blueprintjs/core";
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { VectorLevel, VectorMethod, VectorPoint, VectorSpace } from "../api/types";
+import type { ClusterSpace, VectorLevel, VectorMethod, VectorPoint, VectorSpace, TopicSpace } from "../api/types";
 import { useApp } from "../AppContext";
 import { ErrorState } from "../components/ErrorState";
 import { toastError, toastSuccess } from "../components/toaster";
@@ -36,24 +36,49 @@ const LEVELS: { id: VectorLevel; label: string; hint: string }[] = [
 const SIZES = [250, 500, 1000, 2000];
 const PAD = 24;
 const POINT_RADIUS = 3.5;
+const NOISE_TOPIC = -1;
+const NOISE_GRAY: [number, number, number] = [130, 130, 130];
 
-/** Stable hue per book so the same book keeps its colour across reloads and methods. */
-function bookHue(bookId: number): number {
-  return (bookId * 137.508) % 360;
+const CLUSTER_SPACES: { id: ClusterSpace; label: string; hint: string }[] = [
+  { id: "raw", label: "Raw", hint: "Cluster the full embeddings directly (cosine distance)." },
+  { id: "umap", label: "UMAP-reduced", hint: "Reduce to ~8 dimensions with UMAP first, like BERTopic does, then cluster that (slower)." },
+];
+
+/** Stable hue per group (book or topic id) so the same one keeps its colour across reloads and methods. */
+function groupHue(id: number): number {
+  return (id * 137.508) % 360;
+}
+
+function hslString(hue: number): string {
+  return `hsl(${hue}, 65%, 52%)`;
+}
+
+/** [hue] as 0-255 RGB, for WebGL. */
+function hslRgb(hue: number): [number, number, number] {
+  const s = 0.65;
+  const l = 0.52;
+  const k = (n: number) => (n + hue / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
 }
 
 function bookColour(bookId: number): string {
-  return `hsl(${bookHue(bookId)}, 65%, 52%)`;
+  return hslString(groupHue(bookId));
 }
 
 /** [bookColour] as 0-255 RGB, for WebGL. */
 export function bookColourRgb(bookId: number): [number, number, number] {
-  const s = 0.65;
-  const l = 0.52;
-  const k = (n: number) => (n + bookHue(bookId) / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+  return hslRgb(groupHue(bookId));
+}
+
+/** Like [bookColour], but noise (unclustered, id -1) is always a neutral grey instead of a hue. */
+function topicColour(topicId: number): string {
+  return topicId === NOISE_TOPIC ? `rgb(${NOISE_GRAY.join(",")})` : hslString(groupHue(topicId));
+}
+
+function topicColourRgb(topicId: number): [number, number, number] {
+  return topicId === NOISE_TOPIC ? NOISE_GRAY : hslRgb(groupHue(topicId));
 }
 
 /** WebGL2 is what deck.gl draws with; without it (or after it failed) the canvas renderer draws 2-D plots. */
@@ -111,6 +136,9 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const [highlightBook, setHighlightBook] = useState<number | null>(null);
   const [pinned, setPinned] = useState<VectorPoint | null>(null);
   const [computing, setComputing] = useState(false);
+  const [colorBy, setColorBy] = useState<"book" | "topic">("book");
+  const [clusterSpace, setClusterSpace] = useState<ClusterSpace>("raw");
+  const [highlightTopic, setHighlightTopic] = useState<number | null>(null);
 
   const space = useAsync<VectorSpace | undefined>(
     (signal) =>
@@ -118,17 +146,28 @@ export function VectorSpaceView({ active }: { active: boolean }) {
     [libraryId, level, method, size, dims, seed],
   );
 
+  // independent of the projection (method/dims): switching PCA/UMAP/t-SNE or 2D/3D never refetches topics
+  const topicsAsync = useAsync<TopicSpace | undefined>(
+    (signal) =>
+      libraryId == null || colorBy !== "topic"
+        ? Promise.resolve(undefined)
+        : api.vectorTopics({ libraryId, level, size, seed, space: clusterSpace }, signal),
+    [libraryId, level, size, seed, clusterSpace, colorBy],
+  );
+
   // a new library's passages are different points: drop the selection and highlight of the previous one, and show
   // that library's own current sample rather than carrying a reshuffle over
   useEffect(() => {
     setPinned(null);
     setHighlightBook(null);
+    setHighlightTopic(null);
     setSeed(undefined);
   }, [libraryId]);
   // passages and books are different points too
   useEffect(() => {
     setPinned(null);
     setHighlightBook(null);
+    setHighlightTopic(null);
   }, [level]);
 
   /** book vectors for books indexed before they existed: averaged from their passages, nothing re-indexed */
@@ -166,7 +205,23 @@ export function VectorSpaceView({ active }: { active: boolean }) {
     return [...byId.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
   }, [data]);
 
+  // only trust topics computed for the sample currently shown (same library/level/size/seed)
+  const topicsData =
+    colorBy === "topic" && topicsAsync.data && data && topicsAsync.data.libraryId === libraryId &&
+      topicsAsync.data.level === level && topicsAsync.data.size === data.size && topicsAsync.data.seed === data.seed
+      ? topicsAsync.data
+      : undefined;
+  const pointTopic = useMemo(() => new Map(Object.entries(topicsData?.pointTopics ?? {})), [topicsData]);
+  const topicOf = useCallback((p: VectorPoint) => pointTopic.get(p.id) ?? NOISE_TOPIC, [pointTopic]);
+  const noiseCount = useMemo(
+    () => (topicsData ? data?.points.filter((p) => topicOf(p) === NOISE_TOPIC).length ?? 0 : 0),
+    [topicsData, data, topicOf],
+  );
+
   const methodMeta = METHODS.find((m) => m.id === method)!;
+  const groupId = colorBy === "book" ? (p: VectorPoint) => p.bookId : topicOf;
+  const highlightGroup = colorBy === "book" ? highlightBook : highlightTopic;
+  const colour = colorBy === "book" ? bookColourRgb : topicColourRgb;
 
   return (
     <div className="vectors-view">
@@ -210,6 +265,22 @@ export function VectorSpaceView({ active }: { active: boolean }) {
           </Tooltip>
         </ButtonGroup>
         <Button icon="random" text="Reshuffle sample" onClick={reshuffle} />
+        <ButtonGroup aria-label="Colour by book or topic">
+          <Button text="Book" active={colorBy === "book"} onClick={() => setColorBy("book")} title="Colour points by their book" />
+          <Button
+            text="Topic"
+            active={colorBy === "topic"}
+            onClick={() => setColorBy("topic")}
+            title="Cluster the embeddings (HDBSCAN) and colour points by discovered topic"
+          />
+        </ButtonGroup>
+        {colorBy === "topic" && (
+          <ButtonGroup aria-label="Cluster on raw embeddings or a UMAP reduction">
+            {CLUSTER_SPACES.map((s) => (
+              <Button key={s.id} text={s.label} active={clusterSpace === s.id} onClick={() => setClusterSpace(s.id)} title={s.hint} />
+            ))}
+          </ButtonGroup>
+        )}
         <span className="spacer" />
         {data && (
           <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
@@ -219,6 +290,12 @@ export function VectorSpaceView({ active }: { active: boolean }) {
           </span>
         )}
       </div>
+      {colorBy === "topic" && topicsData && (
+        <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} vectors-topics-status`}>
+          {formatNumber(topicsData.topics.length)} topics, {formatNumber(noiseCount)} unclustered in{" "}
+          {formatNumber(topicsData.elapsedMs)} ms{topicsData.cached ? " (cached)" : ""}
+        </div>
+      )}
 
       {byBook && data && data.missingBookVectors > 0 && data.points.length > 0 && (
         <Callout compact intent={Intent.PRIMARY} icon="info-sign" className="vectors-missing">
@@ -264,10 +341,11 @@ export function VectorSpaceView({ active }: { active: boolean }) {
                 <DeckScatter
                   points={data.points}
                   dims={dims}
-                  highlightBook={highlightBook}
+                  groupId={groupId}
+                  highlightGroup={highlightGroup}
                   pinnedId={pinned?.id ?? null}
                   onPick={setPinned}
-                  colour={bookColourRgb}
+                  colour={colour}
                   onError={(err) => {
                     console.warn("WebGL plot failed, falling back to the canvas renderer", err);
                     setGpu(false);
@@ -278,7 +356,9 @@ export function VectorSpaceView({ active }: { active: boolean }) {
               <ScatterCanvas
                 active={active}
                 points={data.points}
-                highlightBook={highlightBook}
+                groupId={groupId}
+                highlightGroup={highlightGroup}
+                colour={colour}
                 pinnedId={pinned?.id ?? null}
                 onPick={setPinned}
               />
@@ -288,7 +368,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
             {pinned && (
               <div className="vectors-detail" aria-live="polite">
                 <div className="vectors-detail-head">
-                  <Tag minimal style={{ background: bookColour(pinned.bookId) }}>
+                  <Tag minimal style={{ background: colorBy === "book" ? bookColour(pinned.bookId) : topicColour(topicOf(pinned)) }}>
                     {pinned.title}
                   </Tag>
                   <Button variant="minimal" icon="cross" aria-label="Close details" onClick={() => setPinned(null)} />
@@ -300,31 +380,80 @@ export function VectorSpaceView({ active }: { active: boolean }) {
                 <p className="vectors-snippet">{pinned.snippet}</p>
               </div>
             )}
-            <div className="vectors-legend">
-              <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
-                {byBook ? `${formatNumber(books.length)} books` : "Books"} — click to highlight
-                {highlightBook != null ? " (click again to clear)" : ""}
+            {colorBy === "topic" ? (
+              <div className="vectors-legend">
+                <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                  Topics — click to highlight
+                  {highlightTopic != null ? " (click again to clear)" : ""}
+                </div>
+                {!topicsData ? (
+                  <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                    {topicsAsync.error ? "Clustering failed." : "Clustering embeddings…"}
+                  </div>
+                ) : (
+                  <>
+                    {topicsData.topics.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className={`vectors-legend-item${highlightTopic === t.id ? " is-active" : ""}`}
+                        aria-pressed={highlightTopic === t.id}
+                        onClick={() => setHighlightTopic(highlightTopic === t.id ? null : t.id)}
+                        title={t.keywords.join(", ")}
+                      >
+                        <span className="vectors-swatch" style={{ background: topicColour(t.id) }} />
+                        <span className="vectors-legend-title">{t.label}</span>
+                        <span className={Classes.TEXT_MUTED}>{formatNumber(t.size)}</span>
+                      </button>
+                    ))}
+                    {noiseCount > 0 && (
+                      <button
+                        type="button"
+                        className={`vectors-legend-item${highlightTopic === NOISE_TOPIC ? " is-active" : ""}`}
+                        aria-pressed={highlightTopic === NOISE_TOPIC}
+                        onClick={() => setHighlightTopic(highlightTopic === NOISE_TOPIC ? null : NOISE_TOPIC)}
+                        title="Points that didn't settle into any stable topic"
+                      >
+                        <span className="vectors-swatch" style={{ background: topicColour(NOISE_TOPIC) }} />
+                        <span className="vectors-legend-title">Unclustered</span>
+                        <span className={Classes.TEXT_MUTED}>{formatNumber(noiseCount)}</span>
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
-              {books.map((b) => (
-                <button
-                  key={b.bookId}
-                  type="button"
-                  className={`vectors-legend-item${highlightBook === b.bookId ? " is-active" : ""}`}
-                  aria-pressed={highlightBook === b.bookId}
-                  onClick={() => setHighlightBook(highlightBook === b.bookId ? null : b.bookId)}
-                >
-                  <span className="vectors-swatch" style={{ background: bookColour(b.bookId) }} />
-                  <span className="vectors-legend-title">{b.title}</span>
-                  {!byBook && <span className={Classes.TEXT_MUTED}>{formatNumber(b.count)}</span>}
-                </button>
-              ))}
-            </div>
+            ) : (
+              <div className="vectors-legend">
+                <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                  {byBook ? `${formatNumber(books.length)} books` : "Books"} — click to highlight
+                  {highlightBook != null ? " (click again to clear)" : ""}
+                </div>
+                {books.map((b) => (
+                  <button
+                    key={b.bookId}
+                    type="button"
+                    className={`vectors-legend-item${highlightBook === b.bookId ? " is-active" : ""}`}
+                    aria-pressed={highlightBook === b.bookId}
+                    onClick={() => setHighlightBook(highlightBook === b.bookId ? null : b.bookId)}
+                  >
+                    <span className="vectors-swatch" style={{ background: bookColour(b.bookId) }} />
+                    <span className="vectors-legend-title">{b.title}</span>
+                    {!byBook && <span className={Classes.TEXT_MUTED}>{formatNumber(b.count)}</span>}
+                  </button>
+                ))}
+              </div>
+            )}
           </aside>
         </div>
       )}
       {space.loading && data && (
         <Tag className="vectors-busy" icon={<Spinner size={12} />} intent={Intent.PRIMARY} minimal>
           Re-projecting…
+        </Tag>
+      )}
+      {colorBy === "topic" && topicsAsync.loading && (
+        <Tag className="vectors-busy" icon={<Spinner size={12} />} intent={Intent.PRIMARY} minimal>
+          Clustering…
         </Tag>
       )}
     </div>
@@ -334,13 +463,15 @@ export function VectorSpaceView({ active }: { active: boolean }) {
 interface CanvasProps {
   active: boolean;
   points: VectorPoint[];
-  highlightBook: number | null;
+  groupId: (p: VectorPoint) => number;
+  highlightGroup: number | null;
+  colour: (groupId: number) => [number, number, number];
   pinnedId: string | null;
   onPick: (p: VectorPoint | null) => void;
 }
 
 /** Canvas scatter plot with wheel zoom, drag to pan, nearest-point hover and click. */
-function ScatterCanvas({ active, points, highlightBook, pinnedId, onPick }: CanvasProps) {
+function ScatterCanvas({ active, points, groupId, highlightGroup, colour, pinnedId, onPick }: CanvasProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState({ w: 0, h: 0 });
@@ -392,12 +523,13 @@ function ScatterCanvas({ active, points, highlightBook, pinnedId, onPick }: Canv
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, size.w, size.h);
 
-    const dimmed = highlightBook != null;
+    const dimmed = highlightGroup != null;
     for (const p of points) {
       const { x, y } = transform(p);
-      const isHi = p.bookId === highlightBook;
+      const isHi = groupId(p) === highlightGroup;
       ctx.globalAlpha = dimmed ? (isHi ? 1 : 0.12) : 0.75;
-      ctx.fillStyle = bookColour(p.bookId);
+      const [r, g, b] = colour(groupId(p));
+      ctx.fillStyle = `rgb(${r},${g},${b})`;
       ctx.beginPath();
       ctx.arc(x, y, POINT_RADIUS, 0, Math.PI * 2);
       ctx.fill();
@@ -413,7 +545,7 @@ function ScatterCanvas({ active, points, highlightBook, pinnedId, onPick }: Canv
       ctx.arc(x, y, POINT_RADIUS + 3, 0, Math.PI * 2);
       ctx.stroke();
     }
-  }, [active, points, transform, size, highlightBook, hover, pinnedId]);
+  }, [active, points, transform, size, groupId, highlightGroup, colour, hover, pinnedId]);
 
   const nearest = (px: number, py: number): VectorPoint | null => {
     let best: VectorPoint | null = null;

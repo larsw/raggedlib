@@ -49,6 +49,22 @@ object Projections {
         return Pca(coords, share)
     }
 
+    /** Row-major n × n matrix of squared Euclidean distances between [rows] (not normalised). */
+    fun squaredEuclideanDistances(rows: Array<DoubleArray>): FloatArray {
+        val n = rows.size
+        val out = FloatArray(n * n)
+        for (i in 0 until n) for (j in i + 1 until n) {
+            var d2 = 0.0
+            for (c in rows[i].indices) {
+                val d = rows[i][c] - rows[j][c]
+                d2 += d * d
+            }
+            out[i * n + j] = d2.toFloat()
+            out[j * n + i] = d2.toFloat()
+        }
+        return out
+    }
+
     /** Row-major n × n matrix of squared Euclidean distances between the L2-normalised rows. */
     fun squaredCosineDistances(rows: Array<FloatArray>): FloatArray {
         val n = rows.size

@@ -3,9 +3,11 @@ import type {
   Book,
   BookDetails,
   BookQuery,
+  ClusterSpace,
   VectorLevel,
   VectorMethod,
   VectorSpace,
+  TopicSpace,
   ChatEvent,
   ChatRequest,
   IngestStartRequest,
@@ -145,6 +147,10 @@ export const api = {
     q: { libraryId: number; level: VectorLevel; method: VectorMethod; size: number; dims: 2 | 3; seed?: number },
     signal?: AbortSignal,
   ) => getJson<VectorSpace>(`/vectors${queryString(q)}`, signal),
+  vectorTopics: (
+    q: { libraryId: number; level: VectorLevel; size: number; space: ClusterSpace; seed?: number },
+    signal?: AbortSignal,
+  ) => getJson<TopicSpace>(`/vectors/topics${queryString(q)}`, signal),
   computeBookVectors: (libraryId?: number) =>
     postJson<{ computed: number; missing: number }>(`/vectors/book-vectors${queryString({ libraryId })}`),
   search: (req: SearchRequest, signal?: AbortSignal) => postJson<SearchResponse>("/search", req, signal),
