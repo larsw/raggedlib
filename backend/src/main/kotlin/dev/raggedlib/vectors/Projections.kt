@@ -10,7 +10,8 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
- * 2-D projections of embeddings. Pure functions, no I/O.
+ * 2-D or 3-D projections of embeddings. Pure functions, no I/O. t-SNE and UMAP lay out in as many dimensions as
+ * their starting layout has (PCA with 2 or 3 components).
  *
  * t-SNE and UMAP work on cosine geometry: [squaredCosineDistances] of the L2-normalised rows, where the cosine
  * distance is half the squared Euclidean distance. The matrix is row-major, n × n.
@@ -77,54 +78,53 @@ object Projections {
         iterations: Int = 1000,
     ): Array<DoubleArray> {
         val p = symmetricAffinities(sqDist, n, perplexity)
-        val xs = DoubleArray(n) { init[it][0] }
-        val ys = DoubleArray(n) { init[it][1] }
-        scaleTo(xs, ys, 1e-4)
+        val dims = init[0].size
+        // row-major n × dims
+        val y = DoubleArray(n * dims) { init[it / dims][it % dims] }
+        scaleTo(y, dims, 1e-4)
         val learningRate = max(n / 48.0, 50.0)
-        val update = DoubleArray(2 * n)
-        val gains = DoubleArray(2 * n) { 1.0 }
-        val grad = DoubleArray(2 * n)
+        val update = DoubleArray(n * dims)
+        val gains = DoubleArray(n * dims) { 1.0 }
+        val grad = DoubleArray(n * dims)
         val exaggerationIterations = 250
+
+        fun sqDistance(i: Int, j: Int): Double {
+            var d2 = 0.0
+            for (c in 0 until dims) {
+                val d = y[i * dims + c] - y[j * dims + c]
+                d2 += d * d
+            }
+            return d2
+        }
 
         for (iter in 0 until iterations) {
             val exaggeration = if (iter < exaggerationIterations) 12.0 else 1.0
             val momentum = if (iter < exaggerationIterations) 0.5 else 0.8
 
             var z = 0.0
-            for (i in 0 until n) for (j in i + 1 until n) {
-                val dx = xs[i] - xs[j]
-                val dy = ys[i] - ys[j]
-                z += 2.0 / (1.0 + dx * dx + dy * dy)
-            }
+            for (i in 0 until n) for (j in i + 1 until n) z += 2.0 / (1.0 + sqDistance(i, j))
 
             for (i in 0 until n) {
-                var gx = 0.0
-                var gy = 0.0
+                val gi = i * dims
+                for (c in 0 until dims) grad[gi + c] = 0.0
                 for (j in 0 until n) {
                     if (j == i) continue
-                    val dx = xs[i] - xs[j]
-                    val dy = ys[i] - ys[j]
-                    val num = 1.0 / (1.0 + dx * dx + dy * dy)
+                    val num = 1.0 / (1.0 + sqDistance(i, j))
                     val coeff = (exaggeration * p[i * n + j] - num / z) * num
-                    gx += coeff * dx
-                    gy += coeff * dy
+                    for (c in 0 until dims) grad[gi + c] += coeff * (y[gi + c] - y[j * dims + c])
                 }
-                grad[2 * i] = 4.0 * gx
-                grad[2 * i + 1] = 4.0 * gy
+                for (c in 0 until dims) grad[gi + c] *= 4.0
             }
 
-            for (k in 0 until 2 * n) {
+            for (k in 0 until n * dims) {
                 gains[k] = if ((grad[k] > 0) != (update[k] > 0)) gains[k] + 0.2 else gains[k] * 0.8
                 if (gains[k] < 0.01) gains[k] = 0.01
                 update[k] = momentum * update[k] - learningRate * gains[k] * grad[k]
+                y[k] += update[k]
             }
-            for (i in 0 until n) {
-                xs[i] += update[2 * i]
-                ys[i] += update[2 * i + 1]
-            }
-            centre(xs, ys)
+            centre(y, dims)
         }
-        return Array(n) { doubleArrayOf(xs[it], ys[it]) }
+        return Array(n) { i -> DoubleArray(dims) { y[i * dims + it] } }
     }
 
     /**
@@ -143,9 +143,10 @@ object Projections {
         val edges = fuzzyEdges(sqDist, n, k)
         val rnd = Random(seed)
 
-        val y = Array(n) { i -> DoubleArray(2) { c -> init[i][c] } }
+        val dims = init[0].size
+        val y = Array(n) { i -> DoubleArray(dims) { c -> init[i][c] } }
         val scale = y.maxOf { row -> row.maxOf { abs(it) } }.takeIf { it > 0 } ?: 1.0
-        for (row in y) for (c in 0..1) row[c] = row[c] / scale * 10.0 + rnd.nextDouble(-1e-4, 1e-4)
+        for (row in y) for (c in 0 until dims) row[c] = row[c] / scale * 10.0 + rnd.nextDouble(-1e-4, 1e-4)
 
         val maxWeight = edges.maxOf { it.weight }
         val kept = edges.filter { it.weight >= maxWeight / epochs }
@@ -244,13 +245,20 @@ object Projections {
         return mid
     }
 
+    private fun sqDistance(a: DoubleArray, b: DoubleArray): Double {
+        var d2 = 0.0
+        for (c in a.indices) {
+            val d = a[c] - b[c]
+            d2 += d * d
+        }
+        return d2
+    }
+
     private fun attract(y: Array<DoubleArray>, i: Int, j: Int, alpha: Double) {
-        val dx = y[i][0] - y[j][0]
-        val dy = y[i][1] - y[j][1]
-        val d2 = dx * dx + dy * dy
+        val d2 = sqDistance(y[i], y[j])
         if (d2 <= 0) return
         val coeff = -2.0 * UMAP_A * UMAP_B * d2.pow(UMAP_B - 1) / (UMAP_A * d2.pow(UMAP_B) + 1)
-        for (c in 0..1) {
+        for (c in y[i].indices) {
             val grad = clip(coeff * (y[i][c] - y[j][c]))
             y[i][c] += alpha * grad
             y[j][c] -= alpha * grad
@@ -258,11 +266,9 @@ object Projections {
     }
 
     private fun repel(y: Array<DoubleArray>, i: Int, j: Int, alpha: Double) {
-        val dx = y[i][0] - y[j][0]
-        val dy = y[i][1] - y[j][1]
-        val d2 = dx * dx + dy * dy
+        val d2 = sqDistance(y[i], y[j])
         val coeff = if (d2 > 0) 2.0 * UMAP_GAMMA * UMAP_B / ((0.001 + d2) * (UMAP_A * d2.pow(UMAP_B) + 1)) else 0.0
-        for (c in 0..1) {
+        for (c in y[i].indices) {
             val grad = if (coeff > 0) clip(coeff * (y[i][c] - y[j][c])) else 4.0
             y[i][c] += alpha * grad
         }
@@ -320,21 +326,25 @@ object Projections {
         return p
     }
 
-    private fun scaleTo(xs: DoubleArray, ys: DoubleArray, std: Double) {
-        val mean = xs.average()
-        val sd = sqrt(xs.sumOf { (it - mean) * (it - mean) } / xs.size).takeIf { it > 0 } ?: 1.0
-        for (i in xs.indices) {
-            xs[i] = xs[i] / sd * std
-            ys[i] = ys[i] / sd * std
-        }
+    /** Scales row-major n × [dims] [y] so that its first coordinate has standard deviation [std]. */
+    private fun scaleTo(y: DoubleArray, dims: Int, std: Double) {
+        val n = y.size / dims
+        var mean = 0.0
+        for (i in 0 until n) mean += y[i * dims] / n
+        var variance = 0.0
+        for (i in 0 until n) variance += (y[i * dims] - mean) * (y[i * dims] - mean) / n
+        val sd = sqrt(variance).takeIf { it > 0 } ?: 1.0
+        for (k in y.indices) y[k] = y[k] / sd * std
     }
 
-    private fun centre(xs: DoubleArray, ys: DoubleArray) {
-        val mx = xs.average()
-        val my = ys.average()
-        for (i in xs.indices) {
-            xs[i] -= mx
-            ys[i] -= my
+    /** Moves row-major n × [dims] [y] so that every coordinate averages 0. */
+    private fun centre(y: DoubleArray, dims: Int) {
+        val n = y.size / dims
+        for (c in 0 until dims) {
+            var mean = 0.0
+            for (i in 0 until n) mean += y[i * dims + c]
+            mean /= n
+            for (i in 0 until n) y[i * dims + c] -= mean
         }
     }
 

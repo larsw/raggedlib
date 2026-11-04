@@ -20,6 +20,9 @@ enum class VectorLevel {
     @JsonValue fun json() = name.lowercase()
 }
 
+/** What to lay out: [size] passages or books, projected by [method] to [dims] (2 or 3) dimensions. */
+data class LayoutSpec(val level: VectorLevel, val method: VectorMethod, val size: Int, val dims: Int = 2)
+
 data class VectorPoint(
     /** the passage's id, or (books) the book's */
     val id: String,
@@ -32,12 +35,16 @@ data class VectorPoint(
     val snippet: String,
     val x: Double,
     val y: Double,
+    /** 3-D layouts only */
+    val z: Double? = null,
 )
 
 data class VectorSpace(
     val libraryId: Long,
     val level: VectorLevel,
     val method: VectorMethod,
+    /** 2 or 3: the layout's dimensions (points have a z in 3-D) */
+    val dims: Int,
     val seed: Long,
     /** points in the sample (at most the requested size) */
     val size: Int,
@@ -46,7 +53,7 @@ data class VectorSpace(
     /** books of this library with passages but no book vector yet (see POST /api/vectors/book-vectors) */
     val missingBookVectors: Int,
     val dimensions: Int,
-    /** PCA only: the share of total variance of each axis */
+    /** PCA only: the share of total variance of each axis (dims of them) */
     val explainedVariance: List<Double>?,
     /** how long computing it took (also when served from the cache) */
     val elapsedMs: Long,
@@ -67,8 +74,7 @@ class VectorSpaceService(
      * The 2-D layout of the library's current sample (or, given a [seed], of that one, which a reshuffle makes the
      * current sample), from the cache while the library's vectors are unchanged. See [ProjectionCache].
      */
-    fun space(libraryId: Long, level: VectorLevel, method: VectorMethod, size: Int, seed: Long?): VectorSpace =
-        cache.get(libraryId, level, method, size, seed)
+    fun space(libraryId: Long, spec: LayoutSpec, seed: Long?): VectorSpace = cache.get(libraryId, spec, seed)
 
     /** Computes the missing (or outdated) book vectors of [libraryId]; returns how many. */
     fun computeBookVectors(libraryId: Long?): Int = bookVectors.computeMissing(libraryId)
@@ -91,10 +97,11 @@ class VectorSpaceService(
     )!!
 
     /**
-     * A 2-D layout of [size] passages (or book vectors) of library [libraryId]'s books. The sample is the rows with
-     * the smallest md5(id, seed), so the same seed gives the same points and a new seed a new sample.
+     * A 2-D or 3-D layout of [LayoutSpec.size] passages (or book vectors) of library [libraryId]'s books. The sample
+     * is the rows with the smallest md5(id, seed), so the same seed gives the same points and a new seed a new sample.
      */
-    private fun compute(libraryId: Long, level: VectorLevel, method: VectorMethod, size: Int, seed: Long): VectorSpace {
+    private fun compute(libraryId: Long, spec: LayoutSpec, seed: Long): VectorSpace {
+        val (level, method, size, dims) = spec
         val started = System.nanoTime()
         val (countSql, sampleSql) = when (level) {
             VectorLevel.PASSAGES -> PASSAGE_COUNT_SQL to PASSAGE_SAMPLE_SQL
@@ -117,13 +124,13 @@ class VectorSpaceService(
         val n = rows.size
         if (n < MIN_POINTS) {
             return VectorSpace(
-                libraryId, level, method, seed, n, total, missing, props.embedding.dimensions, null,
+                libraryId, level, method, dims, seed, n, total, missing, props.embedding.dimensions, null,
                 elapsedMs(started), emptyList(),
             )
         }
 
         val raw = Array(n) { i -> DoubleArray(rows[i].embedding.size) { rows[i].embedding[it].toDouble() } }
-        val pca = Projections.pca(raw, seed = seed)
+        val pca = Projections.pca(raw, components = dims, seed = seed)
         val coords = when (method) {
             VectorMethod.PCA -> pca.coords
             VectorMethod.TSNE -> {
@@ -138,12 +145,16 @@ class VectorSpaceService(
 
         val points = List(n) { i ->
             val r = rows[i]
-            VectorPoint(r.id, r.bookId, r.title, r.page, r.section, r.snippet, coords[i][0], coords[i][1])
+            VectorPoint(
+                r.id, r.bookId, r.title, r.page, r.section, r.snippet, coords[i][0], coords[i][1],
+                if (dims == 3) coords[i][2] else null,
+            )
         }
         return VectorSpace(
             libraryId = libraryId,
             level = level,
             method = method,
+            dims = dims,
             seed = seed,
             size = n,
             total = total,

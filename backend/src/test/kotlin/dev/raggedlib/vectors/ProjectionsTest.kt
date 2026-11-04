@@ -18,11 +18,13 @@ class ProjectionsTest {
 
     /** Ratio of the distance between the two cluster centroids to the largest spread within a cluster. */
     private fun separation(p: Array<DoubleArray>): Double {
-        fun centroid(range: IntRange) = doubleArrayOf(range.map { p[it][0] }.average(), range.map { p[it][1] }.average())
-        fun spread(range: IntRange, c: DoubleArray) = range.maxOf { i -> sqrt((p[i][0] - c[0]) * (p[i][0] - c[0]) + (p[i][1] - c[1]) * (p[i][1] - c[1])) }
+        val dims = p[0].size // 2-D or 3-D layouts
+        fun dist(u: DoubleArray, v: DoubleArray) = sqrt((0 until dims).sumOf { (u[it] - v[it]) * (u[it] - v[it]) })
+        fun centroid(range: IntRange) = DoubleArray(dims) { c -> range.map { p[it][c] }.average() }
+        fun spread(range: IntRange, c: DoubleArray) = range.maxOf { i -> dist(p[i], c) }
         val a = centroid(0 until 20)
         val b = centroid(20 until 40)
-        val between = sqrt((a[0] - b[0]) * (a[0] - b[0]) + (a[1] - b[1]) * (a[1] - b[1]))
+        val between = dist(a, b)
         val within = maxOf(spread(0 until 20, a), spread(20 until 40, b))
         return between / within
     }
@@ -76,6 +78,22 @@ class ProjectionsTest {
         assertEquals(x.size, layout.size)
         assertTrue(layout.all { row -> row.all { it.isFinite() } })
         assertTrue(separation(layout) > 2.0, "separation ${separation(layout)}")
+    }
+
+    @Test
+    fun `3-D layouts have three finite coordinates and keep clusters apart`() {
+        val x = twoClusters()
+        val init = Projections.pca(x, components = 3).coords
+        val sq = Projections.squaredCosineDistances(Array(x.size) { i -> FloatArray(10) { x[i][it].toFloat() } })
+        for (layout in listOf(
+            Projections.umap(sq, x.size, init, neighbors = 10, epochs = 200, seed = 1),
+            Projections.tsne(sq, x.size, init, perplexity = 10.0, iterations = 400),
+        )) {
+            assertTrue(layout.all { row -> row.size == 3 && row.all { it.isFinite() } })
+            // the third axis is used, not left at its starting value
+            assertTrue(layout.map { it[2] }.distinct().size > 1)
+            assertTrue(separation(layout) > 2.0, "separation ${separation(layout)}")
+        }
     }
 
     @Test

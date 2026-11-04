@@ -142,7 +142,7 @@ export const api = {
   updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) =>
     postJson<ServerSettings>("/settings", body, undefined, "PUT"),
   vectors: (
-    q: { libraryId: number; level: VectorLevel; method: VectorMethod; size: number; seed?: number },
+    q: { libraryId: number; level: VectorLevel; method: VectorMethod; size: number; dims: 2 | 3; seed?: number },
     signal?: AbortSignal,
   ) => getJson<VectorSpace>(`/vectors${queryString(q)}`, signal),
   computeBookVectors: (libraryId?: number) =>

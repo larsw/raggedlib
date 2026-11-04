@@ -17,6 +17,7 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         @RequestParam(defaultValue = "passages") level: String,
         @RequestParam(defaultValue = "umap") method: String,
         @RequestParam(defaultValue = "1000") size: Int,
+        @RequestParam(defaultValue = "2") dims: Int,
         /** a new sample (Reshuffle); default: the library's current one */
         @RequestParam(required = false) seed: Long?,
     ): VectorSpace {
@@ -25,9 +26,10 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         val l = runCatching { VectorLevel.valueOf(level.uppercase()) }
             .getOrElse { badRequest("level must be passages or books") }
         if (size !in 1..VectorSpaceService.MAX_SIZE) badRequest("size must be between 1 and ${VectorSpaceService.MAX_SIZE}")
+        if (dims !in 2..3) badRequest("dims must be 2 or 3")
         // one library at a time; byId 404s an unknown one, and (first use) backfills pre-multi-library books' library_id
         libraries.byId(libraryId)
-        return service.space(libraryId, l, m, size, seed)
+        return service.space(libraryId, LayoutSpec(l, m, size, dims), seed)
     }
 
     /**
