@@ -19,11 +19,12 @@ data class VectorPoint(
 )
 
 data class VectorSpace(
+    val libraryId: Long,
     val method: VectorMethod,
     val seed: Long,
     /** passages in the sample (at most the requested size) */
     val size: Int,
-    /** passages with an embedding in the whole store */
+    /** passages with an embedding in this library */
     val totalPassages: Long,
     val dimensions: Int,
     /** PCA only: the share of total variance of each axis */
@@ -38,12 +39,13 @@ class VectorSpaceService(
     private val props: RaggedlibProperties,
 ) {
     /**
-     * A 2-D layout of [size] passages drawn from the vector store. The sample is the rows with the smallest
-     * md5(id, seed), so the same seed gives the same passages and a new seed a new sample.
+     * A 2-D layout of [size] passages drawn from the vector store, from the books of library [libraryId] only. The
+     * sample is the rows with the smallest md5(id, seed), so the same seed gives the same passages and a new seed a
+     * new sample.
      */
-    fun space(method: VectorMethod, size: Int, seed: Long): VectorSpace {
+    fun space(libraryId: Long, method: VectorMethod, size: Int, seed: Long): VectorSpace {
         val started = System.nanoTime()
-        val total = jdbc.queryForObject("select count(*) from vector_store where embedding is not null", Long::class.java) ?: 0L
+        val total = jdbc.queryForObject(COUNT_SQL, Long::class.java, libraryId) ?: 0L
         val rows = jdbc.query(SAMPLE_SQL, { rs, _ ->
             Row(
                 id = rs.getString(1),
@@ -54,11 +56,11 @@ class VectorSpaceService(
                 snippet = rs.getString(6) ?: "",
                 embedding = ChunkStore.parseVector(rs.getString(7)),
             )
-        }, seed.toString(), size)
+        }, libraryId, seed.toString(), size)
 
         val n = rows.size
         if (n < MIN_POINTS) {
-            return VectorSpace(method, seed, n, total, props.embedding.dimensions, null, elapsedMs(started), emptyList())
+            return VectorSpace(libraryId, method, seed, n, total, props.embedding.dimensions, null, elapsedMs(started), emptyList())
         }
 
         val raw = Array(n) { i -> DoubleArray(rows[i].embedding.size) { rows[i].embedding[it].toDouble() } }
@@ -80,6 +82,7 @@ class VectorSpaceService(
             VectorPoint(r.id, r.bookId, r.title, r.page, r.section, r.snippet, coords[i][0], coords[i][1])
         }
         return VectorSpace(
+            libraryId = libraryId,
             method = method,
             seed = seed,
             size = n,
@@ -108,10 +111,16 @@ class VectorSpaceService(
         const val MAX_SIZE = 2000
         private const val SNIPPET_CHARS = 240
 
+        private val COUNT_SQL = """
+            select count(*)
+            from vector_store v join books b on b.id = v.book_id
+            where v.embedding is not null and b.library_id = ?
+        """.trimIndent()
+
         private val SAMPLE_SQL = """
             select v.id::text, v.book_id, b.title, v.page, v.section, left(v.content, $SNIPPET_CHARS), v.embedding::text
             from vector_store v join books b on b.id = v.book_id
-            where v.embedding is not null
+            where v.embedding is not null and b.library_id = ?
             order by md5(v.id::text || ?)
             limit ?
         """.trimIndent()
