@@ -93,6 +93,14 @@ class Reranker internal constructor(private val cfg: RaggedlibProperties.Rerank,
         false
     }
 
+    /** The model llama.cpp was started with (its OpenAI-compatible `/v1/models`), for the system status; null if unreachable. */
+    fun modelName(): String? = try {
+        client.get().uri("/v1/models").retrieve().body(JsonNode::class.java)
+            ?.path("models")?.get(0)?.path("name")?.asString()?.takeIf { it.isNotBlank() }
+    } catch (_: Exception) {
+        null
+    }
+
     internal companion object {
         private const val WARN_INTERVAL_NANOS = 60_000_000_000L
 

@@ -24,6 +24,8 @@ data class SystemInfo(
     val rerankEnabled: Boolean,
     val rerankerUrl: String,
     val rerankerReachable: Boolean,
+    /** The model llama.cpp was started with (its own /v1/models); null if unreachable or not reported. */
+    val rerankerModel: String?,
 )
 
 @RestController
@@ -57,6 +59,7 @@ class SystemController(
             val name = m.path("name").asString()
             "embedding" !in caps && !name.contains("embed", ignoreCase = true)
         }?.map { it.path("name").asString() }?.sorted() ?: emptyList()
+        val rerankerUp = reranker.enabled && reranker.reachable()
         return SystemInfo(
             libraries = libraries.all.map { LibraryStatusInfo(it.name, it.root.toString()) },
             ollamaUrl = ollamaUrl,
@@ -67,7 +70,8 @@ class SystemController(
             availableChatModels = chatModels,
             rerankEnabled = reranker.enabled,
             rerankerUrl = props.rerank.baseUrl,
-            rerankerReachable = reranker.enabled && reranker.reachable(),
+            rerankerReachable = rerankerUp,
+            rerankerModel = if (rerankerUp) reranker.modelName() else null,
         )
     }
 }
