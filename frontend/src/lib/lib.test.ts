@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { citedRefs, splitCitations } from "./citations";
 import { formatBytes, formatDuration } from "./format";
 import { highlightParts, queryTerms } from "./highlight";
+import { sortParam } from "./bookSort";
 
 describe("splitCitations", () => {
   test("single and adjacent citations", () => {
@@ -77,5 +78,17 @@ describe("formatBytes", () => {
     expect(formatBytes(940 * 1024)).toBe("940 KB");
     expect(formatBytes(12.4 * 1024 * 1024)).toBe("12.4 MB");
     expect(formatBytes(3 * 1024 ** 3)).toBe("3.0 GB");
+  });
+});
+
+describe("Library sort parameter", () => {
+  test("text fields: ascending is the plain field, descending is prefixed", () => {
+        expect(sortParam("title", false)).toBe("title");
+    expect(sortParam("title", true)).toBe("-title");
+  });
+  test("dates are newest first unprefixed, so ascending is the prefixed one", () => {
+        expect(sortParam("pubdate", true)).toBe("pubdate");
+    expect(sortParam("pubdate", false)).toBe("-pubdate");
+    expect(sortParam("indexedAt", false)).toBe("-indexedAt");
   });
 });

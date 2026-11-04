@@ -157,7 +157,7 @@ export interface BookQuery {
   libraryId?: number;
   page?: number;
   size?: number;
-  sort?: BookSort;
+  sort?: BookSort | `-${BookSort}`; // "-": the opposite of the field's default order (newest first for dates)
 }
 
 export interface IngestStartRequest {

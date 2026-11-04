@@ -2,6 +2,7 @@ import {
   Button,
   ButtonGroup,
   Classes,
+  ControlGroup,
   HTMLSelect,
   HTMLTable,
   InputGroup,
@@ -30,17 +31,9 @@ import { usePageVisible } from "../hooks/usePageVisible";
 import { useSyncLibrary } from "../hooks/useSyncLibrary";
 import { formatAuthors, formatDateTime, formatNumber, formatYear } from "../lib/format";
 import { readerFormat } from "../lib/reader";
+import { SORTS, sortParam } from "../lib/bookSort";
 
 const PAGE_SIZE = 50;
-const SORTS: { value: BookSort; label: string }[] = [
-  { value: "title", label: "Title" },
-  { value: "author", label: "Author" },
-  { value: "publisher", label: "Publisher" },
-  { value: "pubdate", label: "Published" },
-  { value: "indexedAt", label: "Indexed at" },
-  { value: "id", label: "ID" },
-];
-
 /** Resizable columns, between the cover and the actions (which aren't). */
 const COLUMNS: (ColumnSpec & { className?: string })[] = [
   { id: "title", label: "Title", defaultWidth: 420, flexible: true },
@@ -80,6 +73,13 @@ export function LibraryView({ active }: { active: boolean }) {
   const [tag, setTag] = useState("");
   const [publisher, setPublisher] = useState("");
   const [sort, setSort] = useState<BookSort>("title");
+  const [descending, setDescending] = useState(false);
+  const sortMeta = SORTS.find((s) => s.value === sort)!;
+  // a newly chosen field starts in its natural direction: A → Z, or newest first for dates
+  const chooseSort = (field: BookSort) => {
+    setSort(field);
+    setDescending(SORTS.find((s) => s.value === field)?.newestFirst ?? false);
+  };
   const [page, setPage] = useState(0);
   const [reindexing, setReindexing] = useState<Set<number>>(new Set());
   /** the book shown in the details panel */
@@ -92,7 +92,7 @@ export function LibraryView({ active }: { active: boolean }) {
   const columns = useColumnWidths(STORAGE_KEYS.libraryColumns, COLUMNS);
 
   // back to the first page whenever the filter changes
-  useEffect(() => setPage(0), [query, status, tag, publisher, sort, library?.id]);
+  useEffect(() => setPage(0), [query, status, tag, publisher, sort, descending, library?.id]);
 
   const books = useAsync(
     (signal) =>
@@ -103,13 +103,13 @@ export function LibraryView({ active }: { active: boolean }) {
           tag: tag || undefined,
           publisher: publisher || undefined,
           libraryId: library?.id,
-          sort,
+          sort: sortParam(sort, descending),
           page,
           size: PAGE_SIZE,
         },
         signal,
       ),
-    [query, status, tag, publisher, sort, page, library?.id],
+    [query, status, tag, publisher, sort, descending, page, library?.id],
   );
 
   // Refresh when coming back to the tab (statuses change while indexing runs).
@@ -214,12 +214,24 @@ export function LibraryView({ active }: { active: boolean }) {
         />
         <FacetFilterSelect facet="tags" value={tag} onChange={setTag} />
         <FacetFilterSelect facet="publishers" value={publisher} onChange={setPublisher} />
-        <HTMLSelect
-          aria-label="Sort by"
-          value={sort}
-          onChange={(e) => setSort(e.currentTarget.value as BookSort)}
-          options={SORTS.map((s) => ({ value: s.value, label: `Sort: ${s.label}` }))}
-        />
+        <ControlGroup>
+          <HTMLSelect
+            aria-label="Sort by"
+            value={sort}
+            onChange={(e) => chooseSort(e.currentTarget.value as BookSort)}
+            options={SORTS.map((s) => ({ value: s.value, label: `Sort: ${s.label}` }))}
+          />
+          <Tooltip
+            content={`${descending ? sortMeta.descending : sortMeta.ascending}; click for ${(descending ? sortMeta.ascending : sortMeta.descending).toLowerCase()}`}
+            placement="bottom"
+          >
+            <Button
+              icon={descending ? `sort-${sortMeta.kind}-desc` : `sort-${sortMeta.kind}`}
+              aria-label={`Sorted ${descending ? "descending" : "ascending"} (${descending ? sortMeta.descending : sortMeta.ascending}); reverse`}
+              onClick={() => setDescending((d) => !d)}
+            />
+          </Tooltip>
+        </ControlGroup>
         {books.loading && books.data && <Spinner size={16} />}
         <span className="spacer" />
         <Button icon="refresh" text="Sync library" onClick={() => sync().then(books.reload)} loading={syncing} />
