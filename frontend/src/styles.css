@@ -1983,8 +1983,9 @@ body.is-resizing-x * {
   bottom: 16px;
 }
 .vectors-side {
-  width: 300px;
-  flex-shrink: 0;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
   overflow-y: auto;
   border-left: 1px solid var(--app-border);
   padding: 12px;
@@ -2037,8 +2038,16 @@ body.is-resizing-x * {
   .vectors-body {
     flex-direction: column;
   }
+  /* stacked below the plot: the inline (desktop, horizontal) resize width no longer applies */
+  .vectors-body .side-dock {
+    width: auto !important;
+    max-width: none;
+    min-width: 0;
+  }
+  .vectors-body .side-resize-handle {
+    display: none;
+  }
   .vectors-side {
-    width: auto;
     max-height: 40%;
     border-left: 0;
     border-top: 1px solid var(--app-border);
