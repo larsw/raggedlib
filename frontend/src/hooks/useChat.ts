@@ -62,6 +62,7 @@ function scopeLabel(scope: Scope, library: Library | null): string | undefined {
   if (scope.books.length === 1) parts.push(scope.books[0]!.title);
   else if (scope.books.length > 1) parts.push(`${scope.books.length} books`);
   if (scope.tags.length) parts.push(scope.tags.map((t) => `#${t}`).join(" "));
+  if (scope.publishers.length) parts.push(scope.publishers.join(", "));
   return parts.length ? parts.join(" · ") : undefined;
 }
 
@@ -116,6 +117,7 @@ export function useChat() {
         topK: scope.topK,
         ...(scope.books.length ? { bookIds: scope.books.map((b) => b.id) } : {}),
         ...(scope.tags.length ? { tags: scope.tags } : {}),
+        ...(scope.publishers.length ? { publishers: scope.publishers } : {}),
         ...(library ? { libraryIds: [library.id] } : {}),
         rerank: scope.rerank,
         ...(history.length ? { history } : {}),

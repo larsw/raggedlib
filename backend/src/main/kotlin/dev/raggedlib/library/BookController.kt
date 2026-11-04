@@ -28,7 +28,7 @@ class BookController(
     private val paths: LibraryPaths,
     private val details: BookDetailsService,
 ) {
-    private val sorts = setOf("title", "author", "pubdate", "indexedAt", "id")
+    private val sorts = setOf("title", "author", "publisher", "pubdate", "indexedAt", "id")
 
     @PostMapping("/library/sync")
     fun sync(): SyncResult = library.sync()
@@ -39,6 +39,7 @@ class BookController(
         @RequestParam(required = false) status: String?,
         @RequestParam(required = false) tag: String?,
         @RequestParam(required = false) libraryId: Long?,
+        @RequestParam(required = false) publisher: String?,
         @RequestParam(defaultValue = "0") page: Int,
         @RequestParam(defaultValue = "50") size: Int,
         @RequestParam(defaultValue = "title") sort: String,
@@ -47,7 +48,7 @@ class BookController(
         val st = status?.takeIf { it.isNotBlank() }?.let {
             runCatching { BookStatus.valueOf(it.uppercase()) }.getOrElse { badRequest("unknown status '$status'") }
         }
-        return books.search(q, st, tag, page.coerceAtLeast(0), size.coerceIn(1, 500), sort, libraryId)
+        return books.search(q, st, tag, page.coerceAtLeast(0), size.coerceIn(1, 500), sort, libraryId, publisher)
     }
 
     @GetMapping("/books/{id}")
@@ -61,6 +62,9 @@ class BookController(
 
     @GetMapping("/tags")
     fun tags(@RequestParam(required = false) libraryId: Long?): List<TagCount> = books.tags(libraryId)
+
+    @GetMapping("/publishers")
+    fun publishers(@RequestParam(required = false) libraryId: Long?): List<TagCount> = books.publishers(libraryId)
 
     @GetMapping("/books/{id}/cover")
     fun cover(@PathVariable id: Long): ResponseEntity<Resource> {

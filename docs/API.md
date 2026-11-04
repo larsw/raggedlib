@@ -19,6 +19,7 @@ interface Book {
   seriesIndex: number | null;
   languages: string[];
   pubdate: string | null;
+  publisher: string | null;             // from Calibre; filled in by a library sync
   formats: string[];          // upper-case extensions available, e.g. ["PDF","EPUB"]
   sourceFormat: string | null;// format chosen for indexing, e.g. "EPUB"
   hasCover: boolean;
@@ -97,13 +98,14 @@ interface SystemInfo {
 | GET  | `/api/system` | `SystemInfo` |
 | GET  | `/api/libraries` | `Library[]`: every configured Calibre library with its book count. |
 | POST | `/api/library/sync` | Runs `calibredb list` (or reads `metadata.db`) for every configured library and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
-| GET  | `/api/books?q=&status=&tag=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `libraryId` restricts to one library (default: every library). `sort` ∈ `title`,`author`,`pubdate`,`indexedAt`,`id`. |
+| GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |
 | GET  | `/api/books/{id}` | `Book` |
 | GET  | `/api/books/{id}/cover` | `image/jpeg` (404 if none) |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
 | GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: description as plain text, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, and `sections: {title, firstPage, passages}[]`, the indexed outline in reading order. |
 | POST | `/api/books/{id}/reindex` | Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
 | GET  | `/api/tags?libraryId=` | `{ name: string, count: number }[]` sorted by count desc; `libraryId` restricts to one library |
+| GET  | `/api/publishers?libraryId=` | `{ name: string, count: number }[]`: publishers by number of books, like `/api/tags` (books without one are left out) |
 | POST | `/api/ingest/start` | Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed). Returns `IngestStatus`. Idempotent if running. |
 | POST | `/api/ingest/reprocess` | Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books again (all when `bookIds` is absent; an empty list selects none; or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
 | POST | `/api/ingest/stop?force=` | Graceful by default: waits for books in flight. `force=true` interrupts them right away (killing e.g. an OCR process) and puts them back to PENDING instead of letting them finish. Returns `IngestStatus`. |
@@ -121,6 +123,7 @@ interface SearchRequest {
   bookIds?: number[];       // restrict to these books
   tags?: string[];          // restrict to books having ANY of these tags
   libraryIds?: number[];    // restrict to these libraries (see GET /api/libraries); default: every library
+  publishers?: string[];    // restrict to books from ANY of these publishers (see GET /api/publishers)
   rerank?: boolean;         // cross-encoder reranking, default true; ignored (fused order) if the server has none
   correct?: boolean;        // spelling correction, default true; false searches for the query exactly as written
 }

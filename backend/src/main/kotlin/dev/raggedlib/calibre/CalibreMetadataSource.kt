@@ -36,7 +36,7 @@ class CalibreMetadataSource(
                 props.tools.calibredb, "list",
                 "--library-path", libraryRoot.toString(),
                 "--for-machine",
-                "--fields", "id,title,authors,formats,tags,languages,pubdate,series,series_index,cover,last_modified",
+                "--fields", "id,title,authors,formats,tags,languages,pubdate,series,series_index,cover,last_modified,publisher",
             ),
             props.tools.calibredbTimeout,
         )

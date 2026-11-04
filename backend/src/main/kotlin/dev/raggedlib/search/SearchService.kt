@@ -46,6 +46,7 @@ class SearchService(
         val bookIds = req.bookIds?.distinct()?.takeIf { it.isNotEmpty() }
         val tags = req.tags?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
         val libraryIds = req.libraryIds?.distinct()?.takeIf { it.isNotEmpty() }
+        val publishers = req.publishers?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
 
         val filters = mutableListOf<String>()
         val params = MapSqlParameterSource()
@@ -62,6 +63,10 @@ class SearchService(
         if (libraryIds != null) {
             filters += "v.book_id in (select $ownOrKept from books where library_id in (:libraryIds))"
             params.addValue("libraryIds", libraryIds)
+        }
+        if (publishers != null) {
+            filters += "v.book_id in (select $ownOrKept from books where publisher in (:publishers))"
+            params.addValue("publishers", publishers)
         }
         val filterSql = filters.joinToString("") { " and $it" }
 

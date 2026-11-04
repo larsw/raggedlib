@@ -11,6 +11,7 @@ export interface BookRef {
 export interface Scope {
   books: BookRef[];
   tags: string[];
+  publishers: string[];
   /** "" = backend default chat model */
   model: string;
   topK: number;
@@ -21,13 +22,14 @@ export interface Scope {
 export const DEFAULT_TOP_K = 8;
 export const MAX_TOP_K = 50;
 
-export const EMPTY_SCOPE: Scope = { books: [], tags: [], model: "", topK: DEFAULT_TOP_K, rerank: true };
+export const EMPTY_SCOPE: Scope = { books: [], tags: [], publishers: [], model: "", topK: DEFAULT_TOP_K, rerank: true };
 
 function sanitize(raw: Partial<Scope> | null): Scope {
   if (!raw || typeof raw !== "object") return EMPTY_SCOPE;
   return {
     books: Array.isArray(raw.books) ? raw.books.filter((b) => b && typeof b.id === "number") : [],
     tags: Array.isArray(raw.tags) ? raw.tags.filter((t) => typeof t === "string") : [],
+    publishers: Array.isArray(raw.publishers) ? raw.publishers.filter((p) => typeof p === "string") : [],
     model: typeof raw.model === "string" ? raw.model : "",
     topK:
       typeof raw.topK === "number" && raw.topK >= 1 && raw.topK <= MAX_TOP_K ? Math.round(raw.topK) : DEFAULT_TOP_K,
@@ -43,5 +45,5 @@ export function useScope(): [Scope, React.Dispatch<React.SetStateAction<Scope>>]
 }
 
 export function scopeIsEmpty(scope: Scope): boolean {
-  return scope.books.length === 0 && scope.tags.length === 0;
+  return scope.books.length === 0 && scope.tags.length === 0 && scope.publishers.length === 0;
 }

@@ -21,6 +21,7 @@ class CalibredbParserTest {
             "languages": ["eng"],
             "last_modified": "2023-09-01T18:57:42+00:00",
             "pubdate": "2022-05-05T22:00:00+00:00",
+            "publisher": "Springer Singapore",
             "series": "CTF",
             "series_index": 2.0,
             "tags": ["Security", "Network Security"],
@@ -62,12 +63,14 @@ class CalibredbParserTest {
             r.formats,
         )
         assertEquals("Nu1l Team/Handbook for CTFers (2)/cover.jpg", r.coverPath)
+        assertEquals("Springer Singapore", r.publisher)
 
         val bare = records[1]
         assertNull(bare.series)
         assertNull(bare.seriesIndex)
         assertNull(bare.pubdate, "calibre's 0101 'undefined' date maps to null")
         assertNull(bare.coverPath)
+        assertNull(bare.publisher)
         assertEquals(emptyMap(), bare.formats)
     }
 

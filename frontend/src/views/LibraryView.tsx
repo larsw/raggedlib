@@ -19,7 +19,7 @@ import { BookCover } from "../components/BookCover";
 import { BookDetailsPanel } from "../components/BookDetailsPanel";
 import { ErrorState } from "../components/ErrorState";
 import { isBusyStatus, StatusTag } from "../components/StatusTag";
-import { TagFilterSelect } from "../components/TagFilterSelect";
+import { FacetFilterSelect } from "../components/FacetFilterSelect";
 import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
 import { useDebounced } from "../hooks/useDebounced";
@@ -34,6 +34,7 @@ const PAGE_SIZE = 50;
 const SORTS: { value: BookSort; label: string }[] = [
   { value: "title", label: "Title" },
   { value: "author", label: "Author" },
+  { value: "publisher", label: "Publisher" },
   { value: "pubdate", label: "Published" },
   { value: "indexedAt", label: "Indexed at" },
   { value: "id", label: "ID" },
@@ -61,6 +62,7 @@ export function LibraryView({ active }: { active: boolean }) {
   const query = useDebounced(q.trim(), 300);
   const [status, setStatus] = useState<BookStatus | "">("");
   const [tag, setTag] = useState("");
+  const [publisher, setPublisher] = useState("");
   const [sort, setSort] = useState<BookSort>("title");
   const [page, setPage] = useState(0);
   const [reindexing, setReindexing] = useState<Set<number>>(new Set());
@@ -73,15 +75,24 @@ export function LibraryView({ active }: { active: boolean }) {
   const { sync, syncing } = useSyncLibrary();
 
   // back to the first page whenever the filter changes
-  useEffect(() => setPage(0), [query, status, tag, sort, library?.id]);
+  useEffect(() => setPage(0), [query, status, tag, publisher, sort, library?.id]);
 
   const books = useAsync(
     (signal) =>
       api.books(
-        { q: query || undefined, status: status || undefined, tag: tag || undefined, libraryId: library?.id, sort, page, size: PAGE_SIZE },
+        {
+          q: query || undefined,
+          status: status || undefined,
+          tag: tag || undefined,
+          publisher: publisher || undefined,
+          libraryId: library?.id,
+          sort,
+          page,
+          size: PAGE_SIZE,
+        },
         signal,
       ),
-    [query, status, tag, sort, page, library?.id],
+    [query, status, tag, publisher, sort, page, library?.id],
   );
 
   // Refresh when coming back to the tab (statuses change while indexing runs).
@@ -105,7 +116,7 @@ export function LibraryView({ active }: { active: boolean }) {
 
   const total = books.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
-  const filtered = !!(query || status || tag);
+  const filtered = !!(query || status || tag || publisher);
   // provenance only matters when books from more than one library can appear side by side
   const showLibraryColumn = !library && libraries.length > 1;
   const libraryNames = useMemo(() => new Map(libraries.map((l) => [l.id, l.name])), [libraries]);
@@ -128,12 +139,12 @@ export function LibraryView({ active }: { active: boolean }) {
   };
 
   const askAbout = (book: Book) => {
-    setScope((s) => ({ ...s, books: [{ id: book.id, title: book.title, authors: book.authors }], tags: [] }));
+    setScope((s) => ({ ...s, books: [{ id: book.id, title: book.title, authors: book.authors }], tags: [], publishers: [] }));
     navigate("ask");
   };
 
   const searchIn = (book: Book) => {
-    setScope((s) => ({ ...s, books: [{ id: book.id, title: book.title, authors: book.authors }], tags: [] }));
+    setScope((s) => ({ ...s, books: [{ id: book.id, title: book.title, authors: book.authors }], tags: [], publishers: [] }));
     navigate("search");
   };
 
@@ -152,6 +163,7 @@ export function LibraryView({ active }: { active: boolean }) {
     setQ("");
     setStatus("");
     setTag("");
+    setPublisher("");
   };
 
   return (
@@ -179,7 +191,8 @@ export function LibraryView({ active }: { active: boolean }) {
           onChange={(e) => setStatus(e.currentTarget.value as BookStatus | "")}
           options={[{ value: "", label: "Any status" }, ...BOOK_STATUSES.map((s) => ({ value: s, label: s.toLowerCase() }))]}
         />
-        <TagFilterSelect value={tag} onChange={setTag} />
+        <FacetFilterSelect facet="tags" value={tag} onChange={setTag} />
+        <FacetFilterSelect facet="publishers" value={publisher} onChange={setPublisher} />
         <HTMLSelect
           aria-label="Sort by"
           value={sort}
@@ -220,6 +233,7 @@ export function LibraryView({ active }: { active: boolean }) {
                 <th aria-label="Cover" />
                 <th>Title</th>
                 <th>Authors</th>
+                <th>Publisher</th>
                 {showLibraryColumn && <th>Library</th>}
                 <th>Tags</th>
                 <th>Format</th>
@@ -259,6 +273,9 @@ export function LibraryView({ active }: { active: boolean }) {
                     </td>
                     <td className="authors-cell" title={b.authors.join(", ")}>
                       {formatAuthors(b.authors)}
+                    </td>
+                    <td className="publisher-cell" title={b.publisher ?? undefined}>
+                      {b.publisher ?? <span className={Classes.TEXT_MUTED}>—</span>}
                     </td>
                     {showLibraryColumn && (
                       <td className={Classes.TEXT_SMALL}>{libraryNames.get(b.libraryId) ?? "—"}</td>
@@ -342,6 +359,7 @@ export function LibraryView({ active }: { active: boolean }) {
             onClose={() => setSelectedId(null)}
             onSelectBook={setSelectedId}
             onFilterTag={setTag}
+            onFilterPublisher={setPublisher}
             onAsk={askAbout}
             onSearchIn={searchIn}
             onReindex={(b) => reindex(b).then(() => setRefreshKey((k) => k + 1))}

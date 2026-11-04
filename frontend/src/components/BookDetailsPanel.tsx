@@ -20,6 +20,7 @@ interface Props {
   onClose: () => void;
   onSelectBook: (id: number) => void;
   onFilterTag: (tag: string) => void;
+  onFilterPublisher: (publisher: string) => void;
   onAsk: (book: Book) => void;
   onSearchIn: (book: Book) => void;
   onReindex: (book: Book) => void;
@@ -55,7 +56,7 @@ export function BookDetailsPanel(props: Props) {
   );
 }
 
-function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk, onSearchIn, onReindex }: Props & { details: BookDetails }) {
+function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onFilterPublisher, onAsk, onSearchIn, onReindex }: Props & { details: BookDetails }) {
   const { book, calibre, duplicateOf, sections } = details;
   const { openReader, libraries } = useApp();
   const libraryName = libraries.find((l) => l.id === book.libraryId)?.name;
@@ -109,7 +110,18 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onAsk,
 
       <dl className="book-facts">
         <Fact label="Published">{year || "—"}</Fact>
-        {calibre?.publisher && <Fact label="Publisher">{calibre.publisher}</Fact>}
+        {book.publisher ? (
+          <Fact label="Publisher">
+            <Tooltip content="Show books from this publisher" placement="top">
+              <Tag minimal interactive onClick={() => onFilterPublisher(book.publisher!)}>
+                {book.publisher}
+              </Tag>
+            </Tooltip>
+          </Fact>
+        ) : (
+          // not stored yet (indexed before publishers were, and not synced since): Calibre's own reading
+          calibre?.publisher && <Fact label="Publisher">{calibre.publisher}</Fact>
+        )}
         {book.languages.length > 0 && <Fact label="Language">{book.languages.join(", ")}</Fact>}
         {calibre?.addedAt && <Fact label="Added">{formatDate(calibre.addedAt)}</Fact>}
         {calibre &&

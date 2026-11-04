@@ -18,6 +18,7 @@ data class Book(
     val seriesIndex: Double?,
     val languages: List<String>,
     val pubdate: Instant?,
+    val publisher: String?,
     val formats: List<String>,
     val sourceFormat: String?,
     val hasCover: Boolean,
@@ -41,6 +42,7 @@ data class BookRow(
 
 data class Page<T>(val items: List<T>, val total: Long, val page: Int, val size: Int)
 
+/** A tag or publisher and how many books have it. */
 data class TagCount(val name: String, val count: Int)
 
 data class SyncResult(val added: Int, val updated: Int, val removed: Int, val total: Int, val source: String)
