@@ -45,7 +45,7 @@ The host backend and the containerized backend can share the same database, beca
 
 ## Use it from agents (MCP)
 
-The backend serves an [MCP](https://modelcontextprotocol.io) endpoint at `http://localhost:8080/mcp` (streamable HTTP, stateless) with five read-only tools:
+The backend serves an [MCP](https://modelcontextprotocol.io) endpoint at `http://localhost:8090/mcp` (streamable HTTP, stateless) with five read-only tools:
 
 | Tool | What it does |
 |---|---|
@@ -62,12 +62,12 @@ Every MCP request needs an API key, sent as `Authorization: Bearer <key>` or `X-
 KEY=$(openssl rand -hex 32)
 touch .env && sed -i '/^MCP_API_KEY=/d' .env && echo "MCP_API_KEY=$KEY" >> .env   # docker compose reads .env
 docker compose up -d --build backend
-claude mcp add --transport http raggedlib http://localhost:8080/mcp --header "Authorization: Bearer $KEY"
+claude mcp add --transport http raggedlib http://localhost:8090/mcp --header "Authorization: Bearer $KEY"
 ```
 
 `ask_library` runs for up to 150 s, and the stateless transport sends no progress updates meanwhile. Give it a tool timeout of at least 180 s: many clients default to 60 s. In Claude Code, set `MCP_TOOL_TIMEOUT=180000`.
 
-Other harnesses take the same URL and header, for example as JSON: `{"type": "http", "url": "http://localhost:8080/mcp", "headers": {"Authorization": "Bearer <key>"}}`.
+Other harnesses take the same URL and header, for example as JSON: `{"type": "http", "url": "http://localhost:8090/mcp", "headers": {"Authorization": "Bearer <key>"}}`.
 
 **Agent skill.** [`skills/raggedlib/`](skills/raggedlib/SKILL.md) is an [Agent Skill](https://agentskills.io) that tells an agent when to reach for these tools and how to use them well: `search_library` first, retrying with other words before concluding the books don't cover something, narrowing to books and tags, reading scores, and citing pages or sections. It also has setup notes for Claude Code, Codex and other harnesses, and `scripts/raggedlib_mcp.py`, which calls the tools over plain HTTP where no MCP client is connected (`RAGGEDLIB_MCP_KEY` holds the key). Install it by linking or copying the folder into the harness's skills directory (`~/.claude/skills/`, `~/.agents/skills/`, …), or with `npx skills add larsw/raggedlib`.
 
