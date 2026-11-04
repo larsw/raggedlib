@@ -17,7 +17,9 @@ import { useApp } from "../AppContext";
 import { ErrorState } from "../components/ErrorState";
 import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
+import { useSidePanel } from "../hooks/useSidePanel";
 import { formatNumber } from "../lib/format";
+import { STORAGE_KEYS } from "../lib/storage";
 
 // deck.gl (WebGL) loads with the first plot, not with the app
 const DeckScatter = lazy(() => import("../components/vectors/DeckScatter"));
@@ -136,6 +138,8 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const [highlightBook, setHighlightBook] = useState<number | null>(null);
   const [pinned, setPinned] = useState<VectorPoint | null>(null);
   const [computing, setComputing] = useState(false);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const panel = useSidePanel(bodyRef, { storageKey: STORAGE_KEYS.vectorsPanel });
   const [colorBy, setColorBy] = useState<"book" | "topic">("book");
   const [clusterSpace, setClusterSpace] = useState<ClusterSpace>("raw");
   const [highlightTopic, setHighlightTopic] = useState<number | null>(null);
@@ -327,7 +331,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
           />
         )
       ) : (
-        <div className="vectors-body">
+        <div className={`vectors-body${panel.dragging ? " is-resizing" : ""}`} ref={bodyRef}>
           <div className="vectors-canvas-wrap">
             <Callout compact className="vectors-hint">
               {byBook ? "Each point is a book: the average of its passages. " : ""}
@@ -364,7 +368,9 @@ export function VectorSpaceView({ active }: { active: boolean }) {
               />
             )}
           </div>
-          <aside className="vectors-side">
+          <div className="side-dock" style={{ width: panel.width }}>
+            <div className="side-resize-handle" {...panel.handleProps} aria-label="Resize the Vectors sidebar" />
+            <aside className="vectors-side">
             {pinned && (
               <div className="vectors-detail" aria-live="polite">
                 <div className="vectors-detail-head">
@@ -443,7 +449,8 @@ export function VectorSpaceView({ active }: { active: boolean }) {
                 ))}
               </div>
             )}
-          </aside>
+            </aside>
+          </div>
         </div>
       )}
       {space.loading && data && (
