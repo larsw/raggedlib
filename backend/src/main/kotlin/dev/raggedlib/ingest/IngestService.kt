@@ -12,6 +12,7 @@ import dev.raggedlib.library.BookRow
 import dev.raggedlib.library.BookStatus
 import dev.raggedlib.library.LibraryPaths
 import dev.raggedlib.settings.AppSettings
+import dev.raggedlib.vectors.BookVectors
 import org.slf4j.LoggerFactory
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.boot.context.event.ApplicationReadyEvent
@@ -46,6 +47,7 @@ class IngestService(
     private val tx: TransactionTemplate,
     private val events: ApplicationEventPublisher,
     private val settings: AppSettings,
+    private val bookVectors: BookVectors,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -435,6 +437,7 @@ class IngestService(
             chunks.deleteForBookExcept(id, keep)
             chunks.insert(id, row.book.title, row.book.authors, toWrite, all)
             books.markIndexed(id, ex.chunks.size, ex.format, ex.ocrPages)
+            bookVectors.refresh(id) // after markIndexed: computed_at must not predate indexed_at
         }
         log.debug("Stored book {} in {} ms", id, (System.nanoTime() - storeStart) / 1_000_000)
         sessionChunks.addAndGet(ex.chunks.size.toLong())

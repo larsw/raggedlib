@@ -11,9 +11,10 @@ import {
 } from "@blueprintjs/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
-import type { VectorMethod, VectorPoint, VectorSpace } from "../api/types";
+import type { VectorLevel, VectorMethod, VectorPoint, VectorSpace } from "../api/types";
 import { useApp } from "../AppContext";
 import { ErrorState } from "../components/ErrorState";
+import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
 import { formatNumber } from "../lib/format";
 
@@ -21,6 +22,11 @@ const METHODS: { id: VectorMethod; label: string; hint: string }[] = [
   { id: "pca", label: "PCA", hint: "Linear projection onto the two directions of greatest variance. Fast; distances are roughly preserved." },
   { id: "umap", label: "UMAP", hint: "Preserves local neighbourhoods. Clusters are compact; global distances are not meaningful." },
   { id: "tsne", label: "t-SNE", hint: "Preserves local neighbourhoods. Slowest at large sizes; global distances are not meaningful." },
+];
+
+const LEVELS: { id: VectorLevel; label: string; hint: string }[] = [
+  { id: "passages", label: "Passages", hint: "One point per passage: a sample of the library's passages." },
+  { id: "books", label: "Books", hint: "One point per book: the average of its passages' embeddings." },
 ];
 
 const SIZES = [250, 500, 1000, 2000];
@@ -66,6 +72,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   // One library at a time: the navbar's choice, or — with "All libraries" chosen there — a pick of this view's own.
   const [ownLibraryId, setOwnLibraryId] = useState<number | null>(null);
   const libraryId = library?.id ?? libraries.find((l) => l.id === ownLibraryId)?.id ?? libraries[0]?.id;
+  const [level, setLevel] = useState<VectorLevel>("passages");
   const [method, setMethod] = useState<VectorMethod>("umap");
   const [size, setSize] = useState(1000);
   // undefined: the library's current sample (kept by the server, so a reload shows the last reshuffle); a number:
@@ -73,11 +80,12 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const [seed, setSeed] = useState<number | undefined>();
   const [highlightBook, setHighlightBook] = useState<number | null>(null);
   const [pinned, setPinned] = useState<VectorPoint | null>(null);
+  const [computing, setComputing] = useState(false);
 
   const space = useAsync<VectorSpace | undefined>(
     (signal) =>
-      libraryId == null ? Promise.resolve(undefined) : api.vectors({ libraryId, method, size, seed }, signal),
-    [libraryId, method, size, seed],
+      libraryId == null ? Promise.resolve(undefined) : api.vectors({ libraryId, level, method, size, seed }, signal),
+    [libraryId, level, method, size, seed],
   );
 
   // a new library's passages are different points: drop the selection and highlight of the previous one, and show
@@ -87,11 +95,32 @@ export function VectorSpaceView({ active }: { active: boolean }) {
     setHighlightBook(null);
     setSeed(undefined);
   }, [libraryId]);
+  // passages and books are different points too
+  useEffect(() => {
+    setPinned(null);
+    setHighlightBook(null);
+  }, [level]);
+
+  /** book vectors for books indexed before they existed: averaged from their passages, nothing re-indexed */
+  const computeBookVectors = async () => {
+    if (libraryId == null) return;
+    setComputing(true);
+    try {
+      const r = await api.computeBookVectors(libraryId);
+      toastSuccess(`Computed ${formatNumber(r.computed)} book vectors`);
+      space.reload();
+    } catch (err) {
+      toastError("Computing book vectors failed", err);
+    } finally {
+      setComputing(false);
+    }
+  };
 
   const reshuffle = () => setSeed(1 + Math.floor(Math.random() * 1_000_000));
 
-  // the last layout stays up while the next loads, but not across libraries
-  const data = space.data?.libraryId === libraryId ? space.data : undefined;
+  // the last layout stays up while the next loads, but not across libraries or levels
+  const data = space.data && space.data.libraryId === libraryId && space.data.level === level ? space.data : undefined;
+  const byBook = level === "books";
   const books = useMemo(() => {
     const byId = new Map<number, { bookId: number; title: string; count: number }>();
     for (const p of data?.points ?? []) {
@@ -99,7 +128,8 @@ export function VectorSpaceView({ active }: { active: boolean }) {
       entry.count += 1;
       byId.set(p.bookId, entry);
     }
-    return [...byId.values()].sort((a, b) => b.count - a.count);
+    // a book is one point at the books level: alphabetical then, else the books with most passages first
+    return [...byId.values()].sort((a, b) => b.count - a.count || a.title.localeCompare(b.title));
   }, [data]);
 
   const methodMeta = METHODS.find((m) => m.id === method)!;
@@ -115,6 +145,11 @@ export function VectorSpaceView({ active }: { active: boolean }) {
             options={libraries.map((l) => ({ value: l.id, label: l.name }))}
           />
         )}
+        <ButtonGroup aria-label="Plot passages or books">
+          {LEVELS.map((l) => (
+            <Button key={l.id} text={l.label} active={level === l.id} onClick={() => setLevel(l.id)} title={l.hint} />
+          ))}
+        </ButtonGroup>
         <ButtonGroup>
           {METHODS.map((m) => (
             <Button
@@ -135,26 +170,46 @@ export function VectorSpaceView({ active }: { active: boolean }) {
         <span className="spacer" />
         {data && (
           <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
-            {formatNumber(data.size)} of {formatNumber(data.totalPassages)} passages · {data.dimensions}-D →
+            {formatNumber(data.size)} of {formatNumber(data.total)} {byBook ? "books" : "passages"} · {data.dimensions}-D →
             2-D in {formatNumber(data.elapsedMs)} ms{data.cached ? " (cached)" : ""}
           </span>
         )}
       </div>
+
+      {byBook && data && data.missingBookVectors > 0 && data.points.length > 0 && (
+        <Callout compact intent={Intent.PRIMARY} icon="info-sign" className="vectors-missing">
+          {formatNumber(data.missingBookVectors)} indexed {data.missingBookVectors === 1 ? "book has" : "books have"} no
+          book vector yet, so {data.missingBookVectors === 1 ? "it isn't" : "they aren't"} plotted.{" "}
+          <Button size="small" intent={Intent.PRIMARY} text="Compute book vectors" loading={computing} onClick={computeBookVectors} />
+        </Callout>
+      )}
 
       {space.error ? (
         <ErrorState error={space.error} onRetry={space.reload} />
       ) : !data ? (
         <NonIdealState icon={<Spinner />} description="Projecting embeddings…" />
       ) : data.points.length === 0 ? (
-        <NonIdealState
-          icon="scatter-plot"
-          title="No embeddings yet"
-          description="Index some books of this library to see them here."
-        />
+        byBook && data.missingBookVectors > 0 ? (
+          <NonIdealState
+            icon="scatter-plot"
+            title="No book vectors yet"
+            description={`${formatNumber(data.missingBookVectors)} indexed books can get one: the average of their passages' embeddings, computed from what's already indexed (a few seconds, no re-indexing).`}
+            action={
+              <Button intent={Intent.PRIMARY} icon="calculator" text="Compute book vectors" loading={computing} onClick={computeBookVectors} />
+            }
+          />
+        ) : (
+          <NonIdealState
+            icon="scatter-plot"
+            title="No embeddings yet"
+            description="Index some books of this library to see them here."
+          />
+        )
       ) : (
         <div className="vectors-body">
           <div className="vectors-canvas-wrap">
             <Callout compact className="vectors-hint">
+              {byBook ? "Each point is a book: the average of its passages. " : ""}
               {methodMeta.hint} Scroll to zoom, drag to pan, click a point for details.
             </Callout>
             <ScatterCanvas
@@ -183,7 +238,8 @@ export function VectorSpaceView({ active }: { active: boolean }) {
             )}
             <div className="vectors-legend">
               <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
-                Books — click to highlight{highlightBook != null ? " (click again to clear)" : ""}
+                {byBook ? `${formatNumber(books.length)} books` : "Books"} — click to highlight
+                {highlightBook != null ? " (click again to clear)" : ""}
               </div>
               {books.map((b) => (
                 <button
@@ -195,7 +251,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
                 >
                   <span className="vectors-swatch" style={{ background: bookColour(b.bookId) }} />
                   <span className="vectors-legend-title">{b.title}</span>
-                  <span className={Classes.TEXT_MUTED}>{formatNumber(b.count)}</span>
+                  {!byBook && <span className={Classes.TEXT_MUTED}>{formatNumber(b.count)}</span>}
                 </button>
               ))}
             </div>
