@@ -1924,6 +1924,21 @@ body.is-resizing-x * {
   min-width: 0;
   min-height: 0;
 }
+.vectors-deck {
+  position: absolute;
+  inset: 0;
+}
+.vectors-tooltip {
+  background: var(--app-surface) !important;
+  color: var(--app-text) !important;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  padding: 6px 8px !important;
+  font-size: 12px;
+  max-width: 360px;
+  white-space: pre-line;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.18);
+}
 .vectors-missing {
   margin: 8px 16px 0;
   width: auto;

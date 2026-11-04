@@ -220,12 +220,14 @@ export interface VectorPoint {
   snippet: string;
   x: number;
   y: number;
+  z: number | null; // 3-D layouts only
 }
 
 export interface VectorSpace {
   libraryId: number;
   level: VectorLevel;
   method: VectorMethod;
+  dims: 2 | 3;
   seed: number;
   size: number;
   total: number; // passages (or books) with a vector in this library

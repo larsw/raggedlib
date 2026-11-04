@@ -8,8 +8,9 @@ import {
   NonIdealState,
   Spinner,
   Tag,
+  Tooltip,
 } from "@blueprintjs/core";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { VectorLevel, VectorMethod, VectorPoint, VectorSpace } from "../api/types";
 import { useApp } from "../AppContext";
@@ -18,8 +19,11 @@ import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
 import { formatNumber } from "../lib/format";
 
+// deck.gl (WebGL) loads with the first plot, not with the app
+const DeckScatter = lazy(() => import("../components/vectors/DeckScatter"));
+
 const METHODS: { id: VectorMethod; label: string; hint: string }[] = [
-  { id: "pca", label: "PCA", hint: "Linear projection onto the two directions of greatest variance. Fast; distances are roughly preserved." },
+  { id: "pca", label: "PCA", hint: "Linear projection onto the directions of greatest variance. Fast; distances are roughly preserved." },
   { id: "umap", label: "UMAP", hint: "Preserves local neighbourhoods. Clusters are compact; global distances are not meaningful." },
   { id: "tsne", label: "t-SNE", hint: "Preserves local neighbourhoods. Slowest at large sizes; global distances are not meaningful." },
 ];
@@ -34,8 +38,31 @@ const PAD = 24;
 const POINT_RADIUS = 3.5;
 
 /** Stable hue per book so the same book keeps its colour across reloads and methods. */
+function bookHue(bookId: number): number {
+  return (bookId * 137.508) % 360;
+}
+
 function bookColour(bookId: number): string {
-  return `hsl(${(bookId * 137.508) % 360}, 65%, 52%)`;
+  return `hsl(${bookHue(bookId)}, 65%, 52%)`;
+}
+
+/** [bookColour] as 0-255 RGB, for WebGL. */
+export function bookColourRgb(bookId: number): [number, number, number] {
+  const s = 0.65;
+  const l = 0.52;
+  const k = (n: number) => (n + bookHue(bookId) / 30) % 12;
+  const a = s * Math.min(l, 1 - l);
+  const f = (n: number) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+  return [Math.round(f(0) * 255), Math.round(f(8) * 255), Math.round(f(4) * 255)];
+}
+
+/** WebGL2 is what deck.gl draws with; without it (or after it failed) the canvas renderer draws 2-D plots. */
+function hasWebGL2(): boolean {
+  try {
+    return !!document.createElement("canvas").getContext("webgl2");
+  } catch {
+    return false;
+  }
 }
 
 interface Bounds {
@@ -75,6 +102,9 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const [level, setLevel] = useState<VectorLevel>("passages");
   const [method, setMethod] = useState<VectorMethod>("umap");
   const [size, setSize] = useState(1000);
+  const [gpu, setGpu] = useState(hasWebGL2);
+  const [dimsWanted, setDims] = useState<2 | 3>(2);
+  const dims = gpu ? dimsWanted : 2; // 3-D needs the GPU renderer
   // undefined: the library's current sample (kept by the server, so a reload shows the last reshuffle); a number:
   // a new sample, after Reshuffle
   const [seed, setSeed] = useState<number | undefined>();
@@ -84,8 +114,8 @@ export function VectorSpaceView({ active }: { active: boolean }) {
 
   const space = useAsync<VectorSpace | undefined>(
     (signal) =>
-      libraryId == null ? Promise.resolve(undefined) : api.vectors({ libraryId, level, method, size, seed }, signal),
-    [libraryId, level, method, size, seed],
+      libraryId == null ? Promise.resolve(undefined) : api.vectors({ libraryId, level, method, size, dims, seed }, signal),
+    [libraryId, level, method, size, dims, seed],
   );
 
   // a new library's passages are different points: drop the selection and highlight of the previous one, and show
@@ -119,7 +149,11 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const reshuffle = () => setSeed(1 + Math.floor(Math.random() * 1_000_000));
 
   // the last layout stays up while the next loads, but not across libraries or levels
-  const data = space.data && space.data.libraryId === libraryId && space.data.level === level ? space.data : undefined;
+  // (a 2-D layout shown in 3-D, or the other way round, would be wrong, so not across dimensions either)
+  const data =
+    space.data && space.data.libraryId === libraryId && space.data.level === level && space.data.dims === dims
+      ? space.data
+      : undefined;
   const byBook = level === "books";
   const books = useMemo(() => {
     const byId = new Map<number, { bookId: number; title: string; count: number }>();
@@ -166,12 +200,22 @@ export function VectorSpaceView({ active }: { active: boolean }) {
             <Button key={s} text={formatNumber(s)} active={size === s} onClick={() => setSize(s)} />
           ))}
         </ButtonGroup>
+        <ButtonGroup aria-label="2-D or 3-D">
+          <Button text="2D" active={dims === 2} onClick={() => setDims(2)} />
+          <Tooltip
+            content={gpu ? "Lay out in three dimensions; drag to rotate" : "3-D needs WebGL2, which this browser doesn't offer"}
+            placement="bottom"
+          >
+            <Button text="3D" active={dims === 3} disabled={!gpu} onClick={() => setDims(3)} />
+          </Tooltip>
+        </ButtonGroup>
         <Button icon="random" text="Reshuffle sample" onClick={reshuffle} />
         <span className="spacer" />
         {data && (
           <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
-            {formatNumber(data.size)} of {formatNumber(data.total)} {byBook ? "books" : "passages"} · {data.dimensions}-D →
-            2-D in {formatNumber(data.elapsedMs)} ms{data.cached ? " (cached)" : ""}
+            {formatNumber(data.size)} of {formatNumber(data.total)} {byBook ? "books" : "passages"} · {data.dimensions}-D →{" "}
+            {data.dims}-D in {formatNumber(data.elapsedMs)} ms{data.cached ? " (cached)" : ""} ·{" "}
+            {gpu ? "WebGL" : "canvas"}
           </span>
         )}
       </div>
@@ -210,15 +254,35 @@ export function VectorSpaceView({ active }: { active: boolean }) {
           <div className="vectors-canvas-wrap">
             <Callout compact className="vectors-hint">
               {byBook ? "Each point is a book: the average of its passages. " : ""}
-              {methodMeta.hint} Scroll to zoom, drag to pan, click a point for details.
+              {methodMeta.hint}{" "}
+              {dims === 3
+                ? "Drag to rotate, right-drag or Shift-drag to pan, scroll to zoom, click a point for details."
+                : "Scroll to zoom, drag to pan, click a point for details."}
             </Callout>
-            <ScatterCanvas
-              active={active}
-              points={data.points}
-              highlightBook={highlightBook}
-              pinnedId={pinned?.id ?? null}
-              onPick={setPinned}
-            />
+            {gpu ? (
+              <Suspense fallback={<NonIdealState icon={<Spinner />} description="Loading the plot…" />}>
+                <DeckScatter
+                  points={data.points}
+                  dims={dims}
+                  highlightBook={highlightBook}
+                  pinnedId={pinned?.id ?? null}
+                  onPick={setPinned}
+                  colour={bookColourRgb}
+                  onError={(err) => {
+                    console.warn("WebGL plot failed, falling back to the canvas renderer", err);
+                    setGpu(false);
+                  }}
+                />
+              </Suspense>
+            ) : (
+              <ScatterCanvas
+                active={active}
+                points={data.points}
+                highlightBook={highlightBook}
+                pinnedId={pinned?.id ?? null}
+                onPick={setPinned}
+              />
+            )}
           </div>
           <aside className="vectors-side">
             {pinned && (
