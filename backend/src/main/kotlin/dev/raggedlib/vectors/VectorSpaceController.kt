@@ -15,7 +15,8 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         @RequestParam libraryId: Long,
         @RequestParam(defaultValue = "umap") method: String,
         @RequestParam(defaultValue = "1000") size: Int,
-        @RequestParam(defaultValue = "1") seed: Long,
+        /** a new sample (Reshuffle); default: the library's current one */
+        @RequestParam(required = false) seed: Long?,
     ): VectorSpace {
         val m = runCatching { VectorMethod.valueOf(method.uppercase()) }
             .getOrElse { badRequest("method must be one of pca, umap, tsne") }

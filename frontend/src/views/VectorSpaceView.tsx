@@ -68,7 +68,9 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const libraryId = library?.id ?? libraries.find((l) => l.id === ownLibraryId)?.id ?? libraries[0]?.id;
   const [method, setMethod] = useState<VectorMethod>("umap");
   const [size, setSize] = useState(1000);
-  const [seed, setSeed] = useState(1);
+  // undefined: the library's current sample (kept by the server, so a reload shows the last reshuffle); a number:
+  // a new sample, after Reshuffle
+  const [seed, setSeed] = useState<number | undefined>();
   const [highlightBook, setHighlightBook] = useState<number | null>(null);
   const [pinned, setPinned] = useState<VectorPoint | null>(null);
 
@@ -78,10 +80,12 @@ export function VectorSpaceView({ active }: { active: boolean }) {
     [libraryId, method, size, seed],
   );
 
-  // a new library's passages are different points: drop the selection and highlight of the previous one
+  // a new library's passages are different points: drop the selection and highlight of the previous one, and show
+  // that library's own current sample rather than carrying a reshuffle over
   useEffect(() => {
     setPinned(null);
     setHighlightBook(null);
+    setSeed(undefined);
   }, [libraryId]);
 
   const reshuffle = () => setSeed(1 + Math.floor(Math.random() * 1_000_000));
@@ -132,7 +136,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
         {data && (
           <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
             {formatNumber(data.size)} of {formatNumber(data.totalPassages)} passages · {data.dimensions}-D →
-            2-D in {formatNumber(data.elapsedMs)} ms
+            2-D in {formatNumber(data.elapsedMs)} ms{data.cached ? " (cached)" : ""}
           </span>
         )}
       </div>
