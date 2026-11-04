@@ -88,6 +88,7 @@ interface SystemInfo {
   rerankEnabled: boolean;               // server has a reranker configured (raggedlib.rerank.enabled)
   rerankerUrl: string;
   rerankerReachable: boolean;           // GET <rerankerUrl>/health answered
+  rerankerModel: string | null;         // GET <rerankerUrl>/v1/models' model name; null if unreachable
 }
 ```
 

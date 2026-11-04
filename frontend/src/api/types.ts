@@ -133,6 +133,7 @@ export interface SystemInfo {
   rerankEnabled: boolean; // server has a reranker configured
   rerankerUrl: string;
   rerankerReachable: boolean;
+  rerankerModel: string | null; // the model llama.cpp was started with; null if unreachable or not reported
 }
 
 export interface SyncResult {

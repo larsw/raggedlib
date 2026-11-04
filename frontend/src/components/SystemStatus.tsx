@@ -44,7 +44,7 @@ export function SystemStatus() {
               !system.rerankEnabled
                 ? "off"
                 : system.rerankerReachable
-                  ? `reachable (${system.rerankerUrl})`
+                  ? `${system.rerankerModel ?? "reachable"} (${system.rerankerUrl})`
                   : `UNREACHABLE (${system.rerankerUrl})`
             }
           />
