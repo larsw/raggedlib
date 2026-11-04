@@ -114,7 +114,7 @@ export const api = {
 
   books: (q: BookQuery = {}, signal?: AbortSignal) =>
     getJson<Page<Book>>(
-      `/books${queryString({ q: q.q, status: q.status, tag: q.tag, libraryId: q.libraryId, page: q.page, size: q.size, sort: q.sort })}`,
+      `/books${queryString({ q: q.q, status: q.status, tag: q.tag, publisher: q.publisher, libraryId: q.libraryId, page: q.page, size: q.size, sort: q.sort })}`,
       signal,
     ),
 
@@ -129,6 +129,8 @@ export const api = {
     (await send(`/books/${id}/file?format=${encodeURIComponent(format)}`, { signal })).blob(),
 
   tags: (libraryId?: number, signal?: AbortSignal) => getJson<TagCount[]>(`/tags${queryString({ libraryId })}`, signal),
+  publishers: (libraryId?: number, signal?: AbortSignal) =>
+    getJson<TagCount[]>(`/publishers${queryString({ libraryId })}`, signal),
 
   ingestStart: (body?: IngestStartRequest) => postJson<IngestStatus>("/ingest/start", body ?? {}),
   /** `force`: interrupt books currently being extracted (killing e.g. OCR) and put them back to PENDING, instead of waiting for them to finish. */

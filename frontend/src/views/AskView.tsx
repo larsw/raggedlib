@@ -167,6 +167,7 @@ function scopeSummary(scope: Scope, rerankAvailable: boolean): string {
   if (scope.books.length === 1) parts.push(scope.books[0]!.title);
   else if (scope.books.length > 1) parts.push(`${scope.books.length} books`);
   if (scope.tags.length) parts.push(scope.tags.map((t) => `#${t}`).join(" "));
+  if (scope.publishers.length) parts.push(scope.publishers.join(", "));
   if (!parts.length) parts.push("All books");
   parts.push(scope.rerank && rerankAvailable ? "reranked" : "fused order");
   return parts.join(" · ");

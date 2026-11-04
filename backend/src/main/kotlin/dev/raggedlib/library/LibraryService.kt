@@ -55,12 +55,14 @@ class LibraryService(
                     continue
                 }
                 val changed = old.lastModified != r.lastModified || old.formatPaths.keys != r.formats.keys
-                val pathsMoved = old.formatPaths != r.formats || old.coverPath != r.coverPath
+                // also refreshes what an older index didn't store (publisher, before V7) without re-indexing
+                val metadataOnly = old.formatPaths != r.formats || old.coverPath != r.coverPath ||
+                    old.book.publisher != r.publisher
                 if (changed) {
                     // passages stay searchable until re-indexing replaces them (reusing unchanged embeddings)
                     books.updateMetadata(old.book.id, r, preferred, reset = true)
                     updated++
-                } else if (pathsMoved) {
+                } else if (metadataOnly) {
                     books.updateMetadata(old.book.id, r, old.book.sourceFormat ?: preferred, reset = false)
                 }
             }

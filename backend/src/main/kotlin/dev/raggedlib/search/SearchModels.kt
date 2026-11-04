@@ -11,6 +11,8 @@ data class SearchRequest(
     val rerank: Boolean? = null,
     /** Correct misspelled words before searching (default true); false searches for the query exactly as written. */
     val correct: Boolean? = null,
+    /** Restrict to books from ANY of these publishers (exact names, see GET /api/publishers). */
+    val publishers: List<String>? = null,
 )
 
 data class SearchResponse(

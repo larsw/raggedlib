@@ -16,7 +16,7 @@ class BookRepository(
     private val mapper: ObjectMapper,
 ) {
     private val columns = """
-        id, library_id, calibre_id, title, authors, tags, series, series_index, languages, pubdate, formats,
+        id, library_id, calibre_id, title, authors, tags, series, series_index, languages, pubdate, publisher, formats,
         source_format, cover_path, calibre_last_modified, status, chunk_count, error, indexed_at, duplicate_of,
         ocr_pages
     """.trimIndent()
@@ -38,6 +38,7 @@ class BookRepository(
                 seriesIndex = rs.getObject("series_index") as Double?,
                 languages = rs.strings("languages"),
                 pubdate = rs.getTimestamp("pubdate")?.toInstant(),
+                publisher = rs.getString("publisher"),
                 formats = formatPaths.keys.sorted(),
                 sourceFormat = rs.getString("source_format"),
                 hasCover = cover != null,
@@ -62,7 +63,10 @@ class BookRepository(
     fun findAllByLibrary(libraryId: Long): List<BookRow> =
         jdbc.query("select $columns from books where library_id = :libraryId", mapOf("libraryId" to libraryId), rowMapper)
 
-    fun search(q: String?, status: BookStatus?, tag: String?, page: Int, size: Int, sort: String, libraryId: Long? = null): Page<Book> {
+    fun search(
+        q: String?, status: BookStatus?, tag: String?, page: Int, size: Int, sort: String, libraryId: Long? = null,
+        publisher: String? = null,
+    ): Page<Book> {
         val where = mutableListOf<String>()
         val params = MapSqlParameterSource()
         if (!q.isNullOrBlank()) {
@@ -81,10 +85,15 @@ class BookRepository(
             where += "library_id = :libraryId"
             params.addValue("libraryId", libraryId)
         }
+        if (!publisher.isNullOrBlank()) {
+            where += "publisher = :publisher"
+            params.addValue("publisher", publisher)
+        }
         val whereSql = if (where.isEmpty()) "" else "where " + where.joinToString(" and ")
         val desc = sort.startsWith("-")
         val orderSql = when (sort.removePrefix("-")) {
             "author" -> "lower(coalesce(authors[1], '')) ${dir(desc)}, lower(title)"
+            "publisher" -> "lower(publisher) ${dir(desc)} nulls last, lower(title)"
             "pubdate" -> "pubdate ${dir(!desc)} nulls last, lower(title)" // newest first by default
             "indexedAt" -> "indexed_at ${dir(!desc)} nulls last, lower(title)" // most recent first by default
             "id" -> "id ${dir(desc)}"
@@ -107,6 +116,15 @@ class BookRepository(
         ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
     }
 
+    /** Publishers with how many books each, most books first. */
+    fun publishers(libraryId: Long? = null): List<TagCount> {
+        val filter = if (libraryId != null) "and library_id = :libraryId" else ""
+        return jdbc.query(
+            "select publisher, count(*) c from books where publisher is not null $filter group by publisher order by c desc, publisher",
+            mapOf("libraryId" to libraryId),
+        ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
+    }
+
     fun countsByLibrary(): Map<Long, Int> = jdbc.query(
         "select library_id, count(*) from books group by library_id", emptyMap<String, Any>(),
     ) { rs, _ -> rs.getLong(1) to rs.getInt(2) }.toMap()
@@ -115,9 +133,9 @@ class BookRepository(
     fun insert(libraryId: Long, r: CalibreRecord, sourceFormat: String?): Long = jdbc.queryForObject(
         """
         insert into books (library_id, calibre_id, title, authors, tags, series, series_index, languages, pubdate,
-                           formats, source_format, cover_path, calibre_last_modified, status)
+                           publisher, formats, source_format, cover_path, calibre_last_modified, status)
         values (:libraryId, :id, :title, :authors, :tags, :series, :seriesIndex, :languages, :pubdate,
-                cast(:formats as jsonb), :sourceFormat, :cover, :lastModified, 'PENDING')
+                :publisher, cast(:formats as jsonb), :sourceFormat, :cover, :lastModified, 'PENDING')
         returning id
         """.trimIndent(),
         recordParams(r, sourceFormat).addValue("libraryId", libraryId),
@@ -133,7 +151,8 @@ class BookRepository(
         jdbc.update(
             """
             update books set title = :title, authors = :authors, tags = :tags, series = :series, series_index = :seriesIndex,
-                   languages = :languages, pubdate = :pubdate, formats = cast(:formats as jsonb), source_format = :sourceFormat,
+                   languages = :languages, pubdate = :pubdate, publisher = :publisher, formats = cast(:formats as jsonb),
+                   source_format = :sourceFormat,
                    cover_path = :cover, calibre_last_modified = :lastModified, updated_at = now() $resetSql
             where id = :bookId
             """.trimIndent(),
@@ -150,6 +169,7 @@ class BookRepository(
         .addValue("seriesIndex", r.seriesIndex)
         .addValue("languages", r.languages.toTypedArray())
         .addValue("pubdate", r.pubdate?.let(Timestamp::from))
+        .addValue("publisher", r.publisher)
         .addValue("formats", mapper.writeValueAsString(r.formats))
         .addValue("sourceFormat", sourceFormat)
         .addValue("cover", r.coverPath)

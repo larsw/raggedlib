@@ -77,6 +77,7 @@ class MetadataDbReader(private val libraryRoot: Path) {
         val tags = multi("select l.book, t.name from books_tags_link l join tags t on t.id = l.tag order by l.book, l.id")
         val langs = multi("select l.book, g.lang_code from books_languages_link l join languages g on g.id = l.lang_code order by l.book, l.item_order")
         val series = multi("select l.book, s.name from books_series_link l join series s on s.id = l.series")
+        val publishers = multi("select l.book, p.name from books_publishers_link l join publishers p on p.id = l.publisher")
         val formats = linkedMapOf<Long, MutableMap<String, String>>()
         c.createStatement().use { s ->
             s.executeQuery("select d.book, d.format, d.name, b.path from data d join books b on b.id = d.book order by d.book, d.id").use { rs ->
@@ -105,6 +106,7 @@ class MetadataDbReader(private val libraryRoot: Path) {
                         formats = formats[id] ?: emptyMap(),
                         coverPath = if (rs.getBoolean(6)) "${rs.getString(5)}/cover.jpg" else null,
                         lastModified = CalibreDates.lastModified(rs.getString(7)),
+                        publisher = publishers[id]?.firstOrNull()?.trim()?.ifEmpty { null },
                     )
                 }
             }

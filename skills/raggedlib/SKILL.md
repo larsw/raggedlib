@@ -25,14 +25,14 @@ available at all, see "When the tools aren't connected" below.
 |---|---|---|
 | `search_library` | Finding passages: the default for almost everything | ~1 s, no LLM |
 | `ask_library` | A cited answer written by the user's local LLM | 20–90 s, cut off at ~150 s |
-| `list_books` | Book ids by title/author substring, tag or status | instant |
+| `list_books` | Book ids by title/author substring, tag, publisher or status | instant |
 | `list_tags` | Calibre tags with book counts, most used first | instant |
 | `library_status` | How many books are indexed, whether indexing is running | instant |
 
 ### search_library — start here
 
-Arguments: `query` (required), `topK` (1–50, default 8), `bookIds`, `tags`, `rerank` (default true),
-`correctSpelling` (default true).
+Arguments: `query` (required), `topK` (1–50, default 8), `bookIds`, `tags`, `publishers`, `rerank` (default
+true), `correctSpelling` (default true).
 
 Returns `{query, correctedQuery, passages: [{ref, bookId, title, authors, page, section, score, scoreKind, text}],
 note}`: whole passages (~1,500 characters) with a `page` (PDFs) or a `section` (ebooks) to cite.
@@ -70,8 +70,8 @@ search from several angles, and you keep control of what is claimed and cited.
 
 ### ask_library — only when the local model's answer is wanted
 
-Arguments: `question` (required, self-contained: no memory between calls), `topK`, `bookIds`, `tags`, `model`,
-`correctSpelling`. Returns `answer` with `[n]` citations, `sources` (400-character excerpts; `ref` matches `[n]`),
+Arguments: `question` (required, self-contained: no memory between calls), `topK`, `bookIds`, `tags`,
+`publishers`, `model`, `correctSpelling`. Returns `answer` with `[n]` citations, `sources` (400-character excerpts; `ref` matches `[n]`),
 and the `searchQuery` it retrieved with.
 
 Use it when the user asks for raggedlib's/the local model's answer, or wants the work kept on their machine.
@@ -81,9 +81,10 @@ fails although the server is fine. Its sources are excerpts, so to quote or chec
 
 ### list_books, list_tags, library_status — narrowing and sanity checks
 
-- `list_books(query?, tag?, status?, page?, size?)` returns `{total, page, size, books: [{id, title, authors,
-  tags, languages, pubYear, status, chunks, duplicateOf}]}`. `query` is a case-insensitive substring of the title
-  or an author. Use the `id`s as `bookIds`. Only `INDEXED` books are searchable; a `DUPLICATE` has the same text as
+- `list_books(query?, tag?, publisher?, status?, page?, size?)` returns `{total, page, size, books: [{id, title,
+  authors, tags, publisher, languages, pubYear, status, chunks, duplicateOf}]}`. `query` is a case-insensitive
+  substring of the title or an author; `publisher` is an exact name, as the books show it, and the same names work
+  as `publishers` (ANY of them) in `search_library` and `ask_library`. Use the `id`s as `bookIds`. Only `INDEXED` books are searchable; a `DUPLICATE` has the same text as
   `duplicateOf` and is searched through it; `PENDING`/`FAILED`/`SKIPPED` books have no passages yet.
 - `list_tags(limit?)` returns `[{name, books}]`: tags to pass as `tags` (a book matches if it has ANY of them).
   Tag names are exact.

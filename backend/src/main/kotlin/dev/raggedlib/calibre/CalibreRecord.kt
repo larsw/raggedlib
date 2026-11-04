@@ -19,6 +19,7 @@ data class CalibreRecord(
     val coverPath: String?,
     /** truncated to seconds so calibredb and metadata.db readings compare equal */
     val lastModified: Instant?,
+    val publisher: String? = null,
 )
 
 object CalibreDates {

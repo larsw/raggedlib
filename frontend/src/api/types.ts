@@ -30,6 +30,7 @@ export interface Book {
   seriesIndex: number | null;
   languages: string[];
   pubdate: string | null;
+  publisher: string | null;
   formats: string[]; // upper-case extensions available, e.g. ["PDF","EPUB"]
   sourceFormat: string | null; // format chosen for indexing, e.g. "EPUB"
   hasCover: boolean;
@@ -146,12 +147,13 @@ export interface TagCount {
   count: number;
 }
 
-export type BookSort = "title" | "author" | "pubdate" | "indexedAt" | "id";
+export type BookSort = "title" | "author" | "publisher" | "pubdate" | "indexedAt" | "id";
 
 export interface BookQuery {
   q?: string;
   status?: BookStatus;
   tag?: string;
+  publisher?: string;
   libraryId?: number;
   page?: number;
   size?: number;
@@ -169,6 +171,7 @@ export interface SearchRequest {
   bookIds?: number[]; // restrict to these books
   tags?: string[]; // restrict to books having ANY of these tags
   libraryIds?: number[]; // restrict to these libraries; default: every configured library
+  publishers?: string[]; // restrict to books from ANY of these publishers
   rerank?: boolean; // cross-encoder reranking; default on when the server has a reranker
   correct?: boolean; // spelling correction of words the library doesn't contain; default true
 }

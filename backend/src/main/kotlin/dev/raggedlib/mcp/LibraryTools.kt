@@ -73,6 +73,7 @@ class LibraryTools(
         val title: String,
         val authors: List<String>,
         val tags: List<String>,
+        val publisher: String?,
         val languages: List<String>,
         val pubYear: Int?,
         val status: BookStatus,
@@ -116,13 +117,15 @@ Use list_books or list_tags first to restrict a search to particular books or ta
         tags: List<String>?,
         @McpToolParam(description = "Only search these libraries (ids from list_libraries); default: every configured library.", required = false)
         libraryIds: List<Long>?,
+        @McpToolParam(description = "Only search books from ANY of these publishers (exact names, as list_books shows them).", required = false)
+        publishers: List<String>?,
         @McpToolParam(description = "Cross-encoder reranking with a relevance cutoff (default true). false = raw hybrid order, never empty while anything matches.", required = false)
         rerank: Boolean?,
         @McpToolParam(description = "Correct misspelled words (default true): words the library lacks, or has only rarely next to a far more common spelling. false searches for the query exactly as written.", required = false)
         correctSpelling: Boolean?,
     ): SearchResult {
         log.info("MCP search_library: '{}'", query.take(200))
-        val response = search.search(SearchRequest(query, topK, bookIds, tags, libraryIds, rerank, correctSpelling))
+        val response = search.search(SearchRequest(query, topK, bookIds, tags, libraryIds, rerank, correctSpelling, publishers))
         val found = response.results.map(::passage)
         // MCP clients cap tool output (Claude Code: ~25K tokens); keep whole passages up to a character budget
         var used = 0
@@ -161,6 +164,8 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
         tags: List<String>?,
         @McpToolParam(description = "Only use these libraries (ids from list_libraries); default: every configured library.", required = false)
         libraryIds: List<Long>?,
+        @McpToolParam(description = "Only use books from ANY of these publishers (exact names, as list_books shows them).", required = false)
+        publishers: List<String>?,
         @McpToolParam(description = "Chat model override (an installed Ollama model); default is the server's.", required = false)
         model: String?,
         @McpToolParam(description = "Correct misspelled words for retrieval (default true); false retrieves for the question exactly as written.", required = false)
@@ -168,7 +173,7 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
     ): AnswerResult {
         require(question.isNotBlank()) { "question must not be empty" }
         log.info("MCP ask_library: '{}'", question.take(200))
-        val req = ChatRequest(query = question, topK = topK, bookIds = bookIds, tags = tags, libraryIds = libraryIds, model = model, correct = correctSpelling)
+        val req = ChatRequest(query = question, topK = topK, bookIds = bookIds, tags = tags, libraryIds = libraryIds, model = model, correct = correctSpelling, publishers = publishers)
         val a = try {
             chat.answer(req, props.mcp.answerTimeout)
         } catch (e: Exception) {
@@ -189,7 +194,7 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
     @McpTool(
         name = "list_books",
         title = "List books in the library",
-        description = """List or find books in the library by title/author substring, tag or indexing status.
+        description = """List or find books in the library by title/author substring, tag, publisher or indexing status.
 Returns ids to pass as bookIds to search_library / ask_library. INDEXED books are searchable; a DUPLICATE book has
 the same text as another (duplicateOf), which is searched in its place.""",
         annotations = McpAnnotations(title = "List books", readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false),
@@ -199,6 +204,8 @@ the same text as another (duplicateOf), which is searched in its place.""",
         query: String?,
         @McpToolParam(description = "Only books with this tag (exact name, see list_tags).", required = false)
         tag: String?,
+        @McpToolParam(description = "Only books from this publisher (exact name, as list_books shows it).", required = false)
+        publisher: String?,
         @McpToolParam(description = "Only books in this status: PENDING, INDEXED, DUPLICATE, FAILED, SKIPPED, EXTRACTING or EMBEDDING.", required = false)
         status: String?,
         @McpToolParam(description = "Only books in this library (id from list_libraries).", required = false)
@@ -212,10 +219,10 @@ the same text as another (duplicateOf), which is searched in its place.""",
             BookStatus.entries.firstOrNull { it.name.equals(s.trim(), ignoreCase = true) }
                 ?: throw IllegalArgumentException("unknown status '$s'; use one of ${BookStatus.entries.joinToString()}")
         }
-        val p = books.search(query, st, tag, (page ?: 0).coerceAtLeast(0), (size ?: 25).coerceIn(1, 100), "title", libraryId)
+        val p = books.search(query, st, tag, (page ?: 0).coerceAtLeast(0), (size ?: 25).coerceIn(1, 100), "title", libraryId, publisher)
         val names = libraries.all.associate { it.id to it.name }
         return BookList(p.total, p.page, p.size, p.items.map { b ->
-            BookInfo(b.id, b.libraryId, names[b.libraryId] ?: "?", b.title, b.authors, b.tags, b.languages,
+            BookInfo(b.id, b.libraryId, names[b.libraryId] ?: "?", b.title, b.authors, b.tags, b.publisher, b.languages,
                 b.pubdate?.atZone(java.time.ZoneOffset.UTC)?.year, b.status, b.chunkCount, b.duplicateOf)
         })
     }

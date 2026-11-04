@@ -46,6 +46,7 @@ export function SearchView() {
       topK: scope.topK,
       ...(scope.books.length ? { bookIds: scope.books.map((b) => b.id) } : {}),
       ...(scope.tags.length ? { tags: scope.tags } : {}),
+      ...(scope.publishers.length ? { publishers: scope.publishers } : {}),
       ...(library ? { libraryIds: [library.id] } : {}),
       rerank: scope.rerank,
       ...(correct ? {} : { correct: false }),

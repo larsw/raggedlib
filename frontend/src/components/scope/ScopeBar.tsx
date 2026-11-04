@@ -2,7 +2,7 @@ import { AnchorButton, Button, ControlGroup, Tooltip } from "@blueprintjs/core";
 import { useApp } from "../../AppContext";
 import { scopeIsEmpty } from "../../hooks/useScope";
 import { BookMultiSelect } from "./BookMultiSelect";
-import { TagMultiSelect } from "./TagMultiSelect";
+import { FacetMultiSelect } from "./FacetMultiSelect";
 
 /** Retrieval scope controls shared by Ask and Search (state lives in AppContext; model and top-k are in Settings). */
 export function ScopeBar() {
@@ -18,7 +18,14 @@ export function ScopeBar() {
         <BookMultiSelect selected={scope.books} onChange={(books) => setScope((s) => ({ ...s, books }))} />
       </div>
       <div className="scope-bar-tags">
-        <TagMultiSelect selected={scope.tags} onChange={(tags) => setScope((s) => ({ ...s, tags }))} />
+        <FacetMultiSelect facet="tags" selected={scope.tags} onChange={(tags) => setScope((s) => ({ ...s, tags }))} />
+      </div>
+      <div className="scope-bar-publishers">
+        <FacetMultiSelect
+          facet="publishers"
+          selected={scope.publishers}
+          onChange={(publishers) => setScope((s) => ({ ...s, publishers }))}
+        />
       </div>
       <ControlGroup className="scope-bar-options">
         <Tooltip
@@ -51,7 +58,7 @@ export function ScopeBar() {
             icon="filter-remove"
             aria-label="Reset scope"
             disabled={scopeIsEmpty(scope)}
-            onClick={() => setScope((s) => ({ ...s, books: [], tags: [] }))}
+            onClick={() => setScope((s) => ({ ...s, books: [], tags: [], publishers: [] }))}
           />
         </Tooltip>
       </ControlGroup>

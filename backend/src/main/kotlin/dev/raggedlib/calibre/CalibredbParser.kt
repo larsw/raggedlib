@@ -37,6 +37,7 @@ class CalibredbParser(private val mapper: ObjectMapper) {
             formats = formats,
             coverPath = textOrNull(n, "cover")?.let { relativize(lib, it) },
             lastModified = CalibreDates.lastModified(textOrNull(n, "last_modified")),
+            publisher = textOrNull(n, "publisher")?.trim(),
         )
     }
 

@@ -995,7 +995,8 @@ body.is-resizing-x * {
   flex: 2 1 260px;
   min-width: 0;
 }
-.scope-bar-tags {
+.scope-bar-tags,
+.scope-bar-publishers {
   flex: 1 1 200px;
   min-width: 0;
 }
@@ -1232,8 +1233,14 @@ body.is-resizing-x * {
 .library-search {
   width: 280px;
 }
-.tag-filter-button {
+.facet-filter-button {
   max-width: 220px;
+}
+.publisher-cell {
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .library-body {
   flex: 1 1 auto;
