@@ -115,19 +115,20 @@ services:
       RAGGEDLIB_LIBRARIES_0_PATH: /library/0
       RAGGEDLIB_LIBRARIES_1_NAME: ${CALIBRE_LIBRARY_1_NAME:-}
       RAGGEDLIB_LIBRARIES_1_PATH: /library/1
-      RAGGEDLIB_LIBRARIES_2_NAME: ${CALIBRE_LIBRARY_2_NAME:-}
-      RAGGEDLIB_LIBRARIES_2_PATH: /library/2
+      # Library 2: uncomment here and the matching volume below, and set CALIBRE_LIBRARY_2 (+ _NAME) in .env, to add a third.
+      # RAGGEDLIB_LIBRARIES_2_NAME: ${CALIBRE_LIBRARY_2_NAME:-}
+      # RAGGEDLIB_LIBRARIES_2_PATH: /library/2
       RAGGEDLIB_RERANK_BASE_URL: http://reranker:8080
-      # MCP endpoint http://localhost:8080/mcp — clients send "Authorization: Bearer $MCP_API_KEY" (unset = MCP refused)
+      # MCP endpoint http://localhost:8090/mcp — clients send "Authorization: Bearer $MCP_API_KEY" (unset = MCP refused)
       RAGGEDLIB_MCP_API_KEYS_0_NAME: ${MCP_API_KEY_NAME:-default}
       RAGGEDLIB_MCP_API_KEYS_0_KEY: ${MCP_API_KEY:-}
       RAGGEDLIB_OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}
     volumes:
       - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library/0:ro
       - ${CALIBRE_LIBRARY_1:-${HOME}/Documents/CalibreLibraryNonFiction}:/library/1:ro
-      - ${CALIBRE_LIBRARY_2:-${HOME}/Documents/CalibreLibraryMisc}:/library/2:ro
+      # - ${CALIBRE_LIBRARY_2:-${HOME}/Documents/CalibreLibraryMisc}:/library/2:ro
     ports:
-      - "127.0.0.1:8080:8080"
+      - "127.0.0.1:8090:8080"
 
   frontend:
     build: ./frontend

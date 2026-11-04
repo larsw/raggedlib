@@ -16,7 +16,7 @@ CREATE INDEX books_library_idx ON books (library_id);
 -- key: existing rows (and vector_store.book_id, which references them) keep their value unchanged, but new books
 -- get one assigned from a sequence seeded above the current max, so ids stay unique across every library.
 CREATE SEQUENCE books_id_seq OWNED BY books.id;
-SELECT setval('books_id_seq', (SELECT coalesce(max(id), 0) FROM books));
+SELECT setval('books_id_seq', (SELECT coalesce(max(id), 1) FROM books), (SELECT max(id) IS NOT NULL FROM books));
 ALTER TABLE books ALTER COLUMN id SET DEFAULT nextval('books_id_seq');
 
 -- library_id/calibre_id for rows that predate this migration are backfilled in app code (LibraryRegistry), once it
