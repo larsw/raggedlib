@@ -1507,7 +1507,7 @@ body.is-resizing-x * {
   display: flex;
   flex-direction: column;
   gap: 12px;
-  max-width: 1200px;
+  max-width: 1600px;
   width: 100%;
   margin: 0 auto;
   box-sizing: border-box;
@@ -1570,12 +1570,18 @@ body.is-resizing-x * {
   gap: 12px;
   align-items: start;
 }
+.indexing-panel {
+  min-width: 0;
+}
 .indexing-panel h4 {
   margin-top: 0;
   font-size: 14px;
 }
+/* The title column takes whatever the other (nowrap) columns leave and ellipsizes, so the table never grows
+   past the card. width:100% + max-width:0 is what lets a table cell shrink below its content. */
 .indexing-panel .title-cell {
-  max-width: 300px;
+  width: 100%;
+  max-width: 0;
 }
 .error-list {
   list-style: none;
