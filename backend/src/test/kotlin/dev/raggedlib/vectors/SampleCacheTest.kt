@@ -6,13 +6,13 @@ import kotlin.test.assertFailsWith
 import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 
-class ProjectionCacheTest {
+class SampleCacheTest {
     private val P = VectorLevel.PASSAGES
     private val computed = mutableListOf<String>()
     private var fingerprints = mutableMapOf(1L to "a", 2L to "b")
     private var failNext = false
 
-    private fun cache(maxEntries: Int = 16) = ProjectionCache(
+    private fun cache(maxEntries: Int = 16) = SampleCache<LayoutSpec, VectorSpace>(
         compute = { lib, spec, seed ->
             val (level, method, size, dims) = spec
             if (failNext) {
@@ -22,6 +22,7 @@ class ProjectionCacheTest {
             computed += (if (level == VectorLevel.BOOKS) "books:" else "") + (if (dims == 3) "3d:" else "") + "$lib/$method/$size/$seed"
             VectorSpace(lib, level, method, dims, seed, size, 0, 0, 0, null, 0, emptyList())
         },
+        markCached = { it.copy(cached = true) },
         fingerprint = { fingerprints.getValue(it) },
         maxEntries = maxEntries,
     )

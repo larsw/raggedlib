@@ -32,6 +32,24 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         return service.space(libraryId, LayoutSpec(l, m, size, dims), seed)
     }
 
+    @GetMapping("/vectors/topics")
+    fun topics(
+        @RequestParam libraryId: Long,
+        @RequestParam(defaultValue = "passages") level: String,
+        @RequestParam(defaultValue = "1000") size: Int,
+        @RequestParam(defaultValue = "raw") space: String,
+        /** a new sample (Reshuffle); default: the library's current one */
+        @RequestParam(required = false) seed: Long?,
+    ): TopicSpace {
+        val l = runCatching { VectorLevel.valueOf(level.uppercase()) }
+            .getOrElse { badRequest("level must be passages or books") }
+        val sp = runCatching { ClusterSpace.valueOf(space.uppercase()) }
+            .getOrElse { badRequest("space must be raw or umap") }
+        if (size !in 1..VectorSpaceService.MAX_SIZE) badRequest("size must be between 1 and ${VectorSpaceService.MAX_SIZE}")
+        libraries.byId(libraryId)
+        return service.topics(libraryId, TopicSpec(l, size, sp), seed)
+    }
+
     /**
      * Computes book vectors (the average of a book's passage embeddings) for books of [libraryId] (default: every
      * library) that have passages but no vector yet, e.g. indexed before book vectors existed. No re-indexing.

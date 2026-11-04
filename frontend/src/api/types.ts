@@ -238,3 +238,28 @@ export interface VectorSpace {
   points: VectorPoint[];
   cached: boolean; // served from the server's cache
 }
+
+/** Where topics are clustered: the raw embeddings (cosine), or a UMAP reduction first (closer to BERTopic). */
+export type ClusterSpace = "raw" | "umap";
+
+/** A discovered topic (HDBSCAN cluster): keywords from class-based TF-IDF over its members' text. */
+export interface Topic {
+  id: number;
+  label: string; // keywords joined for display, e.g. "distributed, consensus, raft"
+  keywords: string[];
+  size: number;
+}
+
+export interface TopicSpace {
+  libraryId: number;
+  level: VectorLevel;
+  seed: number;
+  size: number; // points in the sample that were clustered
+  total: number; // passages (or books) with a vector in this library
+  space: ClusterSpace;
+  elapsedMs: number;
+  topics: Topic[];
+  /** point id (matches VectorPoint.id for the same library/level/size/seed) -> topic id, or -1 for noise */
+  pointTopics: Record<string, number>;
+  cached: boolean;
+}

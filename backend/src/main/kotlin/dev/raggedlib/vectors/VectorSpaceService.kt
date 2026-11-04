@@ -4,7 +4,10 @@ import com.fasterxml.jackson.annotation.JsonValue
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.ingest.ChunkStore
 import org.springframework.jdbc.core.JdbcTemplate
+import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
+import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Service
+import kotlin.math.sqrt
 
 /** Lower case in the API ("pca", "umap", "tsne"), as the requests spell it. */
 enum class VectorMethod {
@@ -22,6 +25,35 @@ enum class VectorLevel {
 
 /** What to lay out: [size] passages or books, projected by [method] to [dims] (2 or 3) dimensions. */
 data class LayoutSpec(val level: VectorLevel, val method: VectorMethod, val size: Int, val dims: Int = 2)
+
+/** Which embedding space topics are clustered in: the raw embeddings, or a UMAP reduction (closer to BERTopic). */
+enum class ClusterSpace {
+    RAW, UMAP;
+
+    @JsonValue fun json() = name.lowercase()
+}
+
+/** What to cluster into topics: [size] passages or books. Independent of the projection [VectorMethod]/dims. */
+data class TopicSpec(val level: VectorLevel, val size: Int, val space: ClusterSpace)
+
+/** A discovered topic: [keywords] from class-based TF-IDF over its members' text (see [TopicLabels]). */
+data class Topic(val id: Int, val label: String, val keywords: List<String>, val size: Int)
+
+data class TopicSpace(
+    val libraryId: Long,
+    val level: VectorLevel,
+    val seed: Long,
+    /** points in the sample that were clustered (at most the requested size) */
+    val size: Int,
+    /** passages (or books) with a vector in this library: what the sample is drawn from */
+    val total: Long,
+    val space: ClusterSpace,
+    val elapsedMs: Long,
+    val topics: List<Topic>,
+    /** point id (matching GET /api/vectors' point ids for the same library/level/size/seed) -> topic id, or -1 for noise */
+    val pointTopics: Map<String, Int>,
+    val cached: Boolean = false,
+)
 
 data class VectorPoint(
     /** the passage's id, or (books) the book's */
@@ -65,16 +97,25 @@ data class VectorSpace(
 @Service
 class VectorSpaceService(
     private val jdbc: JdbcTemplate,
+    private val named: NamedParameterJdbcTemplate,
     private val props: RaggedlibProperties,
     private val bookVectors: BookVectors,
 ) {
-    private val cache = ProjectionCache(::compute, ::fingerprint)
+    private val cache = SampleCache<LayoutSpec, VectorSpace>(::compute, { it.copy(cached = true) }, ::fingerprint)
+    private val topicCache = SampleCache<TopicSpec, TopicSpace>(::computeTopics, { it.copy(cached = true) }, ::fingerprint)
 
     /**
      * The 2-D layout of the library's current sample (or, given a [seed], of that one, which a reshuffle makes the
-     * current sample), from the cache while the library's vectors are unchanged. See [ProjectionCache].
+     * current sample), from the cache while the library's vectors are unchanged. See [SampleCache].
      */
     fun space(libraryId: Long, spec: LayoutSpec, seed: Long?): VectorSpace = cache.get(libraryId, spec, seed)
+
+    /**
+     * HDBSCAN clusters ([Hdbscan]) of the library's current sample at [TopicSpec.level], labelled by class-based
+     * TF-IDF ([TopicLabels]) over their members' text. Shares the library's current sample with [space] (same
+     * point ids for the same level/size/seed), cached the same way.
+     */
+    fun topics(libraryId: Long, spec: TopicSpec, seed: Long?): TopicSpace = topicCache.get(libraryId, spec, seed)
 
     /** Computes the missing (or outdated) book vectors of [libraryId]; returns how many. */
     fun computeBookVectors(libraryId: Long?): Int = bookVectors.computeMissing(libraryId)
@@ -103,23 +144,9 @@ class VectorSpaceService(
     private fun compute(libraryId: Long, spec: LayoutSpec, seed: Long): VectorSpace {
         val (level, method, size, dims) = spec
         val started = System.nanoTime()
-        val (countSql, sampleSql) = when (level) {
-            VectorLevel.PASSAGES -> PASSAGE_COUNT_SQL to PASSAGE_SAMPLE_SQL
-            VectorLevel.BOOKS -> BOOK_COUNT_SQL to BOOK_SAMPLE_SQL
-        }
-        val total = jdbc.queryForObject(countSql, Long::class.java, libraryId) ?: 0L
+        val total = countTotal(level, libraryId)
         val missing = bookVectors.countMissing(libraryId)
-        val rows = jdbc.query(sampleSql, { rs, _ ->
-            Row(
-                id = rs.getString(1),
-                bookId = rs.getLong(2),
-                title = rs.getString(3),
-                page = rs.getObject(4) as Int?,
-                section = rs.getString(5),
-                snippet = rs.getString(6) ?: "",
-                embedding = ChunkStore.parseVector(rs.getString(7)),
-            )
-        }, libraryId, seed.toString(), size)
+        val rows = sampleRows(level, libraryId, size, seed)
 
         val n = rows.size
         if (n < MIN_POINTS) {
@@ -166,6 +193,89 @@ class VectorSpaceService(
         )
     }
 
+    /** HDBSCAN clusters of the library's current sample at [TopicSpec.level], labelled by c-TF-IDF over their text. */
+    private fun computeTopics(libraryId: Long, spec: TopicSpec, seed: Long): TopicSpace {
+        val started = System.nanoTime()
+        val total = countTotal(spec.level, libraryId)
+        val rows = sampleRows(spec.level, libraryId, spec.size, seed)
+        val n = rows.size
+        if (n < MIN_POINTS) {
+            return TopicSpace(libraryId, spec.level, seed, n, total, spec.space, elapsedMs(started), emptyList(), emptyMap())
+        }
+
+        val raw = Array(n) { i -> DoubleArray(rows[i].embedding.size) { rows[i].embedding[it].toDouble() } }
+        val dist = when (spec.space) {
+            ClusterSpace.RAW -> {
+                val sq = Projections.squaredCosineDistances(Array(n) { rows[it].embedding })
+                FloatArray(sq.size) { sqrt(sq[it]) }
+            }
+            ClusterSpace.UMAP -> {
+                val reduceDims = minOf(2, n - 1, raw[0].size)
+                val pcaInit = Projections.pca(raw, components = reduceDims, seed = seed)
+                val sq = Projections.squaredCosineDistances(Array(n) { rows[it].embedding })
+                val reduced = Projections.umap(sq, n, pcaInit.coords, seed = seed)
+                val sqE = Projections.squaredEuclideanDistances(reduced)
+                FloatArray(sqE.size) { sqrt(sqE[it]) }
+            }
+        }
+        val minClusterSize = (spec.size / 40).coerceIn(5, 50)
+        val labels = Hdbscan.cluster(dist, n, minClusterSize)
+
+        val wordCounts = wordCountsByCluster(spec.level, rows, labels)
+        val keywords = TopicLabels.label(wordCounts)
+        val sizeByCluster = labels.filter { it >= 0 }.groupingBy { it }.eachCount()
+        val topics = sizeByCluster.entries.sortedByDescending { it.value }.map { (id, clusterSize) ->
+            val kw = keywords[id].orEmpty()
+            Topic(id, kw.joinToString(", ").ifEmpty { "Topic $id" }, kw, clusterSize)
+        }
+        val pointTopics = rows.indices.associate { i -> rows[i].id to labels[i] }
+        return TopicSpace(libraryId, spec.level, seed, n, total, spec.space, elapsedMs(started), topics, pointTopics)
+    }
+
+    /**
+     * Word counts per cluster, from Postgres's own tokenisation: `content_tsv` (passages) is already stemmed and
+     * stopword-filtered (V1__init.sql); book titles are tokenised the same way on the fly, cheap at this size.
+     */
+    private fun wordCountsByCluster(level: VectorLevel, rows: List<Row>, labels: IntArray): Map<Int, Map<String, Int>> {
+        val clusterOf = HashMap<String, Int>()
+        for (i in rows.indices) if (labels[i] >= 0) clusterOf[rows[i].id] = labels[i]
+        if (clusterOf.isEmpty()) return emptyMap()
+        val sql = if (level == VectorLevel.PASSAGES) WORD_COUNT_PASSAGES_SQL else WORD_COUNT_BOOKS_SQL
+        val counts = HashMap<Int, HashMap<String, Int>>()
+        named.query(sql, MapSqlParameterSource("ids", clusterOf.keys.toList())) { rs ->
+            val cluster = clusterOf[rs.getString(1)] ?: return@query
+            val word = rs.getString(2) ?: return@query
+            counts.getOrPut(cluster) { HashMap() }.merge(word, 1, Int::plus)
+        }
+        return counts
+    }
+
+    private fun sampleRows(level: VectorLevel, libraryId: Long, size: Int, seed: Long): List<Row> {
+        val sampleSql = when (level) {
+            VectorLevel.PASSAGES -> PASSAGE_SAMPLE_SQL
+            VectorLevel.BOOKS -> BOOK_SAMPLE_SQL
+        }
+        return jdbc.query(sampleSql, { rs, _ ->
+            Row(
+                id = rs.getString(1),
+                bookId = rs.getLong(2),
+                title = rs.getString(3),
+                page = rs.getObject(4) as Int?,
+                section = rs.getString(5),
+                snippet = rs.getString(6) ?: "",
+                embedding = ChunkStore.parseVector(rs.getString(7)),
+            )
+        }, libraryId, seed.toString(), size)
+    }
+
+    private fun countTotal(level: VectorLevel, libraryId: Long): Long {
+        val countSql = when (level) {
+            VectorLevel.PASSAGES -> PASSAGE_COUNT_SQL
+            VectorLevel.BOOKS -> BOOK_COUNT_SQL
+        }
+        return jdbc.queryForObject(countSql, Long::class.java, libraryId) ?: 0L
+    }
+
     private class Row(
         val id: String,
         val bookId: Long,
@@ -210,6 +320,14 @@ class VectorSpaceService(
             where b.library_id = ?
             order by md5(b.id::text || ?)
             limit ?
+        """.trimIndent()
+
+        private val WORD_COUNT_PASSAGES_SQL = """
+            select v.id::text, unnest(tsvector_to_array(v.content_tsv)) from vector_store v where v.id::text in (:ids)
+        """.trimIndent()
+
+        private val WORD_COUNT_BOOKS_SQL = """
+            select b.id::text, unnest(tsvector_to_array(to_tsvector('english', b.title))) from books b where b.id::text in (:ids)
         """.trimIndent()
     }
 }

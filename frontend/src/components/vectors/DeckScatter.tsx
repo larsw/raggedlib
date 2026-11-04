@@ -15,10 +15,12 @@ type Rgb = [number, number, number];
 export interface DeckScatterProps {
   points: VectorPoint[];
   dims: 2 | 3;
-  highlightBook: number | null;
+  /** Which colour/highlight group a point belongs to — the book id, or (color-by-topic) the topic id. */
+  groupId: (p: VectorPoint) => number;
+  highlightGroup: number | null;
   pinnedId: string | null;
   onPick: (p: VectorPoint | null) => void;
-  colour: (bookId: number) => Rgb;
+  colour: (groupId: number) => Rgb;
   /** WebGL failed (no context, lost context): the caller falls back to the canvas renderer */
   onError: (error: Error) => void;
 }
@@ -44,7 +46,7 @@ function place(points: VectorPoint[], dims: 2 | 3): Placed[] {
  * GPU scatter plot (deck.gl, WebGL2): a flat zoom/pan view for 2-D layouts, an orbiting camera for 3-D ones.
  * Hover shows the passage or book, click pins it (click empty space to unpin).
  */
-export default function DeckScatter({ points, dims, highlightBook, pinnedId, onPick, colour, onError }: DeckScatterProps) {
+export default function DeckScatter({ points, dims, groupId, highlightGroup, pinnedId, onPick, colour, onError }: DeckScatterProps) {
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
 
@@ -89,16 +91,16 @@ export default function DeckScatter({ points, dims, highlightBook, pinnedId, onP
     stroked: true,
     getPosition: (d) => d.position,
     getRadius: (d) =>
-      d.point.id === pinnedId ? 6.5 : highlightBook != null && d.point.bookId === highlightBook ? 5 : 3.5,
+      d.point.id === pinnedId ? 6.5 : highlightGroup != null && groupId(d.point) === highlightGroup ? 5 : 3.5,
     getFillColor: (d) => {
-      const dimmed = highlightBook != null && d.point.bookId !== highlightBook;
-      return [...colour(d.point.bookId), dimmed ? 35 : 225];
+      const dimmed = highlightGroup != null && groupId(d.point) !== highlightGroup;
+      return [...colour(groupId(d.point)), dimmed ? 35 : 225];
     },
     getLineColor: [255, 255, 255, 230],
     getLineWidth: (d) => (d.point.id === pinnedId ? 2 : 0),
     updateTriggers: {
-      getRadius: [pinnedId, highlightBook],
-      getFillColor: [highlightBook, colour],
+      getRadius: [pinnedId, highlightGroup, groupId],
+      getFillColor: [highlightGroup, colour, groupId],
       getLineWidth: [pinnedId],
     },
   });
