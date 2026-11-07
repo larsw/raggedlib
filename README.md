@@ -15,7 +15,7 @@ Ask questions about your Calibre ebook library. The answers cite the passages th
 
 ```bash
 docker compose up -d --build        # first run pulls ~7 GB of models
-open http://localhost:3000          # sign in as admin@raggedlib.dev / admin, then Indexing tab → Start
+open http://localhost:3000          # sign in as gadmin / gadmin, then Indexing tab → Start
 ```
 
 Sign-in goes through a development OpenID Connect provider, [dex](https://dexidp.io), that the stack brings along
@@ -75,16 +75,20 @@ Every user keeps **favorite lists** of books (private, or shared read-only with 
 **review** of any book they can see: a 1–5 rating, a text, or both. Lists and reviews are on the Lists tab and in a
 book's details.
 
-**The bundled dex** (`infra/dex/config.yaml`, adapted from onto-workbench) has five users; the password is the part
-before the `@`. Their groups map to roles in the `dex` profile (`application-dex.yml`):
+**The bundled dex** (`infra/dex/config.yaml`, adapted from onto-workbench) has seven users; the password is the
+part before the `@` (or the whole name). Their groups map to roles in the `dex` profile (`application-dex.yml`):
 
 | User | Groups | Role |
 |---|---|---|
+| `gadmin` / `gadmin` | `administrators` | global admin |
+| `gcurator` / `gcurator` | `curators` | curator of every library |
 | `admin@raggedlib.dev` | `administrators` | global admin |
 | `librarian@raggedlib.dev` | `librarians` | library admin of every library |
 | `curator@raggedlib.dev` | `curators` | curator of every library |
 | `reader@raggedlib.dev` | `readers` | viewer of every library |
 | `user@raggedlib.dev` | none | nothing, until someone grants a role |
+
+`gadmin` and `gcurator` sign in with just the name, in the field dex labels "email address".
 
 Its issuer is `http://dex.localhost:5556/dex`: browsers resolve `*.localhost` to the loopback address, and inside the
 compose network `dex.localhost` is the dex container's alias, so the browser and the backend (in its container or on

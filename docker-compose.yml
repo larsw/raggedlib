@@ -1,6 +1,6 @@
 name: raggedlib
 
-# Full stack:  docker compose up -d --build      → http://localhost:3000 (sign in as admin@raggedlib.dev / admin)
+# Full stack:  docker compose up -d --build      → http://localhost:3000 (sign in as gadmin / gadmin)
 # Infra only (run backend/frontend on the host):  docker compose up -d postgres ollama models reranker dex
 
 x-models: &models
@@ -73,9 +73,10 @@ services:
       retries: 60
     deploy: *gpu
 
-  # Sign-in for development: dex, an OpenID Connect provider with five static users (infra/dex/config.yaml; e.g.
-  # admin@raggedlib.dev / admin). Its issuer is http://dex.localhost:5556/dex: browsers resolve *.localhost to the
-  # loopback address, where the port is published, and inside this network `dex.localhost` is this container's alias,
+  # Sign-in for development: dex, an OpenID Connect provider with static users (infra/dex/config.yaml; e.g.
+  # gadmin / gadmin, a global admin, and gcurator / gcurator, a curator of every library). Its issuer is
+  # http://dex.localhost:5556/dex: browsers resolve *.localhost to the loopback address, where the port is published,
+  # and inside this network `dex.localhost` is this container's alias,
   # so the browser and the backend reach dex at the same URL. For your own identity provider, drop this service and
   # set SPRING_PROFILES_ACTIVE=oidc plus OIDC_ISSUER_URI / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET (see README).
   dex:

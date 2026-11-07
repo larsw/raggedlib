@@ -96,7 +96,12 @@ class AuthIntegrationTest {
         private var beta = 0L
     }
 
-    private fun as_(name: String): Browser = sessions.getOrPut(name) { Browser(base).login("$name@raggedlib.dev", name) }
+    /** Signed in as the dev dex user [name] (password = name): `<name>@raggedlib.dev`, or the plain-name g-users. */
+    private fun as_(name: String): Browser = sessions.getOrPut(name) {
+        Browser(base).login(if (name in PLAIN_LOGINS) name else "$name@raggedlib.dev", name)
+    }
+
+    private val PLAIN_LOGINS = setOf("gadmin", "gcurator")
 
     @BeforeEach
     fun seed() {
@@ -141,6 +146,11 @@ class AuthIntegrationTest {
         assertFalse(meOf("librarian").path("admin").asBoolean())
         assertEquals(mapOf("Alpha" to "CURATOR", "Beta" to "CURATOR"), rolesOf("curator"))
         assertEquals(mapOf("Alpha" to "VIEWER", "Beta" to "VIEWER"), rolesOf("reader"))
+        // the plain-name users: gadmin/gadmin a global admin, gcurator/gcurator a curator of every library
+        assertTrue(meOf("gadmin").path("admin").asBoolean())
+        assertEquals(mapOf("Alpha" to "ADMIN", "Beta" to "ADMIN"), rolesOf("gadmin"))
+        assertFalse(meOf("gcurator").path("admin").asBoolean())
+        assertEquals(mapOf("Alpha" to "CURATOR", "Beta" to "CURATOR"), rolesOf("gcurator"))
         assertTrue(meOf("curator").path("canCurate").asBoolean())
         assertFalse(meOf("reader").path("canCurate").asBoolean())
         // only admins see where libraries are on disk

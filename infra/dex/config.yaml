@@ -8,6 +8,11 @@
 #   curator@raggedlib.dev   / curator    groups [curators]        -> curator of every library
 #   reader@raggedlib.dev    / reader     groups [readers]         -> viewer of every library
 #   user@raggedlib.dev      / user       no groups                -> no library until someone grants one
+#   gadmin                  / gadmin     groups [administrators]  -> global admin
+#   gcurator                / gcurator   groups [curators]        -> curator of every library
+#
+# gadmin and gcurator sign in with the plain name (dex's form asks for an "email address", but its password
+# database matches the `email` field as given, and theirs is just the name).
 #
 # The group -> role mapping is the backend's, not dex's: see application-dex.yml (profile `dex`).
 #
@@ -78,3 +83,17 @@ staticPasswords:
     hash: "$2b$10$dAfb4KgtGp1WTkvg9jtwbuNrm4Tg7D2XBmgo1DD0Jf2MZycBA86Ta"
     username: user
     userID: 0c10365b-a610-4508-a41b-afbd18679b54
+  - email: gadmin
+    # bcrypt of "gadmin"
+    hash: "$2b$10$E4ts2XCCGR/jMZ67JgGgyOf9JgFVSa5TPVKYL2/NxkoZFMI7GPDIe"
+    username: gadmin
+    userID: dce35eb7-48bf-4875-a8e2-65c5bc203657
+    groups:
+      - administrators
+  - email: gcurator
+    # bcrypt of "gcurator"
+    hash: "$2b$10$jie23xVPAX3mee0gMrvZpOsxnoWEWO1/cY2jOwdpEt15W2hGYq.Bm"
+    username: gcurator
+    userID: 1175aa08-36b2-4b07-bb55-809fba1b8dd3
+    groups:
+      - curators
