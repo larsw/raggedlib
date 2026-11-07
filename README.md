@@ -73,7 +73,9 @@ users: their sessions and API keys stop working at once.
 
 Every user keeps **favorite lists** of books (private, or shared read-only with every signed-in user) and can write a
 **review** of any book they can see: a 1–5 rating, a text, or both. Lists and reviews are on the Lists tab and in a
-book's details.
+book's details. **Save books to a list…** (on Search results, in Ask's toolbar, and as the bookmark in the Sources
+panel) puts the books behind a search, a conversation or one answer on a new list or an existing one, all of them or
+the ones picked (in Ask, just the cited ones with a click).
 
 **The bundled dex** (`infra/dex/config.yaml`, adapted from onto-workbench) has seven users; the password is the
 part before the `@` (or the whole name). Their groups map to roles in the `dex` profile (`application-dex.yml`):

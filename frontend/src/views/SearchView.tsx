@@ -6,6 +6,8 @@ import { useApp } from "../AppContext";
 import { ErrorState } from "../components/ErrorState";
 import { ScopeBar } from "../components/scope/ScopeBar";
 import { SourceCard } from "../components/SourceCard";
+import { SaveBooksDialog } from "../components/lists/SaveBooksDialog";
+import { booksOf, listNameFrom, type FoundBook } from "../lib/foundBooks";
 import { queryTerms } from "../lib/highlight";
 
 /** Plain hybrid passage search (no LLM). */
@@ -24,6 +26,8 @@ export function SearchView() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>();
   const ctrlRef = useRef<AbortController | null>(null);
+  /** "Save books to a list": the books shown when it opened (kept while it closes) */
+  const [save, setSave] = useState<{ open: boolean; books: FoundBook[]; query: string }>({ open: false, books: [], query: "" });
 
   // highlight what was actually searched for
   const searchedFor = corrected ?? shown?.typed ?? submitted;
@@ -126,8 +130,18 @@ export function SearchView() {
         ) : (
           <>
             {notice}
-            <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} results-summary`}>
-              {results.length} passages from {bookCount} book{bookCount === 1 ? "" : "s"} for “{searchedFor}”
+            <div className="results-summary">
+              <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                {results.length} passages from {bookCount} book{bookCount === 1 ? "" : "s"} for “{searchedFor}”
+              </span>
+              <Button
+                size="small"
+                variant="minimal"
+                icon="bookmark"
+                text="Save books to a list…"
+                disabled={loading}
+                onClick={() => setSave({ open: true, books: booksOf([{ sources: results }]), query: searchedFor ?? "" })}
+              />
             </div>
             <div className={`results-list${loading ? " is-stale" : ""}`}>
               {results.map((r) => (
@@ -137,6 +151,13 @@ export function SearchView() {
           </>
         )}
       </div>
+      <SaveBooksDialog
+        isOpen={save.open}
+        onClose={() => setSave((s) => ({ ...s, open: false }))}
+        books={save.books}
+        foundWhere={`for “${save.query}”`}
+        suggestedName={listNameFrom(save.query)}
+      />
     </div>
   );
 }

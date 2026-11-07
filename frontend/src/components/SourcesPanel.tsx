@@ -18,6 +18,8 @@ interface Props {
   correctedQuery?: string;
   /** asks the question again, retrieving for it as typed (shown with a correction; absent while busy) */
   onAskAsTyped?: () => void;
+  /** opens "Save books to a list" for these sources' books (absent: nothing to save) */
+  onSaveBooks?: () => void;
   /** ref to scroll to & flash; `nonce` changes on every click so repeated clicks re-trigger */
   focus: { ref: number; nonce: number } | null;
   onCollapse: () => void;
@@ -36,6 +38,7 @@ export function SourcesPanel({
   reranked,
   correctedQuery,
   onAskAsTyped,
+  onSaveBooks,
   focus,
   onCollapse,
 }: Props) {
@@ -79,6 +82,11 @@ export function SourcesPanel({
             </div>
           )}
         </div>
+        {onSaveBooks && !loading && (
+          <Tooltip content="Save these books to a list" placement="bottom-end">
+            <Button variant="minimal" icon="bookmark" aria-label="Save the books of these sources to a list" onClick={onSaveBooks} />
+          </Tooltip>
+        )}
         <Tooltip content="Collapse" placement="bottom-end">
           <Button variant="minimal" icon="chevron-right" aria-label="Collapse sources panel" onClick={onCollapse} />
         </Tooltip>

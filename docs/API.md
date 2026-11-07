@@ -290,11 +290,12 @@ only the books of libraries they can see. `favorites:read` for GET, `favorites:w
 | Method | Path | Description |
 |---|---|---|
 | GET    | `/api/lists?bookId=` | `{ mine: FavoriteList[], shared: FavoriteList[] }` (shared: other users' shared lists). With `bookId`, each list says whether it holds that book. |
-| POST   | `/api/lists` | Body `{ name, description?, shared? }` → `201 FavoriteList`. |
+| POST   | `/api/lists` | Body `{ name, description?, shared?, bookIds? }` → `201 FavoriteList`. `bookIds` (up to 500): the books to start it with, first shown first; all must be visible to the caller, or nothing is created (`404`). |
 | GET    | `/api/lists/{id}` | `{ list: FavoriteList, books: { book: Book, note, addedAt }[] }`, newest first. |
 | PUT    | `/api/lists/{id}` | Body `{ name?, description?, shared? }` → `FavoriteList`. |
 | DELETE | `/api/lists/{id}` | `204`. |
 | PUT    | `/api/lists/{id}/books/{bookId}` | Body optional `{ note? }`: adds the book, or sets its note (omitted or null: keep it; empty: clear it) → `FavoriteList`. |
+| POST   | `/api/lists/{id}/books` | Body `{ bookIds }` (1 to 500), such as a search result's books: adds them, first shown first; books already on the list keep their note and place → `{ list: FavoriteList, added, alreadyOn }`. All or nothing: an unknown or invisible book is a `404`. |
 | DELETE | `/api/lists/{id}/books/{bookId}` | → `FavoriteList`. |
 
 ```ts

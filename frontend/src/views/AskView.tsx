@@ -4,8 +4,11 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react
 import { useApp } from "../AppContext";
 import { ScopeBar } from "../components/scope/ScopeBar";
 import { SourcesPanel } from "../components/SourcesPanel";
+import { SaveBooksDialog } from "../components/lists/SaveBooksDialog";
 import { useChat, type ChatTurn } from "../hooks/useChat";
 import { useSidePanel } from "../hooks/useSidePanel";
+import { booksOf, listNameFrom, type FoundBook } from "../lib/foundBooks";
+import { splitThinking } from "../lib/thinking";
 import { AskEmptyState } from "./ask/AskEmptyState";
 import { ChatInput } from "./ask/ChatInput";
 import { ChatTurnView } from "./ask/ChatTurnView";
@@ -21,6 +24,13 @@ export function AskView() {
   const panelOpen = !panel.collapsed;
   const { setCollapsed } = panel;
   const [focus, setFocus] = useState<{ ref: number; nonce: number } | null>(null);
+  /** "Save books to a list": the books of the conversation or one answer when it opened (kept while it closes) */
+  const [save, setSave] = useState<{ open: boolean; books: FoundBook[]; where: string; name: string }>({
+    open: false,
+    books: [],
+    where: "",
+    name: "",
+  });
 
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -51,6 +61,19 @@ export function AskView() {
 
   const onRetry = useCallback((turn: ChatTurn) => ask(turn.question), [ask]);
 
+  /** the books with passages behind these answers, cited ones marked; answers still underway add what they have */
+  const booksFor = (ts: ChatTurn[]) => booksOf(ts.map((t) => ({ sources: t.sources, answer: splitThinking(t.answer).answer })));
+  const conversationBooks = turns.some((t) => t.sources.length > 0);
+  const saveConversation = () =>
+    setSave({
+      open: true,
+      books: booksFor(turns),
+      where: turns.length === 1 ? "for this question" : `in this conversation (${turns.length} questions)`,
+      name: listNameFrom(turns[0]?.question ?? ""),
+    });
+  const saveAnswer = (turn: ChatTurn) =>
+    setSave({ open: true, books: booksFor([turn]), where: `for “${listNameFrom(turn.question, 80)}”`, name: listNameFrom(turn.question) });
+
   const newConversation = () => {
     clear();
     setSelectedId(null);
@@ -80,6 +103,15 @@ export function AskView() {
             {turns.length ? `${turns.length} question${turns.length === 1 ? "" : "s"} in this conversation` : ""}
           </span>
           <span className="spacer" />
+          <Button
+            size="small"
+            variant="minimal"
+            icon="bookmark"
+            text="Save books to a list…"
+            title="Put the books with passages found in this conversation on a list"
+            disabled={!conversationBooks}
+            onClick={saveConversation}
+          />
           <Button
             size="small"
             variant="minimal"
@@ -152,11 +184,19 @@ export function AskView() {
           reranked={!!selected?.rerank && !!system?.rerankEnabled && !!system.rerankerReachable}
           correctedQuery={selected?.correctedQuery}
           onAskAsTyped={selected && !busy ? () => ask(selected.question, { correct: false }) : undefined}
+          onSaveBooks={selected && selected.sources.length > 0 ? () => saveAnswer(selected) : undefined}
           focus={focus}
           onCollapse={() => panel.setCollapsed(true)}
           />
         </div>
       )}
+      <SaveBooksDialog
+        isOpen={save.open}
+        onClose={() => setSave((s) => ({ ...s, open: false }))}
+        books={save.books}
+        foundWhere={save.where}
+        suggestedName={save.name}
+      />
     </div>
   );
 }

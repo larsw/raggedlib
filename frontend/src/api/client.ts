@@ -1,6 +1,7 @@
 import { csrfHeaders } from "../lib/csrf";
 import { readSseStream } from "./sse";
 import type {
+  AddBooksResult,
   ApiKey,
   ApiKeyRequest,
   Book,
@@ -200,6 +201,8 @@ export const api = {
   addToList: (id: number, bookId: number, note?: string) =>
     putJson<FavoriteList>(`/lists/${id}/books/${bookId}`, note !== undefined ? { note } : {}),
   removeFromList: (id: number, bookId: number) => deleteJson<FavoriteList>(`/lists/${id}/books/${bookId}`),
+  /** Adds several books at once (first shown first); books already on the list stay as they are. */
+  addBooksToList: (id: number, bookIds: number[]) => postJson<AddBooksResult>(`/lists/${id}/books`, { bookIds }),
 
   // reviews
   bookReviews: (bookId: number, signal?: AbortSignal) => getJson<BookReviews>(`/books/${bookId}/reviews`, signal),

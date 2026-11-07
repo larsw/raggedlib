@@ -50,9 +50,21 @@ data class FavoriteListDetails(val list: FavoriteList, val books: List<FavoriteL
 /** GET /api/lists: the caller's own lists, and the ones others share. */
 data class FavoriteLists(val mine: List<FavoriteList>, val shared: List<FavoriteList>)
 
-data class FavoriteListRequest(val name: String? = null, val description: String? = null, val shared: Boolean? = null)
+/** [bookIds]: only when creating a list, the books to start it with (first shown first). */
+data class FavoriteListRequest(
+    val name: String? = null,
+    val description: String? = null,
+    val shared: Boolean? = null,
+    val bookIds: List<Long>? = null,
+)
 
 data class FavoriteEntryRequest(val note: String? = null)
+
+/** POST /api/lists/{id}/books: several books at once, such as the books of a search result. */
+data class AddBooksRequest(val bookIds: List<Long>? = null)
+
+/** [added] books are new on the list, [alreadyOn] were there already (and keep their note and place). */
+data class AddBooksResult(val list: FavoriteList, val added: Int, val alreadyOn: Int)
 
 /**
  * Favorite lists of books: each user keeps their own, private or shared with every signed-in user. A list may hold
@@ -122,6 +134,7 @@ class FavoriteListService(
     fun create(req: FavoriteListRequest): FavoriteList {
         val me = access.userId()
         val name = validName(req.name) ?: badRequest("name must not be empty")
+        val bookIds = visibleBooks(req.bookIds)
         val id = jdbc.queryForObject(
             "insert into favorite_lists (owner_id, name, description, shared) values (:me, :name, :description, :shared) returning id",
             MapSqlParameterSource()
@@ -131,12 +144,14 @@ class FavoriteListService(
                 .addValue("shared", req.shared ?: false),
             Long::class.java,
         )!!
+        insertBooks(id, bookIds)
         return readable(id)
     }
 
     @Transactional
     fun update(id: Long, req: FavoriteListRequest): FavoriteList {
         owned(id)
+        if (req.bookIds != null) badRequest("bookIds only go with a new list; add books with POST /api/lists/$id/books")
         val sets = mutableListOf("updated_at = now()")
         val p = MapSqlParameterSource("id", id)
         req.name?.let { sets += "name = :name"; p.addValue("name", validName(it) ?: badRequest("name must not be empty")) }
@@ -171,6 +186,25 @@ class FavoriteListService(
         return readable(id)
     }
 
+    /**
+     * Adds several books (which the owner must all be able to see) in one go, the first one shown first. Books already
+     * on the list keep their note and place.
+     */
+    @Transactional
+    fun addBooks(id: Long, bookIds: List<Long>?): AddBooksResult {
+        owned(id)
+        val ids = visibleBooks(bookIds)
+        if (ids.isEmpty()) badRequest("bookIds must name at least one book")
+        val already = jdbc.queryForList(
+            "select book_id from favorite_list_books where list_id = :id and book_id in (:ids)",
+            mapOf("id" to id, "ids" to ids),
+            Long::class.java,
+        ).toSet()
+        insertBooks(id, ids.filterNot { it in already })
+        touch(id)
+        return AddBooksResult(readable(id), added = ids.size - already.size, alreadyOn = already.size)
+    }
+
     @Transactional
     fun removeBook(id: Long, bookId: Long): FavoriteList {
         owned(id)
@@ -178,6 +212,32 @@ class FavoriteListService(
         if (n == 0) notFound("book $bookId is not on list $id")
         touch(id)
         return readable(id)
+    }
+
+    /** [bookIds] without repeats, once all of them are books the caller can see (404 naming the others otherwise). */
+    private fun visibleBooks(bookIds: List<Long>?): List<Long> {
+        val ids = bookIds.orEmpty().distinct()
+        if (ids.size > MAX_BOOKS) badRequest("at most $MAX_BOOKS books at once")
+        if (ids.isEmpty()) return ids
+        val visible = access.libraries()
+        val libraryOf = books.libraryOf(ids)
+        val missing = ids.filterNot { libraryOf[it] in visible }
+        if (missing.isNotEmpty()) notFound("${if (missing.size == 1) "book" else "books"} ${missing.joinToString()} not found")
+        return ids
+    }
+
+    /** New entries, the first of [bookIds] added last: lists show the newest first, so in the order given. */
+    private fun insertBooks(id: Long, bookIds: List<Long>) {
+        if (bookIds.isEmpty()) return
+        jdbc.batchUpdate(
+            """
+            insert into favorite_list_books (list_id, book_id, added_at) values (:id, :bookId, now() - :rank * interval '1 millisecond')
+            on conflict (list_id, book_id) do nothing
+            """.trimIndent(),
+            bookIds.mapIndexed { rank, bookId ->
+                MapSqlParameterSource().addValue("id", id).addValue("bookId", bookId).addValue("rank", rank)
+            }.toTypedArray(),
+        )
     }
 
     private fun touch(id: Long) = jdbc.update("update favorite_lists set updated_at = now() where id = :id", mapOf("id" to id))
@@ -205,6 +265,7 @@ class FavoriteListService(
         const val MAX_NAME = 200
         const val MAX_DESCRIPTION = 2000
         const val MAX_NOTE = 2000
+        const val MAX_BOOKS = 500
     }
 }
 
@@ -234,6 +295,10 @@ class FavoriteListController(private val lists: FavoriteListService) {
     @PutMapping("/{id}/books/{bookId}")
     fun addBook(@PathVariable id: Long, @PathVariable bookId: Long, @RequestBody(required = false) req: FavoriteEntryRequest?): FavoriteList =
         lists.addBook(id, bookId, req?.note)
+
+    /** Body `{ bookIds }`: several books at once, such as a search result's. */
+    @PostMapping("/{id}/books")
+    fun addBooks(@PathVariable id: Long, @RequestBody req: AddBooksRequest): AddBooksResult = lists.addBooks(id, req.bookIds)
 
     @DeleteMapping("/{id}/books/{bookId}")
     fun removeBook(@PathVariable id: Long, @PathVariable bookId: Long): FavoriteList = lists.removeBook(id, bookId)

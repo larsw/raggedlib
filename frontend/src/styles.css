@@ -1170,6 +1170,11 @@ body.is-resizing-x * {
   max-width: 1040px;
   margin: 12px auto 0;
   padding: 0 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
 }
 .correction-notice {
   max-width: 1040px;
@@ -2555,6 +2560,63 @@ body.is-resizing-x * {
 
 /* ---------- add to list (book details) ---------- */
 
+/* "Save books to a list" (Search, Ask) */
+.save-books-dialog {
+  width: 600px;
+  max-width: calc(100vw - 32px);
+}
+.save-books-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 6px;
+}
+.save-books-select {
+  display: flex;
+  gap: 2px;
+}
+.save-books-list {
+  max-height: min(40vh, 360px);
+  overflow-y: auto;
+  margin-bottom: 14px;
+  padding: 6px 8px;
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+}
+/* the box beside the title and authors, not above them */
+.save-books-list .bp6-control {
+  display: flex;
+  align-items: center;
+  margin: 4px 0;
+}
+.save-books-list .bp6-control-indicator {
+  flex: none;
+  margin-top: 0;
+}
+.save-books-item {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.save-books-title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.save-books-count {
+  white-space: nowrap;
+}
+.save-books-target {
+  margin-bottom: 12px;
+}
+.save-books-error {
+  margin-top: 10px;
+}
 .add-to-list {
   width: 280px;
   max-width: calc(100vw - 32px);

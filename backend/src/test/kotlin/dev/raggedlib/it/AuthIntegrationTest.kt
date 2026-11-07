@@ -222,6 +222,38 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `books go on a list several at a time, or with a new list`() {
+        val reader = as_("reader")
+        fun bookIdsOn(list: Long) = reader.get("/api/lists/$list").json.path("books").values().map { it.path("book").path("id").asLong() }
+
+        val created = reader.post("/api/lists", mapOf("name" to "From a search", "bookIds" to listOf(betaBook, alphaBook, betaBook)))
+        assertEquals(201, created.status, created.body)
+        val fromSearch = created.json.path("id").asLong()
+        assertEquals(2, created.json.path("bookCount").asInt())
+        assertEquals(listOf(betaBook, alphaBook), bookIdsOn(fromSearch)) // in the order given
+
+        val later = reader.post("/api/lists", mapOf("name" to "Later")).json.path("id").asLong()
+        reader.put("/api/lists/$later/books/$alphaBook", mapOf("note" to "keep me"))
+        val added = reader.post("/api/lists/$later/books", mapOf("bookIds" to listOf(betaBook, alphaBook)))
+        assertEquals(200, added.status, added.body)
+        assertEquals(1, added.json.path("added").asInt())
+        assertEquals(1, added.json.path("alreadyOn").asInt())
+        assertEquals(2, added.json.path("list").path("bookCount").asInt())
+        val entries = reader.get("/api/lists/$later").json.path("books").values()
+        assertEquals("keep me", entries.first { it.path("book").path("id").asLong() == alphaBook }.path("note").asString())
+
+        // all or nothing: an unknown book leaves the list (or a new one) as it was
+        assertEquals(404, reader.post("/api/lists/$later/books", mapOf("bookIds" to listOf(alphaBook, 987654L))).status)
+        assertEquals(404, reader.post("/api/lists", mapOf("name" to "Ghost", "bookIds" to listOf(betaBook, 987654L))).status)
+        assertFalse(reader.get("/api/lists").json.path("mine").values().any { it.path("name").asString() == "Ghost" })
+        assertEquals(400, reader.post("/api/lists/$later/books", mapOf("bookIds" to emptyList<Long>())).status)
+        assertEquals(400, reader.put("/api/lists/$later", mapOf("bookIds" to listOf(alphaBook))).status)
+        // someone else's private list doesn't exist for them
+        assertEquals(404, as_("curator").post("/api/lists/$later/books", mapOf("bookIds" to listOf(alphaBook))).status)
+        assertEquals(setOf(alphaBook, betaBook), bookIdsOn(later).toSet())
+    }
+
+    @Test
     fun `one review per user and book, which its author or a curator removes`() {
         val reader = as_("reader")
         assertEquals(400, reader.put("/api/books/$betaBook/reviews/mine", mapOf("rating" to 6)).status)

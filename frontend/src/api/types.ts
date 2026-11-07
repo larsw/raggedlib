@@ -417,6 +417,14 @@ export interface FavoriteListRequest {
   name?: string;
   description?: string;
   shared?: boolean;
+  bookIds?: number[]; // only when creating a list: the books to start it with, first shown first
+}
+
+/** POST /api/lists/{id}/books */
+export interface AddBooksResult {
+  list: FavoriteList;
+  added: number; // new on the list
+  alreadyOn: number; // were on it already (and keep their note and place)
 }
 
 // ---- reviews ------------------------------------------------------------------------------------------------
