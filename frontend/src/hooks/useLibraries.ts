@@ -4,8 +4,9 @@ import type { Library } from "../api/types";
 import { loadJson, saveJson, STORAGE_KEYS } from "../lib/storage";
 
 /**
- * The configured libraries and the one chosen in the navbar's chooser (null = every library, the union view).
- * Scopes what Library/Indexing show and what Ask/Search retrieve from; persisted across reloads.
+ * The libraries the caller can see (with its role in each) and the one chosen in the navbar's chooser (null = every
+ * library, the union view). Scopes what Library/Indexing show and what Ask/Search retrieve from; persisted across
+ * reloads.
  */
 export function useLibraries() {
   const [libraries, setLibraries] = useState<Library[]>([]);
@@ -17,6 +18,8 @@ export function useLibraries() {
       api
         .libraries()
         .then(setLibraries)
+        // the views say what's wrong with the backend; a 401 signs out (see useAuth)
+        .catch((err) => console.warn("[raggedlib] couldn't load the libraries", err))
         .finally(() => setLibrariesLoading(false)),
     [],
   );

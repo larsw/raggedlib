@@ -117,11 +117,11 @@ class IngestService(
      * extraction improved. Passages whose text and section come out unchanged keep their embeddings, so only
      * changed ones cost GPU time; books turn out DUPLICATE (or stop being one) along the way.
      */
-    fun reprocess(bookIds: List<Long>?, formats: List<String>?): IngestStatus {
+    fun reprocess(bookIds: List<Long>?, formats: List<String>?, libraryIds: Set<Long>? = null): IngestStatus {
         // an explicit empty list selects nothing; only a missing one means every book
         if (bookIds != null && bookIds.isEmpty()) return status()
         val wanted = formats?.map { it.uppercase() }?.toSet()
-        val ids = books.idsWithStatus(listOf(BookStatus.INDEXED, BookStatus.DUPLICATE), bookIds?.distinct()?.takeIf { it.isNotEmpty() })
+        val ids = books.idsWithStatus(listOf(BookStatus.INDEXED, BookStatus.DUPLICATE), bookIds?.distinct()?.takeIf { it.isNotEmpty() }, libraryIds)
             .filter { id -> wanted == null || books.find(id)?.book?.sourceFormat?.uppercase() in wanted }
         // an empty list would make start() take every PENDING book
         if (ids.isEmpty()) return status()
@@ -133,14 +133,16 @@ class IngestService(
         return status()
     }
 
-    fun start(bookIds: List<Long>?, retryFailed: Boolean): IngestStatus {
+    /** Starts indexing the PENDING (and, if [retryFailed], FAILED) books, of [bookIds] and [libraryIds] if given. */
+    fun start(bookIds: List<Long>?, retryFailed: Boolean, libraryIds: Set<Long>? = null): IngestStatus {
         synchronized(lock) {
             if (run == null) {
                 val eligible = buildSet {
                     add(BookStatus.PENDING)
                     if (retryFailed) add(BookStatus.FAILED)
                 }
-                val ids = books.idsWithStatus(eligible, bookIds?.distinct()?.takeIf { it.isNotEmpty() })
+                val ids = books.idsWithStatus(eligible, bookIds?.distinct()?.takeIf { it.isNotEmpty() }, libraryIds)
+                if (ids.isEmpty() && libraryIds != null) return status()
                 val r = Run(ids, eligible)
                 run = r
                 stopRequested = false
@@ -195,9 +197,12 @@ class IngestService(
 
     fun isRunning() = run != null
 
-    /** Always covers every configured library: one background run indexes all of them together. */
-    fun status(): IngestStatus {
-        val counts = books.statusCounts()
+    /**
+     * One background run indexes every library together; the counts, active books and errors are those of
+     * [libraryIds] (null: every library), the rate and ETA the whole run's.
+     */
+    fun status(libraryIds: Set<Long>? = null): IngestStatus {
+        val counts = books.statusCounts(libraryIds)
         val r = run
         val perSec = if (r != null) rate.perSecond() else 0.0
         val done = if (r != null) progress.perSecond() else 0.0
@@ -213,14 +218,14 @@ class IngestService(
             startedAt = startedAt,
             counts = counts,
             totalBooks = counts.values.sum(),
-            totalChunks = books.totalChunks(),
+            totalChunks = books.totalChunks(libraryIds),
             sessionProcessed = sessionProcessed.get(),
             sessionChunks = sessionChunks.get(),
             parallelBooks = settings.parallelBooks,
             chunksPerSecond = Math.round(perSec * 10) / 10.0,
             etaSeconds = eta,
-            active = active.values.sortedBy { it.bookId },
-            recentErrors = recentErrors.toList(),
+            active = active.values.filter { libraryIds == null || it.libraryId in libraryIds }.sortedBy { it.bookId },
+            recentErrors = recentErrors.filter { libraryIds == null || it.libraryId in libraryIds },
         )
     }
 

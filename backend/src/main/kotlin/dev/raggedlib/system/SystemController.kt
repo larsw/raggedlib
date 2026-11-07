@@ -1,5 +1,6 @@
 package dev.raggedlib.system
 
+import dev.raggedlib.auth.Access
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.library.LibraryRegistry
 import dev.raggedlib.search.Reranker
@@ -11,7 +12,8 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.client.RestClient
 import tools.jackson.databind.JsonNode
 
-data class LibraryStatusInfo(val name: String, val path: String)
+/** [path] is shown to admins only. */
+data class LibraryStatusInfo(val name: String, val path: String?)
 
 data class SystemInfo(
     val libraries: List<LibraryStatusInfo>,
@@ -38,6 +40,7 @@ class SystemController(
     @Value("\${spring.ai.ollama.embedding.model}") private val embeddingModel: String,
     restClientBuilder: RestClient.Builder,
     private val reranker: Reranker,
+    private val access: Access,
 ) {
     private val client = restClientBuilder.clone()
         .baseUrl(ollamaUrl)
@@ -61,7 +64,8 @@ class SystemController(
         }?.map { it.path("name").asString() }?.sorted() ?: emptyList()
         val rerankerUp = reranker.enabled && reranker.reachable()
         return SystemInfo(
-            libraries = libraries.all.map { LibraryStatusInfo(it.name, it.root.toString()) },
+            libraries = access.libraries().let { visible -> libraries.all.filter { it.id in visible } }
+                .map { LibraryStatusInfo(it.name, if (access.isAdmin()) it.root.toString() else null) },
             ollamaUrl = ollamaUrl,
             ollamaReachable = models != null,
             chatModel = chatModel,

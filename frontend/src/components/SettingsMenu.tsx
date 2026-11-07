@@ -8,7 +8,7 @@ import { toastError } from "./toaster";
 
 /** Navbar gear: retrieval/answer settings shared by Ask and Search (stored in the scope, persisted). */
 export function SettingsMenu() {
-  const { scope, setScope, system } = useApp();
+  const { scope, setScope, system, me } = useApp();
   const models = system?.availableChatModels ?? [];
   const modelOptions = [
     { value: "", label: system ? `Default (${system.chatModel})` : "Default model" },
@@ -61,7 +61,8 @@ export function SettingsMenu() {
           onClick={() => setScope((s) => ({ ...s, model: "", topK: DEFAULT_TOP_K }))}
         />
       </div>
-      <IndexingSettings />
+      {/* shared by everyone using the server: only global admins may change them */}
+      {me.admin && <IndexingSettings />}
     </div>
   );
 

@@ -59,7 +59,7 @@ def parse_args(items):
 def rpc(method, params):
     key = os.environ.get("RAGGEDLIB_MCP_KEY", "").strip()
     if not key:
-        fail("set RAGGEDLIB_MCP_KEY to the server's MCP API key (in the raggedlib repo: MCP_API_KEY in .env)", 2)
+        fail("set RAGGEDLIB_MCP_KEY to an API key (minted in the raggedlib web UI: your name in the navbar -> API keys)", 2)
     body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": method, "params": params}).encode()
     req = urllib.request.Request(URL, data=body, method="POST", headers={
         "Content-Type": "application/json",
@@ -72,7 +72,7 @@ def rpc(method, params):
             kind = resp.headers.get("Content-Type", "")
     except urllib.error.HTTPError as e:
         if e.code == 401:
-            fail(f"{URL} refused the API key (401): wrong key, or none configured on the server")
+            fail(f"{URL} refused the API key (401): wrong, revoked or expired key")
         fail(f"{URL} answered HTTP {e.code}: {e.read().decode('utf-8', 'replace')[:300]}")
     except (urllib.error.URLError, TimeoutError, OSError) as e:
         fail(f"can't reach {URL}: {getattr(e, 'reason', e)} (is the raggedlib backend running?)")

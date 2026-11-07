@@ -12,7 +12,7 @@ import {
   Tag,
   Tooltip,
 } from "@blueprintjs/core";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, bookFileUrl } from "../api/client";
 import { BOOK_STATUSES, type Book, type BookSort, type BookStatus } from "../api/types";
 import { useApp } from "../AppContext";
@@ -21,14 +21,15 @@ import { BookDetailsPanel } from "../components/BookDetailsPanel";
 import { ErrorState } from "../components/ErrorState";
 import { isBusyStatus, StatusTag } from "../components/StatusTag";
 import { FacetFilterSelect } from "../components/FacetFilterSelect";
-import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
+import { useBookNavigation, useReindex } from "../hooks/useBookActions";
 import { columnWidth, tableMinWidth, useColumnWidths, type ColumnSpec } from "../hooks/useColumnWidths";
 import { useDebounced } from "../hooks/useDebounced";
 import { useSidePanel } from "../hooks/useSidePanel";
 import { STORAGE_KEYS } from "../lib/storage";
 import { usePageVisible } from "../hooks/usePageVisible";
 import { useSyncLibrary } from "../hooks/useSyncLibrary";
+import { roleAtLeast } from "../lib/auth";
 import { formatAuthors, formatDateTime, formatNumber, formatYear } from "../lib/format";
 import { readerFormat } from "../lib/reader";
 import { SORTS, sortParam } from "../lib/bookSort";
@@ -65,7 +66,11 @@ function TagList({ tags }: { tags: string[] }) {
 }
 
 export function LibraryView({ active }: { active: boolean }) {
-  const { setScope, navigate, openReader, library, libraries } = useApp();
+  const { openReader, library, libraries, me, roleIn } = useApp();
+  const { askAbout, searchIn } = useBookNavigation();
+  // syncing: the chosen library if this user curates it; with every library shown, all the ones it curates
+  const canSync = library ? roleAtLeast(roleIn(library.id), "CURATOR") : me.canCurate;
+  const canReindex = (b: Book) => roleAtLeast(roleIn(b.libraryId), "CURATOR");
   const visible = usePageVisible();
   const [q, setQ] = useState("");
   const query = useDebounced(q.trim(), 300);
@@ -81,14 +86,14 @@ export function LibraryView({ active }: { active: boolean }) {
     setDescending(SORTS.find((s) => s.value === field)?.newestFirst ?? false);
   };
   const [page, setPage] = useState(0);
-  const [reindexing, setReindexing] = useState<Set<number>>(new Set());
   /** the book shown in the details panel */
   const [selectedId, setSelectedId] = useState<number | null>(null);
   /** bumped on every list reload, so the open panel refreshes too */
   const [refreshKey, setRefreshKey] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
   const panel = useSidePanel(bodyRef, { storageKey: STORAGE_KEYS.bookPanel, onSnapClose: () => setSelectedId(null) });
-  const { sync, syncing } = useSyncLibrary();
+  const { sync: syncLibrary, syncing } = useSyncLibrary();
+  const sync = () => syncLibrary(library?.id);
   const columns = useColumnWidths(STORAGE_KEYS.libraryColumns, COLUMNS);
 
   // back to the first page whenever the filter changes
@@ -142,32 +147,12 @@ export function LibraryView({ active }: { active: boolean }) {
   // (a table narrower than the view still fills it), and one wider than the view scrolls sideways.
   const titleFlexible = columnWidth(columns.widths, COLUMNS[0]!) === undefined;
 
-  const reindex = async (book: Book) => {
-    setReindexing((s) => new Set(s).add(book.id));
-    try {
-      const updated = await api.reindex(book.id);
-      books.setData((p) => p && { ...p, items: p.items.map((b) => (b.id === updated.id ? updated : b)) });
-      toastSuccess(`Queued “${book.title}” for reindexing`);
-    } catch (err) {
-      toastError("Reindex failed", err);
-    } finally {
-      setReindexing((s) => {
-        const n = new Set(s);
-        n.delete(book.id);
-        return n;
-      });
-    }
-  };
-
-  const askAbout = (book: Book) => {
-    setScope((s) => ({ ...s, books: [{ id: book.id, title: book.title, authors: book.authors }], tags: [], publishers: [] }));
-    navigate("ask");
-  };
-
-  const searchIn = (book: Book) => {
-    setScope((s) => ({ ...s, books: [{ id: book.id, title: book.title, authors: book.authors }], tags: [], publishers: [] }));
-    navigate("search");
-  };
+  const { reindexing, reindex } = useReindex(
+    useCallback(
+      (updated: Book) => books.setData((p) => p && { ...p, items: p.items.map((b) => (b.id === updated.id ? updated : b)) }),
+      [books.setData],
+    ),
+  );
 
   /** a row click opens the book's details, unless it hit a control inside the row */
   const onRowClick = (e: React.MouseEvent, id: number) => {
@@ -234,7 +219,14 @@ export function LibraryView({ active }: { active: boolean }) {
         </ControlGroup>
         {books.loading && books.data && <Spinner size={16} />}
         <span className="spacer" />
-        <Button icon="refresh" text="Sync library" onClick={() => sync().then(books.reload)} loading={syncing} />
+        {canSync && (
+          <Tooltip
+            content={library ? `Read ${library.name}'s Calibre metadata again` : "Read the Calibre metadata of every library you curate again"}
+            placement="bottom-end"
+          >
+            <Button icon="refresh" text="Sync library" onClick={() => sync().then(books.reload)} loading={syncing} />
+          </Tooltip>
+        )}
       </div>
 
       <div className="library-body" ref={bodyRef}>
@@ -255,8 +247,12 @@ export function LibraryView({ active }: { active: boolean }) {
             <NonIdealState
               icon="book"
               title="The library is empty"
-              description="Sync with Calibre to import your books."
-              action={<Button intent={Intent.PRIMARY} icon="refresh" text="Sync library" loading={syncing} onClick={() => sync().then(books.reload)} />}
+              description={canSync ? "Sync with Calibre to import your books." : "Its books show up here once a curator has synced it with Calibre."}
+              action={
+                canSync ? (
+                  <Button intent={Intent.PRIMARY} icon="refresh" text="Sync library" loading={syncing} onClick={() => sync().then(books.reload)} />
+                ) : undefined
+              }
             />
           )
         ) : (
@@ -358,15 +354,17 @@ export function LibraryView({ active }: { active: boolean }) {
                             />
                           </Tooltip>
                         )}
-                        <Tooltip content="Reindex" placement="top">
-                          <Button
-                            icon="repeat"
-                            aria-label={`Reindex ${b.title}`}
-                            loading={reindexing.has(b.id)}
-                            disabled={isBusyStatus(b.status)}
-                            onClick={() => reindex(b)}
-                          />
-                        </Tooltip>
+                        {canReindex(b) && (
+                          <Tooltip content="Reindex" placement="top">
+                            <Button
+                              icon="repeat"
+                              aria-label={`Reindex ${b.title}`}
+                              loading={reindexing.has(b.id)}
+                              disabled={isBusyStatus(b.status)}
+                              onClick={() => reindex(b)}
+                            />
+                          </Tooltip>
+                        )}
                       </ButtonGroup>
                     </td>
                   </tr>

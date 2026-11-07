@@ -1,5 +1,6 @@
 package dev.raggedlib.chat
 
+import dev.raggedlib.auth.Access
 import dev.raggedlib.config.badRequest
 import org.slf4j.LoggerFactory
 import org.springframework.http.HttpHeaders
@@ -25,6 +26,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 class ChatController(
     private val chat: ChatService,
     private val mapper: ObjectMapper,
+    private val access: Access,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val utf8Text = MediaType("text", "plain", StandardCharsets.UTF_8)
@@ -32,12 +34,14 @@ class ChatController(
     @PostMapping("/chat", produces = [MediaType.TEXT_EVENT_STREAM_VALUE])
     fun chat(@RequestBody req: ChatRequest): ResponseEntity<ResponseBodyEmitter> {
         if (req.query.isBlank()) badRequest("query must not be empty")
+        // resolved here: the answer is written on another thread, which has no security context
+        val allowed = access.libraries()
         val emitter = ResponseBodyEmitter(30 * 60 * 1000L)
         val closed = AtomicBoolean(false)
         emitter.onTimeout { closed.set(true) }
         emitter.onError { closed.set(true) }
         emitter.onCompletion { closed.set(true) }
-        Thread.ofVirtual().name("chat-", 0).start { run(req, emitter, closed) }
+        Thread.ofVirtual().name("chat-", 0).start { run(req, allowed, emitter, closed) }
         return ResponseEntity.ok()
             .contentType(MediaType("text", "event-stream", StandardCharsets.UTF_8))
             .header(HttpHeaders.CACHE_CONTROL, "no-cache, no-transform")
@@ -45,12 +49,12 @@ class ChatController(
             .body(emitter)
     }
 
-    private fun run(req: ChatRequest, emitter: ResponseBodyEmitter, closed: AtomicBoolean) {
+    private fun run(req: ChatRequest, allowed: Set<Long>, emitter: ResponseBodyEmitter, closed: AtomicBoolean) {
         val started = System.currentTimeMillis()
         try {
             val query = chat.standaloneQuery(req)
             if (query != req.query) log.info("Rewrote follow-up '{}' -> '{}'", req.query, query)
-            val found = chat.retrieve(req, query)
+            val found = chat.retrieve(req, query, allowed)
             val sources = found.results
             if (found.correctedQuery != null) {
                 send(emitter, "corrected", mapOf("correctedQuery" to found.correctedQuery, "corrections" to found.corrections))

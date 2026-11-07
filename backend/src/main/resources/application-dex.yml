@@ -1,0 +1,15 @@
+# Profile `dex` (includes `oidc`): sign-in through the bundled development dex (infra/dex/config.yaml), with roles for
+# its static users' groups. For development, the docker-compose stack and integration tests; not for production.
+raggedlib:
+  auth:
+    admin-values: [administrators]
+    group-roles:
+      - group: librarians
+        role: admin
+        library: "*"
+      - group: curators
+        role: curator
+        library: "*"
+      - group: readers
+        role: viewer
+        library: "*"

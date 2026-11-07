@@ -33,8 +33,39 @@ export function saveString(key: string, value: string): void {
   }
 }
 
+export function removeKey(key: string): void {
+  try {
+    window.localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** sessionStorage (this tab only): read and remove in one go. */
+export function takeSessionString(key: string): string | null {
+  try {
+    const v = window.sessionStorage.getItem(key);
+    window.sessionStorage.removeItem(key);
+    return v;
+  } catch {
+    return null;
+  }
+}
+
+export function saveSessionString(key: string, value: string): void {
+  try {
+    window.sessionStorage.setItem(key, value);
+  } catch {
+    /* ignore */
+  }
+}
+
 export const STORAGE_KEYS = {
   theme: "raggedlib.theme",
+  /** the user these keys were last used by (see USER_KEYS) */
+  user: "raggedlib.user.v1",
+  /** sessionStorage: the tab (#/…) to come back to after signing in */
+  returnHash: "raggedlib.returnHash",
   conversation: "raggedlib.conversation.v1",
   scope: "raggedlib.scope.v1",
   libraryId: "raggedlib.libraryId.v1",
@@ -45,3 +76,15 @@ export const STORAGE_KEYS = {
   readerPrefs: "raggedlib.reader.prefs.v1",
   readerPositions: "raggedlib.reader.positions.v1",
 } as const;
+
+/** What one user did in this browser, which the next one to sign in here must not see. */
+export const USER_KEYS: readonly string[] = [
+  STORAGE_KEYS.conversation,
+  STORAGE_KEYS.scope,
+  STORAGE_KEYS.libraryId,
+  STORAGE_KEYS.readerPositions,
+];
+
+export function forgetUserState(): void {
+  for (const key of USER_KEYS) removeKey(key);
+}

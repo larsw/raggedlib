@@ -63,10 +63,12 @@ class BookRepository(
     fun findAllByLibrary(libraryId: Long): List<BookRow> =
         jdbc.query("select $columns from books where library_id = :libraryId", mapOf("libraryId" to libraryId), rowMapper)
 
+    /** Books matching the filters, in libraries [libraryIds] (null: every library; empty: none). */
     fun search(
-        q: String?, status: BookStatus?, tag: String?, page: Int, size: Int, sort: String, libraryId: Long? = null,
+        q: String?, status: BookStatus?, tag: String?, page: Int, size: Int, sort: String, libraryIds: Collection<Long>? = null,
         publisher: String? = null,
     ): Page<Book> {
+        if (libraryIds != null && libraryIds.isEmpty()) return Page(emptyList(), 0, page, size)
         val where = mutableListOf<String>()
         val params = MapSqlParameterSource()
         if (!q.isNullOrBlank()) {
@@ -81,9 +83,9 @@ class BookRepository(
             where += ":tag = any(tags)"
             params.addValue("tag", tag)
         }
-        if (libraryId != null) {
-            where += "library_id = :libraryId"
-            params.addValue("libraryId", libraryId)
+        if (libraryIds != null) {
+            where += "library_id in (:libraryIds)"
+            params.addValue("libraryIds", libraryIds)
         }
         if (!publisher.isNullOrBlank()) {
             where += "publisher = :publisher"
@@ -108,21 +110,47 @@ class BookRepository(
 
     private fun dir(desc: Boolean) = if (desc) "desc" else "asc"
 
-    fun tags(libraryId: Long? = null): List<TagCount> {
-        val filter = if (libraryId != null) "where library_id = :libraryId" else ""
+    /** Tags of the books in [libraryIds] (null: every library; empty: none), most books first. */
+    fun tags(libraryIds: Collection<Long>? = null): List<TagCount> {
+        if (libraryIds != null && libraryIds.isEmpty()) return emptyList()
+        val filter = if (libraryIds != null) "where library_id in (:libraryIds)" else ""
         return jdbc.query(
             "select t, count(*) c from books, unnest(tags) t $filter group by t order by c desc, t",
-            mapOf("libraryId" to libraryId),
+            mapOf("libraryIds" to libraryIds),
         ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
     }
 
-    /** Publishers with how many books each, most books first. */
-    fun publishers(libraryId: Long? = null): List<TagCount> {
-        val filter = if (libraryId != null) "and library_id = :libraryId" else ""
+    /** Publishers with how many books each, most books first, in [libraryIds] (null: every library; empty: none). */
+    fun publishers(libraryIds: Collection<Long>? = null): List<TagCount> {
+        if (libraryIds != null && libraryIds.isEmpty()) return emptyList()
+        val filter = if (libraryIds != null) "and library_id in (:libraryIds)" else ""
         return jdbc.query(
             "select publisher, count(*) c from books where publisher is not null $filter group by publisher order by c desc, publisher",
-            mapOf("libraryId" to libraryId),
+            mapOf("libraryIds" to libraryIds),
         ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
+    }
+
+    fun findByIds(ids: Collection<Long>): List<Book> = if (ids.isEmpty()) emptyList() else
+        jdbc.query("select $columns from books where id in (:ids)", mapOf("ids" to ids), rowMapper).map { it.book }
+
+    /** Library of each of [ids] that exists. */
+    fun libraryOf(ids: Collection<Long>): Map<Long, Long> = if (ids.isEmpty()) emptyMap() else jdbc.query(
+        "select id, library_id from books where id in (:ids)", mapOf("ids" to ids),
+    ) { rs, _ -> rs.getLong(1) to rs.getLong(2) }.toMap()
+
+    /**
+     * For books of [ids] outside [libraryIds]: a book in [libraryIds] that is a duplicate of it (searched through
+     * it), to show in its place to a reader who can only see that one.
+     */
+    fun standIns(ids: Collection<Long>, libraryIds: Collection<Long>): Map<Long, Book> {
+        if (ids.isEmpty() || libraryIds.isEmpty()) return emptyMap()
+        return jdbc.query(
+            """
+            select distinct on (duplicate_of) $columns from books
+            where duplicate_of in (:ids) and library_id in (:libraryIds) order by duplicate_of, id
+            """.trimIndent(),
+            mapOf("ids" to ids, "libraryIds" to libraryIds), rowMapper,
+        ).associate { it.book.duplicateOf!! to it.book }
     }
 
     fun countsByLibrary(): Map<Long, Int> = jdbc.query(
@@ -296,13 +324,19 @@ class BookRepository(
     ).filterNotNull()
 
 
-    fun idsWithStatus(statuses: Collection<BookStatus>, restrictTo: Collection<Long>?): List<Long> {
+    /** Ids of books in [statuses], only of [restrictTo] and in [libraryIds] if given. */
+    fun idsWithStatus(statuses: Collection<BookStatus>, restrictTo: Collection<Long>?, libraryIds: Collection<Long>? = null): List<Long> {
         val params = MapSqlParameterSource("statuses", statuses.map { it.name })
         var sql = "select id from books where status in (:statuses)"
         if (restrictTo != null) {
             if (restrictTo.isEmpty()) return emptyList()
             sql += " and id in (:ids)"
             params.addValue("ids", restrictTo)
+        }
+        if (libraryIds != null) {
+            if (libraryIds.isEmpty()) return emptyList()
+            sql += " and library_id in (:libraryIds)"
+            params.addValue("libraryIds", libraryIds)
         }
         return jdbc.queryForList("$sql order by id", params, Long::class.java).filterNotNull()
     }
@@ -311,16 +345,23 @@ class BookRepository(
         "select status from books where id = :id", mapOf("id" to id), String::class.java,
     ).firstOrNull()?.let(BookStatus::valueOf)
 
-    fun statusCounts(): Map<BookStatus, Int> {
+    /** Books by status, in [libraryIds] (null: every library). */
+    fun statusCounts(libraryIds: Collection<Long>? = null): Map<BookStatus, Int> {
         val counts = BookStatus.entries.associateWith { 0 }.toMutableMap()
-        jdbc.query("select status, count(*) from books group by status", emptyMap<String, Any>()) { rs ->
+        if (libraryIds != null && libraryIds.isEmpty()) return counts
+        val filter = if (libraryIds != null) "where library_id in (:libraryIds)" else ""
+        jdbc.query("select status, count(*) from books $filter group by status", mapOf("libraryIds" to libraryIds)) { rs ->
             counts[BookStatus.valueOf(rs.getString(1))] = rs.getInt(2)
         }
         return counts
     }
 
-    fun totalChunks(): Long =
-        jdbc.queryForObject("select coalesce(sum(chunk_count), 0) from books", emptyMap<String, Any>(), Long::class.java) ?: 0L
+    /** Passages of the books in [libraryIds] (null: every library). */
+    fun totalChunks(libraryIds: Collection<Long>? = null): Long {
+        if (libraryIds != null && libraryIds.isEmpty()) return 0L
+        val filter = if (libraryIds != null) "where library_id in (:libraryIds)" else ""
+        return jdbc.queryForObject("select coalesce(sum(chunk_count), 0) from books $filter", mapOf("libraryIds" to libraryIds), Long::class.java) ?: 0L
+    }
 
     /**
      * Passages still to process for [ids], for the indexing ETA: a book's last known count (kept while it is queued

@@ -3,6 +3,7 @@ package dev.raggedlib.search
 import com.pgvector.PGvector
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.config.badRequest
+import dev.raggedlib.library.BookRepository
 import org.springframework.ai.embedding.EmbeddingModel
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -30,14 +31,21 @@ class SearchService(
     private val termStats: TermStatistics,
     private val reranker: Reranker,
     private val spelling: SpellingCorrector,
+    private val books: BookRepository,
 ) {
     /** [weight] scales the row's RRF contribution (see [HybridRanking.rrf]). */
     private data class Row(val id: String, val bookId: Long, val title: String, val authors: List<String>,
                            val page: Int?, val section: String?, val text: String, val weight: Double = 1.0)
 
-    fun search(req: SearchRequest): SearchResponse {
+    /**
+     * Searches the books of [allowedLibraries] (the caller's: see [dev.raggedlib.auth.Access.libraryScope]), within
+     * which [SearchRequest.libraryIds] can narrow further. An empty [allowedLibraries] finds nothing.
+     */
+    fun search(req: SearchRequest, allowedLibraries: Collection<Long>): SearchResponse {
         val typed = req.query.trim()
         if (typed.isEmpty()) badRequest("query must not be empty")
+        val allowed = req.libraryIds?.takeIf { it.isNotEmpty() }?.filter { it in allowedLibraries }?.toSet() ?: allowedLibraries.toSet()
+        if (allowed.isEmpty()) return SearchResponse(emptyList())
         // the corrected query drives every stage: keyword search, the embedding and the reranker
         val correction = if (req.correct != false) spelling.correct(typed) else null
         val query = correction?.query ?: typed
@@ -45,7 +53,6 @@ class SearchService(
         val topK = (req.topK ?: s.defaultTopK).coerceIn(1, s.maxTopK)
         val bookIds = req.bookIds?.distinct()?.takeIf { it.isNotEmpty() }
         val tags = req.tags?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
-        val libraryIds = req.libraryIds?.distinct()?.takeIf { it.isNotEmpty() }
         val publishers = req.publishers?.filter { it.isNotBlank() }?.takeIf { it.isNotEmpty() }
 
         val filters = mutableListOf<String>()
@@ -60,10 +67,9 @@ class SearchService(
             filters += "v.book_id in (select $ownOrKept from books where tags && cast(:tags as text[]))"
             params.addValue("tags", tags.toTypedArray())
         }
-        if (libraryIds != null) {
-            filters += "v.book_id in (select $ownOrKept from books where library_id in (:libraryIds))"
-            params.addValue("libraryIds", libraryIds)
-        }
+        // always: the caller's libraries (a duplicate's passages are its kept copy's, which may be in another one)
+        filters += "v.book_id in (select $ownOrKept from books where library_id in (:libraryIds))"
+        params.addValue("libraryIds", allowed)
         if (publishers != null) {
             filters += "v.book_id in (select $ownOrKept from books where publisher in (:publishers))"
             params.addValue("publishers", publishers)
@@ -96,10 +102,16 @@ class SearchService(
         }
         val reranked = if (req.rerank != false && reranker.enabled) rerank(query, kept, byId, topK) else null
         val scoreKind = if (reranked != null) ScoreKind.RERANK else ScoreKind.FUSED
-        val results = HybridRanking.capPerBook(reranked ?: kept, cap, topK).mapIndexed { i, f ->
+        val capped = HybridRanking.capPerBook(reranked ?: kept, cap, topK)
+        // a passage of a kept copy the caller can't see is shown as from its duplicate the caller can
+        val shownBooks = capped.map { byId.getValue(it.id).bookId }.toSet()
+        val outside = books.libraryOf(shownBooks).filterValues { it !in allowed }.keys
+        val standIns = books.standIns(outside, allowed)
+        val results = capped.mapIndexed { i, f ->
             val r = byId.getValue(f.id)
-            SourceChunk(i + 1, r.id, r.bookId, r.title, r.authors, r.page, r.section, r.text,
-                Math.round(f.score * 1e6) / 1e6, scoreKind)
+            val book = standIns[r.bookId]
+            SourceChunk(i + 1, r.id, book?.id ?: r.bookId, book?.title ?: r.title, book?.authors ?: r.authors, r.page, r.section,
+                r.text, Math.round(f.score * 1e6) / 1e6, scoreKind)
         }
         return SearchResponse(results, correction?.query, correction?.corrections.orEmpty())
     }

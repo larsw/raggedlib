@@ -1,7 +1,7 @@
 name: raggedlib
 
-# Full stack:  docker compose up -d --build      → http://localhost:3000
-# Infra only (run backend/frontend on the host):  docker compose up -d postgres ollama models reranker
+# Full stack:  docker compose up -d --build      → http://localhost:3000 (sign in as admin@raggedlib.dev / admin)
+# Infra only (run backend/frontend on the host):  docker compose up -d postgres ollama models reranker dex
 
 x-models: &models
   EMBED_MODEL: ${EMBED_MODEL:-qwen3-embedding:0.6b}
@@ -73,6 +73,27 @@ services:
       retries: 60
     deploy: *gpu
 
+  # Sign-in for development: dex, an OpenID Connect provider with five static users (infra/dex/config.yaml; e.g.
+  # admin@raggedlib.dev / admin). Its issuer is http://dex.localhost:5556/dex: browsers resolve *.localhost to the
+  # loopback address, where the port is published, and inside this network `dex.localhost` is this container's alias,
+  # so the browser and the backend reach dex at the same URL. For your own identity provider, drop this service and
+  # set SPRING_PROFILES_ACTIVE=oidc plus OIDC_ISSUER_URI / OIDC_CLIENT_ID / OIDC_CLIENT_SECRET (see README).
+  dex:
+    image: ghcr.io/dexidp/dex:v2.45.1
+    restart: unless-stopped
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./infra/dex/config.yaml:/etc/dex/config.yaml:ro
+    ports:
+      - "127.0.0.1:5556:5556"
+    networks:
+      default:
+        aliases: [dex.localhost]
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:5556/dex/.well-known/openid-configuration"]
+      interval: 5s
+      retries: 20
+
   # One-shot: pull the embedding + chat models only if missing, so a registry hiccup can't block startup.
   models:
     image: ollama/ollama:latest
@@ -102,7 +123,24 @@ services:
         condition: service_completed_successfully
       reranker:
         condition: service_started
+      # the OIDC provider is discovered at startup. Not required: with AUTH_MODE=single-user, or your own provider,
+      # dex isn't used (`docker compose stop dex`, or leave it out with `docker compose up -d --scale dex=0`)
+      dex:
+        condition: service_healthy
+        required: false
     environment:
+      # Sign-in: oidc (users sign in) or single-user (no sign-in: every request without an API key is the local admin)
+      RAGGEDLIB_AUTH_MODE: ${AUTH_MODE:-oidc}
+      # The provider, with AUTH_MODE=oidc: `dex` = the bundled dex above, with roles for its users' groups
+      # (application-dex.yml); `oidc` = your own provider (OIDC_* below)
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dex}
+      OIDC_ISSUER_URI: ${OIDC_ISSUER_URI:-http://dex.localhost:5556/dex}
+      OIDC_CLIENT_ID: ${OIDC_CLIENT_ID:-raggedlib}
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET:-raggedlib-dev-secret}
+      OIDC_SCOPES: ${OIDC_SCOPES:-openid,profile,email,groups}
+      # Global admins: users whose groups claim (RAGGEDLIB_AUTH_GROUPS_CLAIM) holds one of these; more roles: README
+      RAGGEDLIB_AUTH_ADMIN_VALUES: ${AUTH_ADMIN_GROUPS:-administrators}
+      RAGGEDLIB_AUTH_DEFAULT_LIBRARY_ROLE: ${AUTH_DEFAULT_LIBRARY_ROLE:-none}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/raggedlib
       SPRING_DATASOURCE_USERNAME: raggedlib
       SPRING_DATASOURCE_PASSWORD: raggedlib
@@ -119,7 +157,8 @@ services:
       RAGGEDLIB_LIBRARIES_2_NAME: ${CALIBRE_LIBRARY_2_NAME:-}
       RAGGEDLIB_LIBRARIES_2_PATH: /library/2
       RAGGEDLIB_RERANK_BASE_URL: http://reranker:8080
-      # MCP endpoint http://localhost:8090/mcp — clients send "Authorization: Bearer $MCP_API_KEY" (unset = MCP refused)
+      # MCP endpoint http://localhost:3000/mcp (or :8090/mcp): clients send "Authorization: Bearer <key>", a key users
+      # mint in the web UI (Account → API keys). MCP_API_KEY adds one system-wide key (library:read) from here.
       RAGGEDLIB_MCP_API_KEYS_0_NAME: ${MCP_API_KEY_NAME:-default}
       RAGGEDLIB_MCP_API_KEYS_0_KEY: ${MCP_API_KEY:-}
       RAGGEDLIB_OCR_LANGUAGES: ${OCR_LANGUAGES:-eng}

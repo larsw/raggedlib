@@ -1,12 +1,15 @@
 # Connecting a harness to raggedlib's MCP server
 
-The server: `http://localhost:8080/mcp` by default, streamable HTTP in stateless mode (every request is a plain
-POST; no session, no SSE stream to keep open). Every request needs an API key, as `Authorization: Bearer <key>`
-or `X-API-Key: <key>`. With no key configured on the server, it refuses everything (HTTP 401).
+The server: `http://localhost:8080/mcp` by default (a backend run on the host), or `http://localhost:3000/mcp`
+through the web UI (the docker-compose stack, which also publishes the backend itself at `:8090/mcp`); streamable
+HTTP in stateless mode (every request is a plain POST; no session, no SSE stream to keep open). Every request needs
+an API key, as `Authorization: Bearer <key>` or `X-API-Key: <key>`.
 
-The key belongs to the user. Ask them for it, or, in the raggedlib repo, read `MCP_API_KEY` from `.env` into an
-environment variable without printing it. Prefer configurations that reference an environment variable over ones
-that store the key itself.
+The key belongs to the user: they mint it in the raggedlib web UI (their name in the navbar → API keys), choosing
+its scopes, and it is shown only once. Ask them for it; never invent or look for one. `library:read` covers the
+search tools; `favorites:*` and `reviews:*` add the tools for their favorite lists and reviews. An admin may give
+out a system-wide key instead, which has the search tools only. Prefer configurations that reference an environment
+variable over ones that store the key itself.
 
 ## Check the server first
 
@@ -16,9 +19,10 @@ RAGGEDLIB_MCP_KEY=... python3 scripts/raggedlib_mcp.py library_status
 ```
 
 - Connection refused: the backend isn't running. In the raggedlib repo: `docker compose up -d`.
-- 401: wrong key, or `MCP_API_KEY` is empty on the server. Setting one there: generate it
-  (`openssl rand -hex 32`), put it in the repo's `.env` as `MCP_API_KEY=...`, then `docker compose up -d backend`.
-- Empty searches everywhere: `library_status` shows whether any books are indexed yet.
+- 401: wrong, revoked or expired key, or its owner was disabled. The user can mint a new one in the web UI.
+- A tool is missing from the tool list, or fails with a scope error: the key lacks that tool's scope.
+- Empty searches everywhere: `library_status` shows whether any books are indexed yet, and `list_libraries` which
+  libraries the key can see (a user only sees the libraries they have a role in).
 
 ## Claude Code
 

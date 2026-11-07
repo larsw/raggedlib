@@ -21,14 +21,18 @@ class LibraryService(
     private val log = LoggerFactory.getLogger(javaClass)
     private val syncLock = Any()
 
-    /** Syncs every configured library; one library's failure (calibredb down, path unmounted) doesn't block the rest. */
-    fun sync(): SyncResult = synchronized(syncLock) {
+    /**
+     * Syncs the configured libraries (only [libraryIds], if given); one library's failure (calibredb down, path
+     * unmounted) doesn't block the rest.
+     */
+    fun sync(libraryIds: Set<Long>? = null): SyncResult = synchronized(syncLock) {
         var added = 0
         var updated = 0
         var removed = 0
         var total = 0
         val sources = LinkedHashSet<String>()
         for (lib in registry.all) {
+            if (libraryIds != null && lib.id !in libraryIds) continue
             try {
                 val (a, u, r, t, source) = syncOne(lib)
                 added += a; updated += u; removed += r; total += t

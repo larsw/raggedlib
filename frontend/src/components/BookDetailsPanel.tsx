@@ -1,13 +1,18 @@
 import { AnchorButton, Button, ButtonGroup, Classes, NonIdealState, Spinner, Tag, Tooltip } from "@blueprintjs/core";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { api, bookFileUrl } from "../api/client";
 import type { Book, BookDetails } from "../api/types";
 import { useApp } from "../AppContext";
 import { useAsync } from "../hooks/useAsync";
+import { roleAtLeast } from "../lib/auth";
 import { isReaderFormat, readerFormat, type ReaderTarget } from "../lib/reader";
-import { formatBytes, formatDate, formatDateTime, formatNumber, formatYear } from "../lib/format";
+import { formatRating } from "../lib/reviews";
+import { formatBytes, formatDate, formatDateTime, formatNumber, formatYear, pluralize } from "../lib/format";
 import { BookCover } from "./BookCover";
 import { ErrorState } from "./ErrorState";
+import { AddToListButton } from "./lists/AddToListButton";
+import { ReviewsSection } from "./reviews/ReviewsSection";
+import { Stars } from "./reviews/Stars";
 import { isBusyStatus, StatusTag } from "./StatusTag";
 
 const SECTIONS_SHOWN = 12;
@@ -19,11 +24,15 @@ interface Props {
   reindexing: boolean;
   onClose: () => void;
   onSelectBook: (id: number) => void;
-  onFilterTag: (tag: string) => void;
-  onFilterPublisher: (publisher: string) => void;
+  /** tags and the publisher filter the view by them, where it has such filters */
+  onFilterTag?: (tag: string) => void;
+  onFilterPublisher?: (publisher: string) => void;
   onAsk: (book: Book) => void;
   onSearchIn: (book: Book) => void;
+  /** offered to curators of the book's library only */
   onReindex: (book: Book) => void;
+  /** the book was put on or taken off one of the caller's lists */
+  onListsChanged?: () => void;
 }
 
 /** Library's right-hand panel: one book's Calibre metadata, indexing state and indexed outline. */
@@ -56,14 +65,28 @@ export function BookDetailsPanel(props: Props) {
   );
 }
 
-function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onFilterPublisher, onAsk, onSearchIn, onReindex }: Props & { details: BookDetails }) {
+function DetailsContent({
+  details,
+  reindexing,
+  onSelectBook,
+  onFilterTag,
+  onFilterPublisher,
+  onAsk,
+  onSearchIn,
+  onReindex,
+  onListsChanged,
+}: Props & { details: BookDetails }) {
   const { book, calibre, duplicateOf, sections } = details;
-  const { openReader, libraries } = useApp();
+  const { openReader, libraries, roleIn } = useApp();
   const libraryName = libraries.find((l) => l.id === book.libraryId)?.name;
+  const canCurate = roleAtLeast(roleIn(book.libraryId), "CURATOR");
   const year = formatYear(book.pubdate);
   const isPdf = book.sourceFormat === "PDF";
   const readable = readerFormat(book.formats, book.sourceFormat);
   const read = (format?: string, target?: ReaderTarget) => openReader({ bookId: book.id, title: book.title, format, target });
+  const reviews = useAsync((signal) => api.bookReviews(book.id, signal), [book.id]);
+  const rated = reviews.data?.bookId === book.id ? reviews.data : undefined;
+  const reviewsRef = useRef<HTMLDivElement>(null);
 
   return (
     <>
@@ -79,7 +102,7 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onFilt
             </div>
           )}
           {calibre?.rating != null && (
-            <div className="book-rating" aria-label={`Rated ${calibre.rating} of 5`} title={`${calibre.rating} / 5`}>
+            <div className="book-rating" aria-label={`Rated ${calibre.rating} of 5 in Calibre`} title={`Calibre rating: ${calibre.rating} / 5`}>
               {"★".repeat(Math.round(calibre.rating))}
               <span className="book-rating-empty">{"★".repeat(5 - Math.round(calibre.rating))}</span>
             </div>
@@ -97,14 +120,32 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onFilt
         )}
         <Button icon="chat" text="Ask" onClick={() => onAsk(book)} />
         <Button icon="search" text="Search in" onClick={() => onSearchIn(book)} />
-        <Button
-          icon="repeat"
-          text="Reindex"
-          loading={reindexing}
-          disabled={isBusyStatus(book.status)}
-          onClick={() => onReindex(book)}
-        />
+        {canCurate && (
+          <Button
+            icon="repeat"
+            text="Reindex"
+            loading={reindexing}
+            disabled={isBusyStatus(book.status)}
+            onClick={() => onReindex(book)}
+          />
+        )}
       </ButtonGroup>
+
+      <div className="book-panel-secondary">
+        <AddToListButton bookId={book.id} onChanged={onListsChanged} />
+        {rated && rated.averageRating != null && (
+          <button
+            type="button"
+            className="link-button review-summary"
+            title={`${formatRating(rated.averageRating)} from ${pluralize(rated.ratings, "rating")}: go to the reviews`}
+            onClick={() => reviewsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })}
+          >
+            <Stars value={rated.averageRating} />
+            <span>{formatRating(rated.averageRating)}</span>
+            <span className={Classes.TEXT_MUTED}>({formatNumber(rated.ratings)})</span>
+          </button>
+        )}
+      </div>
 
       {calibre?.description && <Description text={calibre.description} />}
 
@@ -112,11 +153,15 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onFilt
         <Fact label="Published">{year || "—"}</Fact>
         {book.publisher ? (
           <Fact label="Publisher">
-            <Tooltip content="Show books from this publisher" placement="top">
-              <Tag minimal interactive onClick={() => onFilterPublisher(book.publisher!)}>
-                {book.publisher}
-              </Tag>
-            </Tooltip>
+            {onFilterPublisher ? (
+              <Tooltip content="Show books from this publisher" placement="top">
+                <Tag minimal interactive onClick={() => onFilterPublisher(book.publisher!)}>
+                  {book.publisher}
+                </Tag>
+              </Tooltip>
+            ) : (
+              book.publisher
+            )}
           </Fact>
         ) : (
           // not stored yet (indexed before publishers were, and not synced since): Calibre's own reading
@@ -138,16 +183,26 @@ function DetailsContent({ details, reindexing, onSelectBook, onFilterTag, onFilt
         <section className="book-panel-section">
           <h4 className="book-panel-subheading">Tags</h4>
           <div className="book-panel-tags">
-            {book.tags.map((t) => (
-              <Tooltip key={t} content="Show books with this tag" placement="top">
-                <Tag minimal interactive onClick={() => onFilterTag(t)}>
+            {book.tags.map((t) =>
+              onFilterTag ? (
+                <Tooltip key={t} content="Show books with this tag" placement="top">
+                  <Tag minimal interactive onClick={() => onFilterTag(t)}>
+                    {t}
+                  </Tag>
+                </Tooltip>
+              ) : (
+                <Tag key={t} minimal>
                   {t}
                 </Tag>
-              </Tooltip>
-            ))}
+              ),
+            )}
           </div>
         </section>
       )}
+
+      <div ref={reviewsRef} className="book-panel-anchor">
+        <ReviewsSection bookId={book.id} reviews={reviews} />
+      </div>
 
       <section className="book-panel-section">
         <h4 className="book-panel-subheading">Index</h4>

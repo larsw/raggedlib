@@ -42,6 +42,13 @@ async function proxy(req: Request, server: Bun.Server<undefined>): Promise<Respo
   // the origin in the backend's allow-list (e.g. 127.0.0.1:3000 or a LAN hostname would break).
   const forwardHeaders = stripHeaders(req.headers);
   forwardHeaders.delete("origin");
+  // Where the browser is: the backend builds its OIDC redirect URI (/api/auth/callback/...) from these, so sign-in
+  // comes back here, and the session cookie stays on this origin. It trusts them from private addresses only.
+  forwardHeaders.set("x-forwarded-host", url.host);
+  forwardHeaders.set("x-forwarded-proto", url.protocol.replace(/:$/, ""));
+  forwardHeaders.set("x-forwarded-port", url.port || (url.protocol === "https:" ? "443" : "80"));
+  const clientIp = server.requestIP(req)?.address;
+  if (clientIp) forwardHeaders.set("x-forwarded-for", clientIp);
 
   let upstream: Response;
   try {
@@ -100,6 +107,8 @@ const server = Bun.serve({
   routes: {
     "/healthz": new Response("ok", { headers: { "content-type": "text/plain" } }),
     "/api/*": proxy,
+    // the MCP endpoint, so agents can use the UI's origin too (API keys only; see Account → API keys)
+    "/mcp": proxy,
     [`${FOLIATE_PREFIX}*`]: foliate,
     "/*": index,
   },
@@ -107,5 +116,5 @@ const server = Bun.serve({
 });
 
 console.log(
-  `raggedlib frontend on ${server.url} (${isProduction ? "production" : "development"}), proxying /api -> ${BACKEND_URL}`,
+  `raggedlib frontend on ${server.url} (${isProduction ? "production" : "development"}), proxying /api and /mcp -> ${BACKEND_URL}`,
 );

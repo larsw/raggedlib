@@ -1,0 +1,30 @@
+# Profile `oidc`: sign-in through an OpenID Connect provider (Spring Security OAuth2 login). Without this profile the
+# server runs in single-user mode; with it, RAGGEDLIB_AUTH_MODE=single-user still turns sign-in off.
+#
+# The defaults are the bundled development dex (infra/dex/config.yaml); for another provider set OIDC_ISSUER_URI,
+# OIDC_CLIENT_ID and OIDC_CLIENT_SECRET, and register the redirect URI <web UI origin>/api/auth/callback/oidc with it.
+# OIDC_SCOPES must ask for the claim holding the user's groups if roles come from groups (raggedlib.auth.groups-claim;
+# dex wants the `groups` scope for it).
+raggedlib:
+  auth:
+    mode: oidc
+
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          oidc:
+            provider: oidc
+            client-name: ${OIDC_PROVIDER_NAME:dex}
+            client-id: ${OIDC_CLIENT_ID:raggedlib}
+            client-secret: ${OIDC_CLIENT_SECRET:raggedlib-dev-secret}
+            authorization-grant-type: authorization_code
+            # on the web UI's origin (it proxies /api), from the X-Forwarded-* headers its server sends
+            redirect-uri: "{baseUrl}/api/auth/callback/{registrationId}"
+            scope: ${OIDC_SCOPES:openid,profile,email,groups}
+        provider:
+          oidc:
+            # discovered at startup, so the provider must be reachable then (docker-compose waits for dex)
+            issuer-uri: ${OIDC_ISSUER_URI:http://dex.localhost:5556/dex}
+            user-name-attribute: sub

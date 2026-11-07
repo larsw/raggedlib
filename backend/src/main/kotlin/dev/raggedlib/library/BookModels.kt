@@ -47,5 +47,11 @@ data class TagCount(val name: String, val count: Int)
 
 data class SyncResult(val added: Int, val updated: Int, val removed: Int, val total: Int, val source: String)
 
-/** GET /api/libraries: one configured Calibre library. */
-data class Library(val id: Long, val name: String, val path: String, val bookCount: Int)
+/** GET /api/libraries: one configured Calibre library. [path] is shown to admins only; [role] is the caller's. */
+data class Library(
+    val id: Long,
+    val name: String,
+    val path: String?,
+    val bookCount: Int,
+    val role: dev.raggedlib.auth.LibraryRole,
+)

@@ -40,9 +40,10 @@ function sessionTotal(s: IngestStatus): number {
 }
 
 export function IndexingView({ active }: { active: boolean }) {
-  const { libraries } = useApp();
-  // Always every configured library: one background run covers all of them, so filtering the view by the
-  // navbar's chooser would only hide what's happening, not change it.
+  const { libraries, me } = useApp();
+  // Always every library the caller can see: one background run covers all of them, so filtering the view by the
+  // navbar's chooser would only hide what's happening, not change it. Start, retry and sync act on the libraries
+  // the caller curates (only curators get this tab).
   const status = usePolling((signal) => api.ingestStatus(signal), POLL_MS, active);
   const { sync, syncing } = useSyncLibrary();
   const libraryNames = useMemo(() => new Map(libraries.map((l) => [l.id, l.name])), [libraries]);
@@ -185,7 +186,11 @@ export function IndexingView({ active }: { active: boolean }) {
             value={`${formatNumber(s.sessionProcessed)} books`}
             sub={`${formatNumber(s.sessionChunks)} chunks embedded`}
           />
-          <Stat label="In parallel" value={`${formatNumber(s.parallelBooks)} books`} sub="change in Settings (gear)" />
+          <Stat
+            label="In parallel"
+            value={`${formatNumber(s.parallelBooks)} books`}
+            sub={me.admin ? "change in Settings (gear)" : "a server setting, for admins"}
+          />
         </div>
 
         {s.running && sessTotal > 0 && (

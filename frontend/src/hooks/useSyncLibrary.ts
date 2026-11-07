@@ -4,13 +4,16 @@ import type { SyncResult } from "../api/types";
 import { toastError, toastSuccess } from "../components/toaster";
 import { clearFacetCache } from "./useFacet";
 
-/** POST /api/library/sync with toast feedback. Resolves with the result (or undefined on failure). */
+/**
+ * POST /api/library/sync with toast feedback: one library, or (without an id) every library the caller curates.
+ * Resolves with the result (or undefined on failure).
+ */
 export function useSyncLibrary() {
   const [syncing, setSyncing] = useState(false);
-  const sync = useCallback(async (): Promise<SyncResult | undefined> => {
+  const sync = useCallback(async (libraryId?: number): Promise<SyncResult | undefined> => {
     setSyncing(true);
     try {
-      const r = await api.syncLibrary();
+      const r = await api.syncLibrary(libraryId);
       clearFacetCache(); // tags and publishers may have changed; the next dropdown that opens refetches them
       toastSuccess(`Library synced: ${r.added} added, ${r.updated} updated, ${r.removed} removed (${r.total} books)`);
       return r;

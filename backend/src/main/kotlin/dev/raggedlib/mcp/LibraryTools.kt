@@ -1,5 +1,7 @@
 package dev.raggedlib.mcp
 
+import dev.raggedlib.auth.Access
+import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.chat.ChatRequest
 import dev.raggedlib.chat.ChatService
 import dev.raggedlib.config.RaggedlibProperties
@@ -21,7 +23,8 @@ import org.springframework.web.reactive.function.client.WebClientResponseExcepti
 
 /**
  * MCP tools over the library: passage search, grounded answers, and book/tag listings so an agent can narrow a
- * search to specific books. All read-only; nothing here starts indexing or changes the library.
+ * search to specific books. All read-only; nothing here starts indexing or changes the library. Each needs the
+ * `library:read` scope and sees only the libraries the API key (and its owner) can.
  */
 @Component
 class LibraryTools(
@@ -31,6 +34,7 @@ class LibraryTools(
     private val ingest: IngestService,
     private val props: RaggedlibProperties,
     private val libraries: LibraryRegistry,
+    private val access: Access,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -125,7 +129,8 @@ Use list_books or list_tags first to restrict a search to particular books or ta
         correctSpelling: Boolean?,
     ): SearchResult {
         log.info("MCP search_library: '{}'", query.take(200))
-        val response = search.search(SearchRequest(query, topK, bookIds, tags, libraryIds, rerank, correctSpelling, publishers))
+        access.requireScope(ApiScope.LIBRARY_READ)
+        val response = search.search(SearchRequest(query, topK, bookIds, tags, libraryIds, rerank, correctSpelling, publishers), access.libraries())
         val found = response.results.map(::passage)
         // MCP clients cap tool output (Claude Code: ~25K tokens); keep whole passages up to a character budget
         var used = 0
@@ -171,11 +176,12 @@ excerpts; use search_library to read passages in full, or to synthesise an answe
         @McpToolParam(description = "Correct misspelled words for retrieval (default true); false retrieves for the question exactly as written.", required = false)
         correctSpelling: Boolean?,
     ): AnswerResult {
+        access.requireScope(ApiScope.LIBRARY_READ)
         require(question.isNotBlank()) { "question must not be empty" }
         log.info("MCP ask_library: '{}'", question.take(200))
         val req = ChatRequest(query = question, topK = topK, bookIds = bookIds, tags = tags, libraryIds = libraryIds, model = model, correct = correctSpelling, publishers = publishers)
         val a = try {
-            chat.answer(req, props.mcp.answerTimeout)
+            chat.answer(req, props.mcp.answerTimeout, access.libraries())
         } catch (e: Exception) {
             val notFound = generateSequence<Throwable>(e) { it.cause }
                 .any { it is WebClientResponseException && it.statusCode.value() == 404 }
@@ -219,7 +225,9 @@ the same text as another (duplicateOf), which is searched in its place.""",
             BookStatus.entries.firstOrNull { it.name.equals(s.trim(), ignoreCase = true) }
                 ?: throw IllegalArgumentException("unknown status '$s'; use one of ${BookStatus.entries.joinToString()}")
         }
-        val p = books.search(query, st, tag, (page ?: 0).coerceAtLeast(0), (size ?: 25).coerceIn(1, 100), "title", libraryId, publisher)
+        access.requireScope(ApiScope.LIBRARY_READ)
+        val scope = if (libraryId != null) setOf(access.requireLibrary(libraryId).id) else access.libraries()
+        val p = books.search(query, st, tag, (page ?: 0).coerceAtLeast(0), (size ?: 25).coerceIn(1, 100), "title", scope, publisher)
         val names = libraries.all.associate { it.id to it.name }
         return BookList(p.total, p.page, p.size, p.items.map { b ->
             BookInfo(b.id, b.libraryId, names[b.libraryId] ?: "?", b.title, b.authors, b.tags, b.publisher, b.languages,
@@ -235,9 +243,11 @@ the same text as another (duplicateOf), which is searched in its place.""",
     )
     fun listLibraries(): List<LibraryInfo> {
         // libraries.all first: it backfills pre-existing books' library_id on first access, which the count must see
+        access.requireScope(ApiScope.LIBRARY_READ)
         val infos = libraries.all
+        val visible = access.libraries()
         val counts = books.countsByLibrary()
-        return infos.map { LibraryInfo(it.id, it.name, counts[it.id] ?: 0) }
+        return infos.filter { it.id in visible }.map { LibraryInfo(it.id, it.name, counts[it.id] ?: 0) }
     }
 
     @McpTool(
@@ -249,7 +259,10 @@ the same text as another (duplicateOf), which is searched in its place.""",
     fun listTags(
         @McpToolParam(description = "Maximum number of tags (most used first; default 100, max 5000).", required = false)
         limit: Int?,
-    ): List<TagInfo> = books.tags().take((limit ?: 100).coerceIn(1, 5000)).map { TagInfo(it.name, it.count) }
+    ): List<TagInfo> {
+        access.requireScope(ApiScope.LIBRARY_READ)
+        return books.tags(access.libraries()).take((limit ?: 100).coerceIn(1, 5000)).map { TagInfo(it.name, it.count) }
+    }
 
     @McpTool(
         name = "library_status",
@@ -258,7 +271,8 @@ the same text as another (duplicateOf), which is searched in its place.""",
         annotations = McpAnnotations(title = "Library status", readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false),
     )
     fun libraryStatus(): LibraryStatus {
-        val s = ingest.status()
+        access.requireScope(ApiScope.LIBRARY_READ)
+        val s = ingest.status(access.libraries())
         val indexed = s.counts[BookStatus.INDEXED] ?: 0
         val duplicates = s.counts[BookStatus.DUPLICATE] ?: 0
         return LibraryStatus(s.totalBooks, s.counts, s.totalChunks, s.running,

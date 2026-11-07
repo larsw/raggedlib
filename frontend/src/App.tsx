@@ -2,12 +2,15 @@ import { BlueprintProvider } from "@blueprintjs/core";
 import { lazy, Suspense, useCallback, useState } from "react";
 import { AppProvider } from "./AppContext";
 import { AppNavbar } from "./components/AppNavbar";
-import { TABS, useHashTab, type TabId } from "./hooks/useHashTab";
-import { useTheme } from "./hooks/useTheme";
+import { AuthGate, type SignedIn } from "./components/auth/AuthGate";
+import { NoLibraryAccess } from "./components/auth/NoLibraryAccess";
+import { TABS, tabsFor, useHashTab, type TabId } from "./hooks/useHashTab";
+import { useTheme, type Theme } from "./hooks/useTheme";
 import type { ReaderRequest } from "./lib/reader";
 import { AskView } from "./views/AskView";
 import { IndexingView } from "./views/IndexingView";
 import { LibraryView } from "./views/LibraryView";
+import { ListsView } from "./views/ListsView";
 import { SearchView } from "./views/SearchView";
 import { VectorSpaceView } from "./views/VectorSpaceView";
 
@@ -15,8 +18,23 @@ import { VectorSpaceView } from "./views/VectorSpaceView";
 const ReaderDrawer = lazy(() => import("./components/reader/ReaderDrawer"));
 
 export function App() {
-  const [tab, setTab] = useHashTab();
   const [theme, toggleTheme] = useTheme();
+  return (
+    <BlueprintProvider>
+      <AuthGate theme={theme} onToggleTheme={toggleTheme}>
+        {(auth) => <SignedInApp auth={auth} theme={theme} onToggleTheme={toggleTheme} />}
+      </AuthGate>
+    </BlueprintProvider>
+  );
+}
+
+function SignedInApp({ auth, theme, onToggleTheme }: { auth: SignedIn; theme: Theme; onToggleTheme: () => void }) {
+  const { me } = auth;
+  const [hashTab, setTab] = useHashTab();
+  const noAccess = me.libraries.length === 0;
+  const tabs = noAccess ? [] : tabsFor(me.canCurate);
+  // a tab this user doesn't get (e.g. #/indexing for a viewer) falls back to Ask
+  const tab: TabId = tabs.includes(hashTab) ? hashTab : "ask";
   // Views mount on first visit and then stay mounted (hidden), so a streaming answer,
   // search results and library filters survive tab switches.
   const [visited, setVisited] = useState<Set<TabId>>(() => new Set([tab]));
@@ -36,6 +54,8 @@ export function App() {
         return <SearchView />;
       case "library":
         return <LibraryView active={active} />;
+      case "lists":
+        return <ListsView active={active} />;
       case "vectors":
         return <VectorSpaceView active={active} />;
       case "indexing":
@@ -44,24 +64,26 @@ export function App() {
   };
 
   return (
-    <BlueprintProvider>
-      <AppProvider navigate={setTab} openReader={openReader}>
-        <div className="app">
-          <AppNavbar tab={tab} onTabChange={setTab} theme={theme} onToggleTheme={toggleTheme} />
-          <main className="app-main">
-            {TABS.filter((id) => visited.has(id)).map((id) => (
+    <AppProvider me={me} refreshMe={auth.refreshMe} signOut={auth.signOut} navigate={setTab} openReader={openReader}>
+      <div className="app">
+        <AppNavbar tab={tab} tabs={tabs} onTabChange={setTab} theme={theme} onToggleTheme={onToggleTheme} />
+        <main className="app-main">
+          {noAccess ? (
+            <NoLibraryAccess />
+          ) : (
+            TABS.filter((id) => visited.has(id) && tabs.includes(id)).map((id) => (
               <div key={id} className="view" hidden={id !== tab} role="tabpanel" aria-label={id}>
                 {render(id)}
               </div>
-            ))}
-          </main>
-        </div>
-        {reader && (
-          <Suspense fallback={null}>
-            <ReaderDrawer request={reader.request} isOpen={reader.open} theme={theme} onClose={closeReader} />
-          </Suspense>
-        )}
-      </AppProvider>
-    </BlueprintProvider>
+            ))
+          )}
+        </main>
+      </div>
+      {reader && (
+        <Suspense fallback={null}>
+          <ReaderDrawer request={reader.request} isOpen={reader.open} theme={theme} onClose={closeReader} />
+        </Suspense>
+      )}
+    </AppProvider>
   );
 }

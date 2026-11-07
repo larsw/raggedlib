@@ -6,10 +6,22 @@ server:
   port: 8080
   compression:
     enabled: false   # never buffer/compress the chat SSE stream
+  # The web UI's server proxies /api (sign-in included) and says where the browser is through X-Forwarded-*: the
+  # OIDC redirect URI must be on its origin. Tomcat trusts these headers from private addresses only.
+  forward-headers-strategy: native
+  servlet:
+    session:
+      timeout: 12h
+      cookie:
+        same-site: lax
+        http-only: true
 
 spring:
   application:
     name: raggedlib
+  profiles:
+    group:
+      dex: oidc                    # the bundled development dex is an OIDC provider (application-dex.yml)
   threads:
     virtual:
       enabled: true
@@ -54,10 +66,12 @@ spring:
         streamable-http:
           mcp-endpoint: /mcp
         instructions: >-
-          Tools over the user's personal ebook library (mostly technical books, indexed from Calibre).
+          Tools over the user's ebook libraries (mostly technical books, indexed from Calibre).
           search_library finds relevant passages fast (no LLM); ask_library writes a cited answer with a local LLM
           (slow, 20-90 s). Cite passages by book title and page/section. list_books / list_tags give ids and tags to
-          narrow a search; library_status tells how much of the library is indexed.
+          narrow a search; library_status tells how much of the library is indexed. With a personal API key that
+          has the scopes, the user's favorite lists and book reviews are available too (list_favorite_lists,
+          get_book_reviews, ...).
     retry:
       max-attempts: 3
 
@@ -130,8 +144,22 @@ raggedlib:
     fallback-common-term-frequency: 0.05
     fallback-max-terms: 12
     term-stats-ttl-seconds: 600
-  # MCP endpoint (/mcp) for agent harnesses: each client sends one of these keys as
-  # "Authorization: Bearer <key>" or "X-API-Key: <key>". No keys = every MCP request refused.
+  # Sign-in and roles.
+  auth:
+    # oidc: users sign in through an OpenID Connect provider, configured by profile `oidc` (application-oidc.yml) or
+    # `dex`, which set this to oidc. single-user: no sign-in; every request without an API key is the built-in local
+    # admin, and an OIDC client configured anyway is ignored. Env RAGGEDLIB_AUTH_MODE (docker-compose: AUTH_MODE).
+    mode: single-user
+    groups-claim: groups           # claim with the user's groups (string or list), for group-roles
+    admin-claim: ""                # claim that makes a global admin; blank = groups-claim
+    admin-values: []               # e.g. [administrators]; env RAGGEDLIB_AUTH_ADMIN_VALUES=administrators
+    default-library-role: none     # none | viewer | curator: what every signed-in user has in every library
+    # IdP groups to library roles; library = name, id or "*". Env: RAGGEDLIB_AUTH_GROUP_ROLES_0_GROUP=readers
+    # RAGGEDLIB_AUTH_GROUP_ROLES_0_ROLE=viewer RAGGEDLIB_AUTH_GROUP_ROLES_0_LIBRARY=*
+    group-roles: []
+  # MCP endpoint (/mcp) for agent harnesses: each client sends an API key as "Authorization: Bearer <key>" or
+  # "X-API-Key: <key>". Users mint personal keys in the web UI, admins system-wide ones; these configured keys are
+  # system-wide keys with the library:read scope.
   # Env: RAGGEDLIB_MCP_API_KEYS_0_NAME=claude-code RAGGEDLIB_MCP_API_KEYS_0_KEY=<secret or sha256:<hex>>
   mcp:
     api-keys: []

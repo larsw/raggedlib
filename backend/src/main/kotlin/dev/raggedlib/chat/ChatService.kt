@@ -80,8 +80,8 @@ class ChatService(
      * Best passages for the question, cut to the model's excerpt budget ([RaggedlibProperties.Chat.maxContextChars]);
      * the response also says whether the search query was spell-corrected.
      */
-    fun retrieve(req: ChatRequest, query: String): SearchResponse {
-        val found = search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.libraryIds, req.rerank, req.correct, req.publishers))
+    fun retrieve(req: ChatRequest, query: String, allowedLibraries: Collection<Long>): SearchResponse {
+        val found = search.search(SearchRequest(query, req.topK, req.bookIds, req.tags, req.libraryIds, req.rerank, req.correct, req.publishers), allowedLibraries)
         return found.copy(results = withinBudget(found.results, props.chat.maxContextChars))
     }
 
@@ -115,10 +115,10 @@ class ChatService(
      * Retrieval + the whole answer, blocking. [timeout] covers both; when it runs out, generation is stopped (which
      * cancels the Ollama request) and the answer is returned as far as it got, marked as cut off.
      */
-    fun answer(req: ChatRequest, timeout: Duration): ChatAnswer {
+    fun answer(req: ChatRequest, timeout: Duration, allowedLibraries: Collection<Long>): ChatAnswer {
         val started = System.nanoTime()
         val query = standaloneQuery(req)
-        val found = retrieve(req, query)
+        val found = retrieve(req, query, allowedLibraries)
         val sources = found.results
         val left = timeout.minusNanos(System.nanoTime() - started).coerceAtLeast(Duration.ofSeconds(1))
         val cut = AtomicBoolean(false)

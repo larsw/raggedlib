@@ -1,7 +1,8 @@
 package dev.raggedlib.vectors
 
 import dev.raggedlib.config.badRequest
-import dev.raggedlib.library.LibraryRegistry
+import dev.raggedlib.auth.Access
+import dev.raggedlib.auth.LibraryRole
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.RequestMapping
@@ -10,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController
 
 @RestController
 @RequestMapping("/api")
-class VectorSpaceController(private val service: VectorSpaceService, private val libraries: LibraryRegistry) {
+class VectorSpaceController(private val service: VectorSpaceService, private val access: Access) {
     @GetMapping("/vectors")
     fun vectors(
         @RequestParam libraryId: Long,
@@ -28,7 +29,7 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         if (size !in 1..VectorSpaceService.MAX_SIZE) badRequest("size must be between 1 and ${VectorSpaceService.MAX_SIZE}")
         if (dims !in 2..3) badRequest("dims must be 2 or 3")
         // one library at a time; byId 404s an unknown one, and (first use) backfills pre-multi-library books' library_id
-        libraries.byId(libraryId)
+        access.requireLibrary(libraryId)
         return service.space(libraryId, LayoutSpec(l, m, size, dims), seed)
     }
 
@@ -46,7 +47,7 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         val sp = runCatching { ClusterSpace.valueOf(space.uppercase()) }
             .getOrElse { badRequest("space must be raw or umap") }
         if (size !in 1..VectorSpaceService.MAX_SIZE) badRequest("size must be between 1 and ${VectorSpaceService.MAX_SIZE}")
-        libraries.byId(libraryId)
+        access.requireLibrary(libraryId)
         return service.topics(libraryId, TopicSpec(l, size, sp), seed)
     }
 
@@ -56,9 +57,10 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
      */
     @PostMapping("/vectors/book-vectors")
     fun computeBookVectors(@RequestParam(required = false) libraryId: Long?): BookVectorsResult {
-        libraryId?.let(libraries::byId)
-        val computed = service.computeBookVectors(libraryId)
-        return BookVectorsResult(computed, service.missingBookVectors(libraryId))
+        val ids = if (libraryId != null) listOf(access.requireLibrary(libraryId, LibraryRole.CURATOR).id)
+        else access.libraries(LibraryRole.CURATOR).toList()
+        val computed = ids.sumOf { service.computeBookVectors(it) }
+        return BookVectorsResult(computed, ids.sumOf { service.missingBookVectors(it) })
     }
 }
 

@@ -48,9 +48,17 @@ export function SystemStatus() {
                   : `UNREACHABLE (${system.rerankerUrl})`
             }
           />
-          {system.libraries.map((l) => (
-            <Row key={l.path} label={system.libraries.length > 1 ? `Library: ${l.name}` : "Library"} value={l.path} />
-          ))}
+          {system.libraries.some((l) => l.path != null) ? (
+            system.libraries.map((l) => (
+              <Row key={l.name} label={system.libraries.length > 1 ? `Library: ${l.name}` : "Library"} value={l.path ?? "—"} />
+            ))
+          ) : (
+            // where libraries are on disk is for admins
+            <Row
+              label={system.libraries.length === 1 ? "Library" : "Libraries"}
+              value={system.libraries.map((l) => l.name).join(", ") || "—"}
+            />
+          )}
         </tbody>
       </table>
     );

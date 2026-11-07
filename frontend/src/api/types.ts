@@ -115,15 +115,17 @@ export interface IngestStatus {
   recentErrors: { bookId: number; libraryId: number; title: string; error: string; at: string }[]; // newest first, max 50
 }
 
+/** GET /api/libraries: the libraries the caller can see. */
 export interface Library {
   id: number;
   name: string;
-  path: string;
+  path: string | null; // where it is on disk; shown to global admins only
   bookCount: number;
+  role: LibraryRole; // the caller's role in it (at least VIEWER)
 }
 
 export interface SystemInfo {
-  libraries: { name: string; path: string }[];
+  libraries: { name: string; path: string | null }[]; // the caller's libraries; path for global admins only
   ollamaUrl: string;
   ollamaReachable: boolean;
   chatModel: string;
@@ -263,4 +265,188 @@ export interface TopicSpace {
   /** point id (matches VectorPoint.id for the same library/level/size/seed) -> topic id, or -1 for noise */
   pointTopics: Record<string, number>;
   cached: boolean;
+}
+
+// ---- users, roles and API keys ------------------------------------------------------------------------------
+
+/**
+ * A user's role in one library, least to most; each includes the ones before it. VIEWER: browse, search, ask, read,
+ * review and list books. CURATOR: also sync the library, (re)index its books and remove others' reviews of them.
+ * ADMIN: also grant and revoke roles in the library. A global admin is ADMIN everywhere.
+ */
+export type LibraryRole = "NONE" | "VIEWER" | "CURATOR" | "ADMIN";
+
+/** Roles that can be granted (PUT /api/libraries/{id}/members/{userId}); revoking is a DELETE. */
+export type GrantableRole = "viewer" | "curator" | "admin";
+
+/** `oidc`: sign-in through the identity provider. `single-user`: none configured, everyone is the local admin. */
+export type AuthMode = "oidc" | "single-user";
+
+export type ApiScope =
+  | "library:read"
+  | "library:curate"
+  | "favorites:read"
+  | "favorites:write"
+  | "reviews:read"
+  | "reviews:write";
+
+/** GET /api/me (401 with `loginUrl` when signed out). */
+export interface Me {
+  id: number | null; // null for a system-wide API key
+  displayName: string;
+  email: string | null;
+  admin: boolean; // global admin
+  authMode: AuthMode;
+  viaApiKey: boolean;
+  scopes: ApiScope[];
+  libraries: { id: number; name: string; role: LibraryRole }[]; // the libraries the caller can see
+  canCurate: boolean; // curator (or more) in at least one library
+  canManageMembers: boolean; // library admin in at least one library (or a global admin)
+}
+
+/** The body of a 401 from the web API. */
+export interface UnauthorizedBody {
+  error: string;
+  loginUrl?: string; // e.g. /api/auth/login/oidc; navigate the browser there to sign in
+}
+
+/** GET /api/me/api-keys/scopes */
+export interface ScopeInfo {
+  scope: ApiScope;
+  description: string;
+  perUser: boolean; // acts on the owner's own data: not for system-wide keys
+}
+
+/** An API key as listed; never the key itself. */
+export interface ApiKey {
+  id: string; // UUID
+  name: string;
+  keyPrefix: string; // the key's first characters, e.g. "rlk_AbCd"
+  scopes: ApiScope[];
+  libraryIds: number[] | null; // null = every library the owner can see
+  system: boolean; // system-wide (no owner)
+  createdBy: string | null;
+  createdAt: string;
+  lastUsedAt: string | null;
+  expiresAt: string | null;
+}
+
+/** POST /api/me/api-keys and POST /api/admin/api-keys */
+export interface ApiKeyRequest {
+  name: string;
+  scopes: ApiScope[];
+  libraryIds?: number[]; // omit for every library
+  expiresAt?: string | null; // ISO instant; omitted/null = never
+}
+
+/** 201 response to creating a key: the only time `rawKey` is shown. */
+export interface CreatedApiKey {
+  apiKey: ApiKey;
+  rawKey: string; // rlk_…
+}
+
+/** GET /api/admin/users: everyone who has signed in. */
+export interface User {
+  id: number;
+  displayName: string;
+  email: string | null;
+  groups: string[];
+  admin: boolean; // global admin, through the claim or granted in the app
+  adminFromClaim: boolean;
+  adminGranted: boolean;
+  disabled: boolean;
+  createdAt: string;
+  lastLoginAt: string | null;
+  granted: Record<string, LibraryRole>; // library id -> role granted in the app
+  roles: Record<string, LibraryRole>; // library id -> effective role (grants, groups, default, admin)
+}
+
+/** PUT /api/admin/users/{id} (you can't disable or demote yourself: 400) */
+export interface UserUpdate {
+  adminGranted?: boolean;
+  disabled?: boolean;
+}
+
+/** GET /api/libraries/{libraryId}/members: every user, with their role in that library. */
+export interface Member {
+  userId: number;
+  displayName: string;
+  email: string | null;
+  granted: LibraryRole | null; // granted in the app for this library
+  role: LibraryRole; // effective
+  admin: boolean; // global admin
+  disabled: boolean;
+}
+
+// ---- favorite lists -----------------------------------------------------------------------------------------
+
+export interface FavoriteList {
+  id: number;
+  name: string;
+  description: string | null;
+  shared: boolean; // visible (read-only) to every signed-in user
+  ownerId: number;
+  ownerName: string;
+  mine: boolean; // the caller owns it, and may change it
+  bookCount: number; // books the caller can see
+  createdAt: string;
+  updatedAt: string;
+  containsBook: boolean | null; // with GET /api/lists?bookId=: whether that book is on the list
+}
+
+/** GET /api/lists[?bookId=] */
+export interface FavoriteLists {
+  mine: FavoriteList[];
+  shared: FavoriteList[]; // others' shared lists
+}
+
+export interface FavoriteListEntry {
+  book: Book;
+  note: string | null;
+  addedAt: string;
+}
+
+/** GET /api/lists/{id} */
+export interface FavoriteListDetails {
+  list: FavoriteList;
+  books: FavoriteListEntry[]; // newest first; books of libraries the caller can't see are left out
+}
+
+/** POST /api/lists, PUT /api/lists/{id} (fields left out stay as they are) */
+export interface FavoriteListRequest {
+  name?: string;
+  description?: string;
+  shared?: boolean;
+}
+
+// ---- reviews ------------------------------------------------------------------------------------------------
+
+export interface Review {
+  id: number;
+  bookId: number;
+  bookTitle: string;
+  userId: number;
+  author: string;
+  rating: number | null; // 1-5, or null for a review without one
+  body: string;
+  createdAt: string;
+  updatedAt: string;
+  mine: boolean;
+}
+
+/** GET /api/books/{id}/reviews */
+export interface BookReviews {
+  bookId: number;
+  count: number;
+  averageRating: number | null; // over the reviews that have a rating
+  ratings: number;
+  reviews: Review[]; // newest first, the caller's own included
+  mine: Review | null;
+  canModerate: boolean; // may remove others' reviews (curator of the book's library)
+}
+
+/** PUT /api/books/{id}/reviews/mine: replaces the caller's review; a rating, a text, or both. */
+export interface ReviewRequest {
+  rating: number | null;
+  body: string;
 }

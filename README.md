@@ -15,8 +15,12 @@ Ask questions about your Calibre ebook library. The answers cite the passages th
 
 ```bash
 docker compose up -d --build        # first run pulls ~7 GB of models
-open http://localhost:3000          # Indexing tab → Start
+open http://localhost:3000          # sign in as admin@raggedlib.dev / admin, then Indexing tab → Start
 ```
+
+Sign-in goes through a development OpenID Connect provider, [dex](https://dexidp.io), that the stack brings along
+(see [Users and roles](#users-and-roles) for its users and for using your own provider instead). For just yourself,
+put `AUTH_MODE=single-user` in `.env`: no sign-in, as before raggedlib had users.
 
 The library is mounted **read-only** from `~/Documents/CalibreLibrary`. Set `CALIBRE_LIBRARY` to use another path, and `CHAT_MODEL` or `EMBED_MODEL` to swap models (see `.env.example`). Changing the embedding model also means changing `vector(1024)` in the migration and re-indexing. Scanned PDFs are OCR'd in English; set `OCR_LANGUAGES` to read others too, e.g. `OCR_LANGUAGES=eng+nor+deu` (Tesseract's language codes), and rebuild the backend, which installs them.
 
@@ -36,16 +40,92 @@ setting keeps its books when you add more libraries, as long as its path doesn't
 ### Develop on the host
 
 ```bash
-docker compose up -d postgres ollama models reranker
-(cd backend && mvn spring-boot:run)          # :8080
-(cd frontend && bun install && bun run dev)  # :3000 with HMR
+docker compose up -d postgres ollama models reranker dex
+(cd backend && mvn spring-boot:run -Dspring-boot.run.profiles=dex)   # :8080; no profile: single-user mode, no sign-in
+(cd frontend && bun install && bun run dev)                          # :3000 with HMR; sign in here
 ```
 
 The host backend and the containerized backend can share the same database, because file paths are stored relative to the library root. Stop the `backend` and `frontend` containers first, or they will occupy the ports.
 
+`mvn test` includes an integration test (`AuthIntegrationTest`) that signs in through dex and exercises roles, lists,
+reviews and API keys over HTTP and MCP; it starts Postgres and dex with Testcontainers, and is skipped without Docker.
+
+## Users and roles
+
+Users sign in with OpenID Connect (Spring Security's OAuth2 login). The web UI's server proxies `/api` and `/mcp`, so
+the whole sign-in happens on its origin, and the provider redirects back to `<web UI>/api/auth/callback/oidc`.
+
+Every user has a role per library, and sees only the libraries where it has one:
+
+| Role | May |
+|---|---|
+| Viewer | browse, search, ask and read the library's books; review them and put them on favorite lists |
+| Curator | also sync the library, index and re-index its books, and remove other users' reviews of them |
+| Library admin | also grant and revoke roles in the library (Administration → Library members) |
+| Global admin | everything, in every library: users, server settings, system-wide API keys |
+
+A user's role in a library is the highest of: one granted in the app, one mapped from a group in the identity
+provider (`raggedlib.auth.group-roles`), and the default for everyone (`raggedlib.auth.default-library-role`, `none`
+unless set). Global admins are the users whose groups claim holds one of `raggedlib.auth.admin-values`
+(`AUTH_ADMIN_GROUPS` in docker-compose), plus those another admin promoted in the app. Without groups, match on
+another claim: `RAGGEDLIB_AUTH_ADMIN_CLAIM=email RAGGEDLIB_AUTH_ADMIN_VALUES=me@example.com`. Admins can also disable
+users: their sessions and API keys stop working at once.
+
+Every user keeps **favorite lists** of books (private, or shared read-only with every signed-in user) and can write a
+**review** of any book they can see: a 1–5 rating, a text, or both. Lists and reviews are on the Lists tab and in a
+book's details.
+
+**The bundled dex** (`infra/dex/config.yaml`, adapted from onto-workbench) has five users; the password is the part
+before the `@`. Their groups map to roles in the `dex` profile (`application-dex.yml`):
+
+| User | Groups | Role |
+|---|---|---|
+| `admin@raggedlib.dev` | `administrators` | global admin |
+| `librarian@raggedlib.dev` | `librarians` | library admin of every library |
+| `curator@raggedlib.dev` | `curators` | curator of every library |
+| `reader@raggedlib.dev` | `readers` | viewer of every library |
+| `user@raggedlib.dev` | none | nothing, until someone grants a role |
+
+Its issuer is `http://dex.localhost:5556/dex`: browsers resolve `*.localhost` to the loopback address, and inside the
+compose network `dex.localhost` is the dex container's alias, so the browser and the backend (in its container or on
+the host) reach dex at the same URL, as OIDC requires.
+
+**Your own provider** (Keycloak, Authentik, Entra ID, …): register a confidential client with the redirect URI
+`http://localhost:3000/api/auth/callback/oidc` (your web UI's origin), then in `.env`:
+
+```bash
+SPRING_PROFILES_ACTIVE=oidc
+OIDC_ISSUER_URI=https://idp.example.com/realms/home
+OIDC_CLIENT_ID=raggedlib
+OIDC_CLIENT_SECRET=...
+OIDC_SCOPES=openid,profile,email,groups    # whatever puts the groups claim in the ID token
+AUTH_ADMIN_GROUPS=raggedlib-admins
+```
+
+and map groups to roles with `RAGGEDLIB_AUTH_GROUP_ROLES_0_GROUP=readers RAGGEDLIB_AUTH_GROUP_ROLES_0_ROLE=viewer
+RAGGEDLIB_AUTH_GROUP_ROLES_0_LIBRARY=*` (a library name or id instead of `*` for one library), and so on at index 1, 2,
+… in the backend's environment. The backend discovers the provider at startup, so it must be reachable then.
+
+**Single-user mode** is a switch, `raggedlib.auth.mode`: `oidc` (users sign in) or `single-user` (no sign-in: every
+request without an API key is a built-in local admin, as before multi-user support). In docker-compose it's
+`AUTH_MODE` in `.env`:
+
+```bash
+AUTH_MODE=single-user      # in .env; then: docker compose up -d backend
+```
+
+`single-user` wins over everything else: a configured provider (such as the `dex` profile the compose file activates)
+is ignored and not even contacted, so dex can be stopped (`docker compose stop dex`). Everything else still works as
+the local user: favorite lists, reviews, API keys (personal and system-wide, with their scopes), and MCP, which still
+takes API keys only. The backend logs a warning at startup; keep its ports on localhost. The mode defaults to
+`single-user` without a profile (`mvn spring-boot:run`) and to `oidc` with the `oidc` or `dex` profile; with
+`oidc` and no provider configured, the backend refuses to start rather than fall back to letting everyone in.
+
 ## Use it from agents (MCP)
 
-The backend serves an [MCP](https://modelcontextprotocol.io) endpoint at `http://localhost:8090/mcp` (streamable HTTP, stateless) with five read-only tools:
+The backend serves an [MCP](https://modelcontextprotocol.io) endpoint (streamable HTTP, stateless) at
+`http://localhost:3000/mcp`, through the web UI's server, or directly at `http://localhost:8090/mcp`. Six read-only
+tools search the libraries; with a personal key, more tools reach the key owner's favorite lists and reviews.
 
 | Tool | What it does |
 |---|---|
@@ -55,23 +135,38 @@ The backend serves an [MCP](https://modelcontextprotocol.io) endpoint at `http:/
 | `list_tags` | Calibre tags by number of books |
 | `list_libraries` | The configured libraries, with how many books each has, to get ids for `libraryIds` |
 | `library_status` | How many books are indexed and searchable |
+| `list_favorite_lists`, `get_favorite_list` | The user's favorite lists and the ones others share, and a list's books (`favorites:read`) |
+| `create_favorite_list`, `add_to_favorite_list`, `remove_from_favorite_list` | Keep the user's lists (`favorites:write`) |
+| `get_book_reviews`, `list_my_reviews` | A book's reviews with the average rating; the user's own reviews (`reviews:read`) |
+| `write_book_review` | The user's review of a book: a rating 1–5 and/or a text (`reviews:write`) |
 
-Every MCP request needs an API key, sent as `Authorization: Bearer <key>` or `X-API-Key: <key>`. With no key configured, the endpoint refuses everything. The rest of the API (`/api`, used by the web UI) doesn't need a key; like the UI, it's published on localhost only.
+Every MCP request needs an API key, sent as `Authorization: Bearer <key>` or `X-API-Key: <key>`:
+
+- **Personal keys** (as in onto-workbench): each user mints their own in the web UI, under their name in the navbar →
+  *API keys*, choosing the scopes (`library:read`, `library:curate`, `favorites:read|write`, `reviews:read|write`),
+  optionally a subset of their libraries, and an expiry. The key is shown once; only its hash is stored. It acts as
+  the user, never with more than the user's own roles, and `tools/list` shows only the tools its scopes allow.
+  Revoking it takes effect at once.
+- **System-wide keys**: admins create them under *Administration → System API keys*, for clients that aren't any one
+  user (a team chatbot, a CI job). They have library scopes only, optionally for some libraries, and never see the
+  per-user tools.
+- **Configured keys**: `raggedlib.mcp.api-keys` (`MCP_API_KEY` in docker-compose) still works, as a system-wide key
+  with `library:read` on every library.
 
 ```bash
-KEY=$(openssl rand -hex 32)
-touch .env && sed -i '/^MCP_API_KEY=/d' .env && echo "MCP_API_KEY=$KEY" >> .env   # docker compose reads .env
-docker compose up -d --build backend
-claude mcp add --transport http raggedlib http://localhost:8090/mcp --header "Authorization: Bearer $KEY"
+claude mcp add --transport http raggedlib http://localhost:3000/mcp --header "Authorization: Bearer $RAGGEDLIB_MCP_KEY"
 ```
+
+The same keys work on the REST API (`/api`), within their scopes; managing keys, users and roles needs a browser
+session.
 
 `ask_library` runs for up to 150 s, and the stateless transport sends no progress updates meanwhile. Give it a tool timeout of at least 180 s: many clients default to 60 s. In Claude Code, set `MCP_TOOL_TIMEOUT=180000`.
 
-Other harnesses take the same URL and header, for example as JSON: `{"type": "http", "url": "http://localhost:8090/mcp", "headers": {"Authorization": "Bearer <key>"}}`.
+Other harnesses take the same URL and header, for example as JSON: `{"type": "http", "url": "http://localhost:3000/mcp", "headers": {"Authorization": "Bearer <key>"}}`.
 
 **Agent skill.** [`skills/raggedlib/`](skills/raggedlib/SKILL.md) is an [Agent Skill](https://agentskills.io) that tells an agent when to reach for these tools and how to use them well: `search_library` first, retrying with other words before concluding the books don't cover something, narrowing to books and tags, reading scores, and citing pages or sections. It also has setup notes for Claude Code, Codex and other harnesses, and `scripts/raggedlib_mcp.py`, which calls the tools over plain HTTP where no MCP client is connected (`RAGGEDLIB_MCP_KEY` holds the key). Install it by linking or copying the folder into the harness's skills directory (`~/.claude/skills/`, `~/.agents/skills/`, …), or with `npx skills add larsw/raggedlib`.
 
-Keys are configured in `raggedlib.mcp.api-keys`, as a list of `{name, key}`. The name only identifies the client in logs. A key can be stored as `sha256:<hex>` instead of in plain text; `printf %s "$KEY" | sha256sum` gives the hex. Clients still send the plain key. In docker-compose, `MCP_API_KEY` (and `MCP_API_KEY_NAME`) fill entry 0. For more keys, add `RAGGEDLIB_MCP_API_KEYS_1_NAME` / `RAGGEDLIB_MCP_API_KEYS_1_KEY` and so on to the backend's environment.
+Configured keys are a list of `{name, key}` in `raggedlib.mcp.api-keys`. The name only identifies the client in logs. A key can be stored as `sha256:<hex>` instead of in plain text; `printf %s "$KEY" | sha256sum` gives the hex. Clients still send the plain key. In docker-compose, `MCP_API_KEY` (and `MCP_API_KEY_NAME`) fill entry 0. For more keys, add `RAGGEDLIB_MCP_API_KEYS_1_NAME` / `RAGGEDLIB_MCP_API_KEYS_1_KEY` and so on to the backend's environment.
 
 ## How it works
 
@@ -89,8 +184,9 @@ Keys are configured in `raggedlib.mcp.api-keys`, as a list of `{name, key}`. The
 ## Layout
 
 ```
-backend/    Spring Boot app (dev.raggedlib.{calibre,extract,ingest,search,chat,library,system})
-frontend/   Bun server (server.ts: static, /api proxy, /vendor/foliate-js) and React app (src/{api,views,components,hooks,lib})
+backend/    Spring Boot app (dev.raggedlib.{calibre,extract,ingest,search,chat,library,system,auth,favorites,reviews,mcp})
+frontend/   Bun server (server.ts: static, /api and /mcp proxy, /vendor/foliate-js) and React app (src/{api,views,components,hooks,lib})
+infra/dex/  development OIDC provider (docker-compose, AuthIntegrationTest)
 docs/API.md HTTP contract
 skills/     Agent Skill for the MCP tools (skills/raggedlib/SKILL.md)
 ```
@@ -116,3 +212,6 @@ skills/     Agent Skill for the MCP tools (skills/raggedlib/SKILL.md)
 - Editing a book's title in Calibre re-embeds the whole book (the title is part of every passage's embedding input). Other metadata edits re-extract it but keep the embeddings of unchanged passages.
 - PDF sections come from a heuristic ("Chapter 3 …", "3.2 …" lines), so PDFs whose chapters are laid out differently get no section labels.
 - The reader can't open LIT, CHM or DJVU books; the drawer offers their files to download instead. A passage indexed from one of those formats is looked up in another format of the book, where its text can differ more.
+- Spelling correction learns its vocabulary from every library, so a correction can be a word that only occurs in a library the user can't see (the passages found are always from libraries they can).
+- Indexing is one queue for every library: a curator starts it for the books of their own libraries, but any curator can stop it.
+- Sessions live in the backend's memory: restarting it signs everyone out (API keys keep working). dex, as configured for development, keeps nothing either.

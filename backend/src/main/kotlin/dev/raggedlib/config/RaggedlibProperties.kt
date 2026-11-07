@@ -30,6 +30,7 @@ data class RaggedlibProperties(
     val rerank: Rerank = Rerank(),
     val mcp: Mcp = Mcp(),
     val ocr: Ocr = Ocr(),
+    val auth: Auth = Auth(),
 ) {
     /** One configured Calibre library. [name] is just a display label; blank defaults to the path's last segment. */
     data class LibraryConfig(val name: String = "", val path: Path = Path.of(""))
@@ -231,10 +232,12 @@ data class RaggedlibProperties(
     )
 
     /**
-     * MCP endpoint (`/mcp`, streamable HTTP) for agent harnesses. Every request needs one of [apiKeys], sent as
-     * `Authorization: Bearer <key>` or `X-API-Key: <key>`; with no keys configured, all MCP requests are refused.
+     * MCP endpoint (`/mcp`, streamable HTTP) for agent harnesses. Every request needs an API key, sent as
+     * `Authorization: Bearer <key>` or `X-API-Key: <key>`: one a user minted (Account → API keys), a system-wide one
+     * an admin created, or one of [apiKeys] from the configuration.
      */
     data class Mcp(
+        /** System-wide keys from the configuration, with the `library:read` scope on every library. */
         val apiKeys: List<ApiKey> = emptyList(),
         /**
          * Upper bound for one `ask_library` call (retrieval + generation); the answer is cut off there and returned
@@ -249,4 +252,32 @@ data class RaggedlibProperties(
      * needn't sit in the configuration. Entries with a blank key are ignored.
      */
     data class ApiKey(val name: String = "", val key: String = "")
+
+    /** Sign-in and roles. */
+    data class Auth(
+        /**
+         * `oidc`: users sign in through an OpenID Connect provider (configured by the `oidc` profile, see
+         * `application-oidc.yml`, which also sets this). `single-user`: no sign-in, every request without an API key
+         * is one built-in local admin (dev.raggedlib.auth.AuthMode).
+         */
+        val mode: String = "single-user",
+        /** Claim (ID token or userinfo) with the user's groups, for [groupRoles]; a string or a list of strings. */
+        val groupsClaim: String = "groups",
+        /** Claim that makes a user a global admin when it holds any of [adminValues]; blank = [groupsClaim]. */
+        val adminClaim: String = "",
+        /**
+         * Values of [adminClaim] that make a user a global admin (any one is enough; a list claim needs to contain
+         * one). Empty = no one is admin through the claim; admins can still promote users in the app.
+         */
+        val adminValues: List<String> = emptyList(),
+        /** Role every signed-in user has in every library, at least: none, viewer or curator. */
+        val defaultLibraryRole: String = "none",
+        /** Library roles granted to members of IdP groups, besides the ones granted in the app. */
+        val groupRoles: List<GroupRole> = emptyList(),
+        /** Where the browser goes after signing in or failing to (the web UI's root, through its /api proxy). */
+        val postLoginRedirect: String = "/",
+    )
+
+    /** Members of [group] have [role] in [library]: a library name or id, or `*` for every library. */
+    data class GroupRole(val group: String = "", val role: String = "viewer", val library: String = "*")
 }

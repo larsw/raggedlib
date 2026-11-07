@@ -18,6 +18,7 @@ import { ErrorState } from "../components/ErrorState";
 import { toastError, toastSuccess } from "../components/toaster";
 import { useAsync } from "../hooks/useAsync";
 import { useSidePanel } from "../hooks/useSidePanel";
+import { roleAtLeast } from "../lib/auth";
 import { formatNumber } from "../lib/format";
 import { STORAGE_KEYS } from "../lib/storage";
 
@@ -122,10 +123,12 @@ interface View {
 const IDENTITY: View = { scale: 1, offsetX: 0, offsetY: 0 };
 
 export function VectorSpaceView({ active }: { active: boolean }) {
-  const { library, libraries } = useApp();
+  const { library, libraries, roleIn } = useApp();
   // One library at a time: the navbar's choice, or — with "All libraries" chosen there — a pick of this view's own.
   const [ownLibraryId, setOwnLibraryId] = useState<number | null>(null);
   const libraryId = library?.id ?? libraries.find((l) => l.id === ownLibraryId)?.id ?? libraries[0]?.id;
+  // computing book vectors writes to the library's index: curators only
+  const canCompute = roleAtLeast(roleIn(libraryId), "CURATOR");
   const [level, setLevel] = useState<VectorLevel>("passages");
   const [method, setMethod] = useState<VectorMethod>("umap");
   const [size, setSize] = useState(1000);
@@ -305,7 +308,11 @@ export function VectorSpaceView({ active }: { active: boolean }) {
         <Callout compact intent={Intent.PRIMARY} icon="info-sign" className="vectors-missing">
           {formatNumber(data.missingBookVectors)} indexed {data.missingBookVectors === 1 ? "book has" : "books have"} no
           book vector yet, so {data.missingBookVectors === 1 ? "it isn't" : "they aren't"} plotted.{" "}
-          <Button size="small" intent={Intent.PRIMARY} text="Compute book vectors" loading={computing} onClick={computeBookVectors} />
+          {canCompute ? (
+            <Button size="small" intent={Intent.PRIMARY} text="Compute book vectors" loading={computing} onClick={computeBookVectors} />
+          ) : (
+            "A curator of the library can compute them."
+          )}
         </Callout>
       )}
 
@@ -318,9 +325,16 @@ export function VectorSpaceView({ active }: { active: boolean }) {
           <NonIdealState
             icon="scatter-plot"
             title="No book vectors yet"
-            description={`${formatNumber(data.missingBookVectors)} indexed books can get one: the average of their passages' embeddings, computed from what's already indexed (a few seconds, no re-indexing).`}
+            description={
+              `${formatNumber(data.missingBookVectors)} indexed books can get one: the average of their passages' embeddings, ` +
+              (canCompute
+                ? "computed from what's already indexed (a few seconds, no re-indexing)."
+                : "which a curator of the library can compute from what's already indexed.")
+            }
             action={
-              <Button intent={Intent.PRIMARY} icon="calculator" text="Compute book vectors" loading={computing} onClick={computeBookVectors} />
+              canCompute ? (
+                <Button intent={Intent.PRIMARY} icon="calculator" text="Compute book vectors" loading={computing} onClick={computeBookVectors} />
+              ) : undefined
             }
           />
         ) : (

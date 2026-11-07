@@ -1,0 +1,80 @@
+# dex: a local OpenID Connect provider for development, the docker-compose stack and integration tests
+# (image ghcr.io/dexidp/dex:v2.45.1; adapted from onto-workbench's infra/dex-config.yaml).
+#
+# Static users (password = the part before the @):
+#
+#   admin@raggedlib.dev     / admin      groups [administrators]  -> global admin
+#   librarian@raggedlib.dev / librarian  groups [librarians]      -> library admin of every library
+#   curator@raggedlib.dev   / curator    groups [curators]        -> curator of every library
+#   reader@raggedlib.dev    / reader     groups [readers]         -> viewer of every library
+#   user@raggedlib.dev      / user       no groups                -> no library until someone grants one
+#
+# The group -> role mapping is the backend's, not dex's: see application-dex.yml (profile `dex`).
+#
+# Issuer: http://dex.localhost:5556/dex. Browsers resolve any *.localhost name to the loopback address, where
+# docker-compose publishes dex's port; inside the compose network `dex.localhost` is a network alias of the dex
+# container. So the browser, the backend in its container and a backend on the host all reach dex at the same URL,
+# which the issuer has to be.
+#
+# Requires dex >= v2.45 — older releases ignored `groups:` on staticPasswords; v2.45 honors it and puts the
+# `groups` claim in the ID token when the `groups` scope is requested.
+#
+# A new password hash (any of these; dex accepts $2a$ / $2b$ / $2y$):
+#   htpasswd -Bnb dummy <password> | cut -d: -f2
+#   python3 -c "import bcrypt; print(bcrypt.hashpw(b'<password>', bcrypt.gensalt(10)).decode())"
+
+issuer: http://dex.localhost:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  responseTypes: ["code"]
+  skipApprovalScreen: true
+  alwaysShowLoginScreen: false
+
+staticClients:
+  - id: raggedlib
+    name: raggedlib (dev)
+    secret: raggedlib-dev-secret
+    redirectURIs:
+      # the web UI (docker-compose, or `bun run dev` on the host): it proxies /api to the backend
+      - http://localhost:3000/api/auth/callback/oidc
+      - http://127.0.0.1:3000/api/auth/callback/oidc
+      # the backend itself, on the host (8080) or published by docker-compose (8090)
+      - http://localhost:8080/api/auth/callback/oidc
+      - http://localhost:8090/api/auth/callback/oidc
+
+enablePasswordDB: true
+staticPasswords:
+  - email: admin@raggedlib.dev
+    hash: "$2b$10$bqVFiLq1QshvCNB7V8.fZuHq9Xc6S8q1feU/9nBgLNc5JjjPry9RS"
+    username: admin
+    userID: e9fef6aa-90bf-4a2e-bddd-5c2ba832d94a
+    groups:
+      - administrators
+  - email: librarian@raggedlib.dev
+    hash: "$2b$10$QWP2voH0nnS4ITPr3oDYeejPt28udtcax8ycGrzBImgdMC/V5rrQC"
+    username: librarian
+    userID: e545b85d-b882-4708-a052-f94795d7ba46
+    groups:
+      - librarians
+  - email: curator@raggedlib.dev
+    hash: "$2b$10$hX2FOlwAbtjmPmBqosc4COER8iKWlgoZRwy6FxmXWYKEXhToULuGK"
+    username: curator
+    userID: 8c87238f-a188-4af2-b7a7-213e5c3beddb
+    groups:
+      - curators
+  - email: reader@raggedlib.dev
+    hash: "$2b$10$Od2rivFlNLN8DBBeh5bhmOr3zYEwqydCJHp18TIS424HKO8vmgl7y"
+    username: reader
+    userID: b92be42b-c1fb-4f83-80fc-1edbb261f0d3
+    groups:
+      - readers
+  - email: user@raggedlib.dev
+    hash: "$2b$10$dAfb4KgtGp1WTkvg9jtwbuNrm4Tg7D2XBmgo1DD0Jf2MZycBA86Ta"
+    username: user
+    userID: 0c10365b-a610-4508-a41b-afbd18679b54

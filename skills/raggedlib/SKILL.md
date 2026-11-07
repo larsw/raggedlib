@@ -2,7 +2,8 @@
 name: raggedlib
 description: >-
   Search and cite the user's own ebook library (Calibre, indexed by raggedlib) through its MCP tools:
-  search_library, ask_library, list_books, list_tags, library_status. Use this skill whenever the user asks
+  search_library, ask_library, list_books, list_tags, library_status, plus their favorite lists and book
+  reviews. Use this skill whenever the user asks
   what their books, ebook library, Calibre library or "my library" say about something, wants passages, quotes
   or page references from books or documents they own, wants an answer grounded in (or checked against) their
   books, asks which of their books cover a topic, or asks what is indexed in raggedlib — even if they don't name
@@ -11,7 +12,7 @@ description: >-
 
 # raggedlib: the user's ebook library over MCP
 
-raggedlib indexes the user's Calibre library on their own machine and serves five **read-only** tools over MCP.
+raggedlib indexes Calibre libraries on the user's own server and serves **read-only** search tools over MCP.
 The library is mostly technical books, but can hold anything Calibre does: papers, documentation, legal
 documents, books in other languages, scans read by OCR. Use the tools to ground answers in what the user actually
 owns, with citations they can look up.
@@ -28,6 +29,13 @@ available at all, see "When the tools aren't connected" below.
 | `list_books` | Book ids by title/author substring, tag, publisher or status | instant |
 | `list_tags` | Calibre tags with book counts, most used first | instant |
 | `library_status` | How many books are indexed, whether indexing is running | instant |
+| `list_favorite_lists`, `get_favorite_list` | The user's favorite lists of books, and lists others share | instant |
+| `create_favorite_list`, `add_to_favorite_list`, `remove_from_favorite_list` | Keeping the user's lists | instant |
+| `get_book_reviews`, `list_my_reviews`, `write_book_review` | Book reviews (rating 1–5 and/or text) | instant |
+
+raggedlib is multi-user: the tools see only the libraries the API key's owner may see, and which tools exist
+depends on the key's scopes. The favorites and reviews tools act as the user; a system-wide key doesn't have them.
+Only change lists or write a review when the user asks for it, and write reviews in their words.
 
 ### search_library — start here
 
@@ -122,9 +130,10 @@ the passage text when it shows one.
 
 ## What the tools can't do
 
-They are read-only. They can't add books, start or stop indexing, re-index, or change metadata; the raggedlib web
-UI does that (by default http://localhost:3000, Indexing tab). Books the user owns but hasn't indexed, or whose
-indexing was skipped, aren't searchable.
+Apart from the user's favorite lists and reviews, they are read-only. They can't add books, start or stop indexing,
+re-index, or change metadata; the raggedlib web UI does that for curators (by default http://localhost:3000,
+Indexing tab). Books the user owns but hasn't indexed, or whose indexing was skipped, aren't searchable, and books
+in libraries the user has no role in don't exist for them.
 
 ## When the tools aren't connected
 
@@ -151,5 +160,5 @@ python3 $S --list        # tool names and descriptions
 ```
 
 Never print, echo or log the API key, and don't write it into files the user didn't ask for. If you need the key
-and it isn't set, ask the user for it (in the raggedlib repo it is `MCP_API_KEY` in `.env`; load it into the
-variable in the same command that uses it, without displaying it).
+and it isn't set, ask the user for it (they mint one in the web UI: their name in the navbar → API keys; load it
+into the variable in the same command that uses it, without displaying it).
