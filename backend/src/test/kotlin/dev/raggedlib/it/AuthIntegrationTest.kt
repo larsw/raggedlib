@@ -277,6 +277,19 @@ class AuthIntegrationTest {
         assertEquals(0, reader.get("/api/lists/$other").json.path("list").path("bookCount").asInt())
         val curatorList = as_("curator").post("/api/lists", mapOf("name" to "Curator's own")).json.path("id").asLong()
         assertTrue(reader.callTool("add_books_to_favorite_list", mapOf("listId" to curatorList, "bookIds" to listOf(alphaBook)), key).path("isError").asBoolean())
+
+        // or a new list that starts with the books, in the order given; an unknown book creates nothing
+        val created = reader.callTool("create_favorite_list", mapOf("name" to "Agent's reading", "bookIds" to listOf(betaBook, alphaBook)), key)
+        assertFalse(created.path("isError").asBoolean(), created.toString())
+        val newList = reader.get("/api/lists").json.path("mine").values().first { it.path("name").asString() == "Agent's reading" }
+        assertEquals(
+            listOf(betaBook, alphaBook),
+            reader.get("/api/lists/${newList.path("id").asLong()}").json.path("books").values().map { it.path("book").path("id").asLong() },
+        )
+        assertTrue(reader.callTool("create_favorite_list", mapOf("name" to "Agent's ghost", "bookIds" to listOf(987654L)), key).path("isError").asBoolean())
+        assertFalse(reader.get("/api/lists").json.path("mine").values().any { it.path("name").asString() == "Agent's ghost" })
+        // without books, as before
+        assertFalse(reader.callTool("create_favorite_list", mapOf("name" to "Agent's empty"), key).path("isError").asBoolean())
     }
 
     @Test

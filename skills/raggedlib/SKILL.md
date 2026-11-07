@@ -30,7 +30,7 @@ available at all, see "When the tools aren't connected" below.
 | `list_tags` | Calibre tags with book counts, most used first | instant |
 | `library_status` | How many books are indexed, whether indexing is running | instant |
 | `list_favorite_lists`, `get_favorite_list` | The user's favorite lists of books, and lists others share | instant |
-| `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` | Keeping the user's lists (`add_books_to_favorite_list`: a search's books in one call) | instant |
+| `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` | Keeping the user's lists (`create_favorite_list` with `bookIds`, or `add_books_to_favorite_list`: a search's books in one call) | instant |
 | `get_book_reviews`, `list_my_reviews`, `write_book_review` | Book reviews (rating 1–5 and/or text) | instant |
 
 raggedlib is multi-user: the tools see only the libraries the API key's owner may see, and which tools exist

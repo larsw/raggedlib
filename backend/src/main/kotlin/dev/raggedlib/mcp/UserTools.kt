@@ -60,16 +60,19 @@ share. Use get_favorite_list to see a list's books.""",
     @McpTool(
         name = "create_favorite_list",
         title = "Create a favorite list",
-        description = "Create a new favorite list for the user: private unless shared is true (then every signed-in user can read it).",
+        description = """Create a new favorite list for the user: private unless shared is true (then every signed-in user
+can read it). With bookIds (from search_library, ask_library's sources or list_books), the list starts with those books,
+the first shown first; if a book id is unknown, no list is created.""",
         annotations = McpAnnotations(title = "Create a favorite list", readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false),
     )
     fun createFavoriteList(
         @McpToolParam(description = "Name of the list.") name: String,
         @McpToolParam(description = "What the list is for.", required = false) description: String?,
         @McpToolParam(description = "Share the list with every signed-in user (default false: private).", required = false) shared: Boolean?,
+        @McpToolParam(description = "Books to start the list with, at most 500; repeats count once.", required = false) bookIds: List<Long>?,
     ): FavoriteList {
         access.requireScope(ApiScope.FAVORITES_WRITE)
-        return lists.create(FavoriteListRequest(name, description, shared ?: false))
+        return lists.create(FavoriteListRequest(name, description, shared ?: false, bookIds))
     }
 
     @McpTool(
