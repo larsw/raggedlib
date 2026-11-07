@@ -32,8 +32,16 @@ import org.springframework.security.web.authentication.www.BasicAuthenticationFi
 import org.springframework.security.web.savedrequest.NullRequestCache
 import org.springframework.security.web.util.matcher.AnyRequestMatcher
 import org.springframework.security.web.util.matcher.RequestMatcher
+import org.springframework.http.client.JdkClientHttpRequestFactory
+import org.springframework.http.converter.FormHttpMessageConverter
+import org.springframework.security.oauth2.client.endpoint.RestClientAuthorizationCodeTokenResponseClient
+import org.springframework.security.oauth2.client.http.OAuth2ErrorResponseErrorHandler
+import org.springframework.security.oauth2.core.http.converter.OAuth2AccessTokenResponseHttpMessageConverter
+import org.springframework.web.client.RestClient
 import org.springframework.web.util.UriComponentsBuilder
 import tools.jackson.databind.ObjectMapper
+import java.net.http.HttpClient
+import java.time.Duration
 
 /**
  * Who may call what, with standard Spring Security:
@@ -132,6 +140,7 @@ class SecurityConfig {
                 o.loginPage(loginUrl)
                 o.authorizationEndpoint { it.baseUri(LOGIN_BASE) }
                 o.redirectionEndpoint { it.baseUri("/api/auth/callback/*") }
+                o.tokenEndpoint { it.accessTokenResponseClient(tokenResponseClient()) }
                 o.userInfoEndpoint { it.oidcUserService(provisioning) }
                 o.successHandler(SimpleUrlAuthenticationSuccessHandler(home).apply { setAlwaysUseDefaultTargetUrl(true) })
                 o.failureHandler { _, response, e ->
@@ -154,6 +163,31 @@ class SecurityConfig {
 
     private fun all(vararg managers: AuthorizationManager<RequestAuthorizationContext>): AuthorizationManager<RequestAuthorizationContext> =
         AuthorizationManagers.allOf(*managers)
+
+    /**
+     * Exchanges the sign-in code for tokens over the JDK's HttpClient, configured otherwise like Spring Security's
+     * default. That default is a RestClient, which picks Reactor Netty (on the classpath for Spring AI); Netty's own DNS
+     * resolver sends every `*.localhost` name to the loopback address (RFC 6761) without asking the system's resolver.
+     * In a container, the development dex's `dex.localhost` (a Docker network alias, see docker-compose.yml) thus
+     * became 127.0.0.1 and every sign-in failed with `invalid_token_response`. Discovery, the user-info call and the
+     * JWK set already go through the system resolver (RestTemplate), so all calls to the provider now resolve alike.
+     */
+    private fun tokenResponseClient() = RestClientAuthorizationCodeTokenResponseClient().apply {
+        val http = HttpClient.newBuilder()
+            .version(HttpClient.Version.HTTP_1_1) // no h2c upgrade attempts against plain-http providers
+            .connectTimeout(Duration.ofSeconds(10))
+            .build()
+        setRestClient(
+            RestClient.builder()
+                .requestFactory(JdkClientHttpRequestFactory(http).apply { setReadTimeout(Duration.ofSeconds(30)) })
+                .configureMessageConverters { c ->
+                    c.addCustomConverter(FormHttpMessageConverter())
+                    c.addCustomConverter(OAuth2AccessTokenResponseHttpMessageConverter())
+                }
+                .defaultStatusHandler(OAuth2ErrorResponseErrorHandler())
+                .build(),
+        )
+    }
 
     companion object {
         const val LOGIN_BASE = "/api/auth/login"
