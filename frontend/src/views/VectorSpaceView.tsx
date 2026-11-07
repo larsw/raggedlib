@@ -230,6 +230,26 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const highlightGroup = colorBy === "book" ? highlightBook : highlightTopic;
   const colour = colorBy === "book" ? bookColourRgb : topicColourRgb;
 
+  // Background work, shown in the plot's lower right corner (or the view's while there's no plot).
+  const plotted = !space.error && !!data && data.points.length > 0;
+  const reprojecting = space.loading && !!data;
+  const clustering = colorBy === "topic" && topicsAsync.loading;
+  const busy =
+    reprojecting || clustering ? (
+      <div className="vectors-busy" role="status">
+        {reprojecting && (
+          <Tag icon={<Spinner size={12} />} intent={Intent.PRIMARY} minimal>
+            Re-projecting…
+          </Tag>
+        )}
+        {clustering && (
+          <Tag icon={<Spinner size={12} />} intent={Intent.PRIMARY} minimal>
+            Clustering…
+          </Tag>
+        )}
+      </div>
+    ) : null;
+
   return (
     <div className="vectors-view">
       <div className="view-toolbar">
@@ -381,6 +401,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
                 onPick={setPinned}
               />
             )}
+            {busy}
           </div>
           <div className="side-dock" style={{ width: panel.width }}>
             <div className="side-resize-handle" {...panel.handleProps} aria-label="Resize the Vectors sidebar" />
@@ -467,16 +488,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
           </div>
         </div>
       )}
-      {space.loading && data && (
-        <Tag className="vectors-busy" icon={<Spinner size={12} />} intent={Intent.PRIMARY} minimal>
-          Re-projecting…
-        </Tag>
-      )}
-      {colorBy === "topic" && topicsAsync.loading && (
-        <Tag className="vectors-busy" icon={<Spinner size={12} />} intent={Intent.PRIMARY} minimal>
-          Clustering…
-        </Tag>
-      )}
+      {!plotted && busy}
     </div>
   );
 }

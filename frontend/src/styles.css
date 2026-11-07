@@ -1920,6 +1920,7 @@ body.is-resizing-x * {
 
 /* Vectors tab: scatter plot with a side panel for details and the book legend */
 .vectors-view {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -1989,10 +1990,21 @@ body.is-resizing-x * {
   right: 12px;
   bottom: 12px;
 }
+/* progress tags: in the plot's lower right corner, stacked when both run */
 .vectors-busy {
   position: absolute;
-  right: 16px;
-  bottom: 16px;
+  right: 12px;
+  bottom: 12px;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+  pointer-events: none;
+}
+/* the canvas renderer's "Reset view" button takes that corner while zoomed */
+.vectors-canvas-wrap:has(.vectors-reset) .vectors-busy {
+  bottom: 44px;
 }
 .vectors-side {
   flex: 1 1 auto;
