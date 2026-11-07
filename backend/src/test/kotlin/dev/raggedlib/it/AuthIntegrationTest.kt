@@ -254,6 +254,32 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `an agent with favorites write puts several books on a list in one call`() {
+        val reader = as_("reader")
+        val listId = reader.post("/api/lists", mapOf("name" to "Agent's picks")).json.path("id").asLong()
+        reader.put("/api/lists/$listId/books/$alphaBook", mapOf("note" to "mine"))
+        val key = reader.post("/api/me/api-keys", mapOf("name" to "curating agent", "scopes" to listOf("library:read", "favorites:write")))
+            .json.path("rawKey").asString()
+        assertTrue("add_books_to_favorite_list" in reader.tools(key))
+
+        val result = reader.callTool("add_books_to_favorite_list", mapOf("listId" to listId, "bookIds" to listOf(betaBook, alphaBook, betaBook)), key)
+        assertFalse(result.path("isError").asBoolean(), result.toString())
+        val out = result.path("structuredContent").takeIf { it.isObject } ?: Browser.MAPPER.readTree(result.path("content").path(0).path("text").asString())
+        assertEquals(1, out.path("added").asInt(), out.toString())
+        assertEquals(1, out.path("alreadyOn").asInt())
+        assertEquals(2, out.path("list").path("bookCount").asInt())
+        val books = reader.get("/api/lists/$listId").json.path("books").values()
+        assertEquals("mine", books.first { it.path("book").path("id").asLong() == alphaBook }.path("note").asString())
+
+        // an unknown book: an error, and nothing added; someone else's list: an error too
+        val other = reader.post("/api/lists", mapOf("name" to "Still empty")).json.path("id").asLong()
+        assertTrue(reader.callTool("add_books_to_favorite_list", mapOf("listId" to other, "bookIds" to listOf(alphaBook, 987654L)), key).path("isError").asBoolean())
+        assertEquals(0, reader.get("/api/lists/$other").json.path("list").path("bookCount").asInt())
+        val curatorList = as_("curator").post("/api/lists", mapOf("name" to "Curator's own")).json.path("id").asLong()
+        assertTrue(reader.callTool("add_books_to_favorite_list", mapOf("listId" to curatorList, "bookIds" to listOf(alphaBook)), key).path("isError").asBoolean())
+    }
+
+    @Test
     fun `one review per user and book, which its author or a curator removes`() {
         val reader = as_("reader")
         assertEquals(400, reader.put("/api/books/$betaBook/reviews/mine", mapOf("rating" to 6)).status)
@@ -289,7 +315,10 @@ class AuthIntegrationTest {
 
         val tools = reader.tools(key)
         assertTrue(listOf("search_library", "ask_library", "list_books", "list_favorite_lists", "get_favorite_list").all { it in tools }, "$tools")
-        assertTrue(listOf("create_favorite_list", "add_to_favorite_list", "get_book_reviews", "write_book_review").none { it in tools }, "$tools")
+        assertTrue(
+            listOf("create_favorite_list", "add_to_favorite_list", "add_books_to_favorite_list", "get_book_reviews", "write_book_review").none { it in tools },
+            "$tools",
+        )
 
         val lists = reader.callTool("list_favorite_lists", emptyMap(), key)
         assertFalse(lists.path("isError").asBoolean(), lists.toString())

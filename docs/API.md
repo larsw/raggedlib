@@ -343,7 +343,7 @@ session gets `403`). Each tool needs a scope, and `tools/list` lists only the to
 |---|---|
 | `library:read` | `search_library`, `ask_library`, `list_books`, `list_tags`, `list_libraries`, `library_status` |
 | `favorites:read` | `list_favorite_lists`, `get_favorite_list` |
-| `favorites:write` | `create_favorite_list`, `add_to_favorite_list`, `remove_from_favorite_list` |
+| `favorites:write` | `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` |
 | `reviews:read` | `get_book_reviews`, `list_my_reviews` |
 | `reviews:write` | `write_book_review` |
 

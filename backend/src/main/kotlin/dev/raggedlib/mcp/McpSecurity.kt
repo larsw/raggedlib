@@ -60,6 +60,7 @@ class McpSecurity {
             "get_favorite_list" to ApiScope.FAVORITES_READ,
             "create_favorite_list" to ApiScope.FAVORITES_WRITE,
             "add_to_favorite_list" to ApiScope.FAVORITES_WRITE,
+            "add_books_to_favorite_list" to ApiScope.FAVORITES_WRITE,
             "remove_from_favorite_list" to ApiScope.FAVORITES_WRITE,
             "get_book_reviews" to ApiScope.REVIEWS_READ,
             "list_my_reviews" to ApiScope.REVIEWS_READ,

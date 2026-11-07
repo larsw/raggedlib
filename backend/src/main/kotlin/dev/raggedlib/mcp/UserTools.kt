@@ -2,6 +2,7 @@ package dev.raggedlib.mcp
 
 import dev.raggedlib.auth.Access
 import dev.raggedlib.auth.ApiScope
+import dev.raggedlib.favorites.AddBooksResult
 import dev.raggedlib.favorites.FavoriteList
 import dev.raggedlib.favorites.FavoriteListRequest
 import dev.raggedlib.favorites.FavoriteListService
@@ -84,6 +85,23 @@ share. Use get_favorite_list to see a list's books.""",
     ): FavoriteList {
         access.requireScope(ApiScope.FAVORITES_WRITE)
         return lists.addBook(listId, bookId, note)
+    }
+
+    @McpTool(
+        name = "add_books_to_favorite_list",
+        title = "Add several books to a favorite list",
+        description = """Put several books (ids from search_library, ask_library's sources or list_books) on one of the
+user's own favorite lists at once, the first shown first. Books already on the list keep their note and place; the
+result says how many were added and how many were on it already. All or nothing: if a book id is unknown, nothing is
+added.""",
+        annotations = McpAnnotations(title = "Add books to favorite list", readOnlyHint = false, destructiveHint = false, idempotentHint = true, openWorldHint = false),
+    )
+    fun addBooksToFavoriteList(
+        @McpToolParam(description = "The list's id (one of the user's own).") listId: Long,
+        @McpToolParam(description = "The books' ids, at most 500; repeats count once.") bookIds: List<Long>,
+    ): AddBooksResult {
+        access.requireScope(ApiScope.FAVORITES_WRITE)
+        return lists.addBooks(listId, bookIds)
     }
 
     @McpTool(

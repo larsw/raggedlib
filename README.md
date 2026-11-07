@@ -142,7 +142,7 @@ tools search the libraries; with a personal key, more tools reach the key owner'
 | `list_libraries` | The configured libraries, with how many books each has, to get ids for `libraryIds` |
 | `library_status` | How many books are indexed and searchable |
 | `list_favorite_lists`, `get_favorite_list` | The user's favorite lists and the ones others share, and a list's books (`favorites:read`) |
-| `create_favorite_list`, `add_to_favorite_list`, `remove_from_favorite_list` | Keep the user's lists (`favorites:write`) |
+| `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` | Keep the user's lists, adding one book or several at once (`favorites:write`) |
 | `get_book_reviews`, `list_my_reviews` | A book's reviews with the average rating; the user's own reviews (`reviews:read`) |
 | `write_book_review` | The user's review of a book: a rating 1–5 and/or a text (`reviews:write`) |
 
