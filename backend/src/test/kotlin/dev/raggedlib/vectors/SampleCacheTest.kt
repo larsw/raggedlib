@@ -20,7 +20,7 @@ class SampleCacheTest {
                 error("projection failed")
             }
             computed += (if (level == VectorLevel.BOOKS) "books:" else "") + (if (dims == 3) "3d:" else "") + "$lib/$method/$size/$seed"
-            VectorSpace(lib, level, method, dims, seed, size, 0, 0, 0, null, 0, emptyList())
+            VectorSpace(lib, level, method, dims, seed, size, 0, 0, 0, null, spec.params, 0, emptyList())
         },
         markCached = { it.copy(cached = true) },
         fingerprint = { fingerprints.getValue(it) },
@@ -80,6 +80,17 @@ class SampleCacheTest {
         assertFalse(c.get(1, LayoutSpec(P, VectorMethod.UMAP, 1000, dims = 3)).cached)
         assertTrue(c.get(1, LayoutSpec(P, VectorMethod.UMAP, 1000, dims = 3)).cached)
         assertEquals(listOf("1/UMAP/1000/1", "3d:1/UMAP/1000/1"), computed)
+    }
+
+    @Test
+    fun `different parameters are cached apart`() {
+        val c = cache()
+        val umap = LayoutSpec(P, VectorMethod.UMAP, 1000)
+        c.get(1, umap)
+        val tighter = umap.copy(params = umap.params.copy(minDist = 0.0))
+        assertFalse(c.get(1, tighter).cached)
+        assertTrue(c.get(1, tighter).cached)
+        assertTrue(c.get(1, umap).cached)
     }
 
     @Test

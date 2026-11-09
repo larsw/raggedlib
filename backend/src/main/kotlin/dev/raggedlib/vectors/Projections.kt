@@ -31,14 +31,22 @@ object Projections {
         val rnd = Random(seed)
         val v = Array(components) { DoubleArray(d) { rnd.nextDouble(-1.0, 1.0) } }
         orthonormalize(v)
-        // orthogonal iteration: v ← orth(Xᵀ X v)
+        // orthogonal iteration: v ← orth(Xᵀ X v), Xᵀ X v summed per chunk of rows, then the chunks in order
         repeat(iterations) {
-            val w = Array(components) { DoubleArray(d) }
-            for (row in xc) for (c in 0 until components) {
-                val z = dot(row, v[c])
-                val wc = w[c]
-                for (j in 0 until d) wc[j] += z * row[j]
+            val partials = Parallel.chunked(n) { from, to ->
+                val part = Array(components) { DoubleArray(d) }
+                for (i in from until to) {
+                    val row = xc[i]
+                    for (c in 0 until components) {
+                        val z = dot(row, v[c])
+                        val wc = part[c]
+                        for (j in 0 until d) wc[j] += z * row[j]
+                    }
+                }
+                part
             }
+            val w = Array(components) { DoubleArray(d) }
+            for (part in partials) for (c in 0 until components) for (j in 0 until d) w[c][j] += part[c][j]
             orthonormalize(w)
             for (c in 0 until components) v[c] = w[c]
         }
@@ -53,14 +61,13 @@ object Projections {
     fun squaredEuclideanDistances(rows: Array<DoubleArray>): FloatArray {
         val n = rows.size
         val out = FloatArray(n * n)
-        for (i in 0 until n) for (j in i + 1 until n) {
-            var d2 = 0.0
-            for (c in rows[i].indices) {
-                val d = rows[i][c] - rows[j][c]
-                d2 += d * d
+        // row i fills its pairs with j > i, both ways round: no cell is written by two rows
+        Parallel.forEach(n) { i ->
+            for (j in i + 1 until n) {
+                val d2 = sqDistance(rows[i], rows[j]).toFloat()
+                out[i * n + j] = d2
+                out[j * n + i] = d2
             }
-            out[i * n + j] = d2.toFloat()
-            out[j * n + i] = d2.toFloat()
         }
         return out
     }
@@ -74,10 +81,13 @@ object Projections {
             DoubleArray(d) { rows[i][it] / norm }
         }
         val out = FloatArray(n * n)
-        for (i in 0 until n) for (j in i + 1 until n) {
-            val dist = max(0.0, 2.0 - 2.0 * dot(unit[i], unit[j])).toFloat()
-            out[i * n + j] = dist
-            out[j * n + i] = dist
+        // row i fills its pairs with j > i, both ways round: no cell is written by two rows
+        Parallel.forEach(n) { i ->
+            for (j in i + 1 until n) {
+                val dist = max(0.0, 2.0 - 2.0 * dot(unit[i], unit[j])).toFloat()
+                out[i * n + j] = dist
+                out[j * n + i] = dist
+            }
         }
         return out
     }
@@ -117,10 +127,14 @@ object Projections {
             val exaggeration = if (iter < exaggerationIterations) 12.0 else 1.0
             val momentum = if (iter < exaggerationIterations) 0.5 else 0.8
 
-            var z = 0.0
-            for (i in 0 until n) for (j in i + 1 until n) z += 2.0 / (1.0 + sqDistance(i, j))
+            val z = Parallel.sum(n) { i ->
+                var row = 0.0
+                for (j in i + 1 until n) row += 2.0 / (1.0 + sqDistance(i, j))
+                row
+            }
 
-            for (i in 0 until n) {
+            // each point's gradient from the current layout, which nothing changes until they're all done
+            Parallel.forEach(n) { i ->
                 val gi = i * dims
                 for (c in 0 until dims) grad[gi + c] = 0.0
                 for (j in 0 until n) {
@@ -145,7 +159,9 @@ object Projections {
 
     /**
      * UMAP (McInnes et al., 2018): fuzzy kNN graph with cosine distances, symmetrised, then stochastic gradient
-     * descent with negative sampling, as in umap-learn with min_dist 0.1, spread 1. [init] is the starting layout.
+     * descent with negative sampling, as in umap-learn (spread 1). [init] is the starting layout. [neighbors] sets
+     * how local the structure kept is (larger: more of the global shape), [minDist] how tightly points may pack (0:
+     * dense clumps, larger: more evenly spread), [epochs] how long the layout is optimised.
      */
     fun umap(
         sqDist: FloatArray,
@@ -154,7 +170,9 @@ object Projections {
         neighbors: Int = 15,
         epochs: Int = 300,
         seed: Long = 0,
+        minDist: Double = 0.1,
     ): Array<DoubleArray> {
+        val curve = umapCurve(minDist)
         val k = min(neighbors, n - 1)
         val edges = fuzzyEdges(sqDist, n, k)
         val rnd = Random(seed)
@@ -177,14 +195,14 @@ object Projections {
                 if (nextSample[e] > epoch) continue
                 val i = kept[e].a
                 val j = kept[e].b
-                attract(y, i, j, alpha)
+                attract(y, i, j, alpha, curve)
                 nextSample[e] += epochsPerSample[e]
 
                 if (epoch >= nextNegative[e]) {
                     val negatives = ((epoch - nextNegative[e]) / epochsPerNegative[e]).toInt()
                     repeat(negatives) {
                         val other = rnd.nextInt(n)
-                        if (other != i) repel(y, i, other, alpha)
+                        if (other != i) repel(y, i, other, alpha, curve)
                     }
                     nextNegative[e] += negatives * epochsPerNegative[e]
                 }
@@ -197,16 +215,23 @@ object Projections {
 
     /** Symmetrised fuzzy-set memberships of the k nearest neighbours; each unordered pair appears once. */
     private fun fuzzyEdges(sqDist: FloatArray, n: Int, k: Int): List<Edge> {
-        val directed = HashMap<Long, Double>()
         val target = ln(k.toDouble()) / ln(2.0)
-        for (i in 0 until n) {
+        // each point's neighbours and memberships on its own (the O(n²) part), then merged in point order
+        val nearestOf = arrayOfNulls<IntArray>(n)
+        val weightsOf = arrayOfNulls<DoubleArray>(n)
+        Parallel.forEach(n) { i ->
             val nearest = nearestNeighbours(sqDist, n, i, k)
             val dist = DoubleArray(k) { sqDist[i * n + nearest[it]] / 2.0 } // cosine distance
             val rho = dist.firstOrNull { it > 0 } ?: 0.0
             val sigma = smoothingScale(dist, rho, target)
-            for (t in 0 until k) {
-                directed[i.toLong() * n + nearest[t]] = exp(-max(0.0, dist[t] - rho) / sigma)
-            }
+            nearestOf[i] = nearest
+            weightsOf[i] = DoubleArray(k) { exp(-max(0.0, dist[it] - rho) / sigma) }
+        }
+        val directed = HashMap<Long, Double>()
+        for (i in 0 until n) {
+            val nearest = nearestOf[i]!!
+            val weights = weightsOf[i]!!
+            for (t in 0 until k) directed[i.toLong() * n + nearest[t]] = weights[t]
         }
         val out = ArrayList<Edge>(directed.size)
         for ((key, w) in directed) {
@@ -270,10 +295,11 @@ object Projections {
         return d2
     }
 
-    private fun attract(y: Array<DoubleArray>, i: Int, j: Int, alpha: Double) {
+    private fun attract(y: Array<DoubleArray>, i: Int, j: Int, alpha: Double, curve: UmapCurve) {
+        val (a, b) = curve
         val d2 = sqDistance(y[i], y[j])
         if (d2 <= 0) return
-        val coeff = -2.0 * UMAP_A * UMAP_B * d2.pow(UMAP_B - 1) / (UMAP_A * d2.pow(UMAP_B) + 1)
+        val coeff = -2.0 * a * b * d2.pow(b - 1) / (a * d2.pow(b) + 1)
         for (c in y[i].indices) {
             val grad = clip(coeff * (y[i][c] - y[j][c]))
             y[i][c] += alpha * grad
@@ -281,18 +307,70 @@ object Projections {
         }
     }
 
-    private fun repel(y: Array<DoubleArray>, i: Int, j: Int, alpha: Double) {
+    private fun repel(y: Array<DoubleArray>, i: Int, j: Int, alpha: Double, curve: UmapCurve) {
+        val (a, b) = curve
         val d2 = sqDistance(y[i], y[j])
-        val coeff = if (d2 > 0) 2.0 * UMAP_GAMMA * UMAP_B / ((0.001 + d2) * (UMAP_A * d2.pow(UMAP_B) + 1)) else 0.0
+        val coeff = if (d2 > 0) 2.0 * UMAP_GAMMA * b / ((0.001 + d2) * (a * d2.pow(b) + 1)) else 0.0
         for (c in y[i].indices) {
             val grad = if (coeff > 0) clip(coeff * (y[i][c] - y[j][c])) else 4.0
             y[i][c] += alpha * grad
         }
     }
 
-    // a, b of the curve 1 / (1 + a x^(2b)) fitted to min_dist = 0.1, spread = 1 (umap-learn's find_ab_params)
-    private const val UMAP_A = 1.5769434
-    private const val UMAP_B = 0.8950608
+    /** a, b of UMAP's low-dimensional similarity 1 / (1 + a d^(2b)), see [umapCurve]. */
+    data class UmapCurve(val a: Double, val b: Double)
+
+    /**
+     * umap-learn's find_ab_params: the a, b for which 1 / (1 + a x^(2b)) best fits (least squares, at 300 points
+     * over 0..3 spread) the target "1 up to [minDist], then exp(-(x - minDist) / spread)". Fitted by
+     * Levenberg-Marquardt from a = b = 1, like scipy's curve_fit. min_dist 0.1 gives a ≈ 1.577, b ≈ 0.895.
+     */
+    fun umapCurve(minDist: Double, spread: Double = 1.0): UmapCurve {
+        require(minDist >= 0 && minDist <= spread) { "minDist must be between 0 and spread" }
+        val xs = DoubleArray(300) { it * 3.0 * spread / 299 }
+        val ys = DoubleArray(xs.size) { if (xs[it] < minDist) 1.0 else exp(-(xs[it] - minDist) / spread) }
+        fun cost(a: Double, b: Double) = xs.indices.sumOf { val r = 1.0 / (1.0 + a * xs[it].pow(2 * b)) - ys[it]; r * r }
+
+        var a = 1.0
+        var b = 1.0
+        var lambda = 1e-3
+        var current = cost(a, b)
+        repeat(500) {
+            // normal equations (J^T J + lambda diag) delta = -J^T r of the 2-parameter problem
+            var jaa = 0.0; var jab = 0.0; var jbb = 0.0; var ga = 0.0; var gb = 0.0
+            for (i in xs.indices) {
+                val x = xs[i]
+                if (x == 0.0) continue // f(0) = 1 whatever a, b: no gradient
+                val p = x.pow(2 * b)
+                val denom = 1.0 + a * p
+                val r = 1.0 / denom - ys[i]
+                val da = -p / (denom * denom)
+                val db = -a * p * 2 * ln(x) / (denom * denom)
+                jaa += da * da; jab += da * db; jbb += db * db
+                ga += da * r; gb += db * r
+            }
+            val maa = jaa * (1 + lambda)
+            val mbb = jbb * (1 + lambda)
+            val det = maa * mbb - jab * jab
+            if (det == 0.0 || !det.isFinite()) return@repeat
+            val stepA = -(mbb * ga - jab * gb) / det
+            val stepB = -(maa * gb - jab * ga) / det
+            val nextA = a + stepA
+            val nextB = b + stepB
+            val next = if (nextA > 0 && nextB > 0) cost(nextA, nextB) else Double.POSITIVE_INFINITY
+            if (next < current) {
+                val converged = current - next < 1e-15
+                a = nextA; b = nextB; current = next
+                lambda = max(lambda / 10, 1e-12)
+                if (converged) return UmapCurve(a, b)
+            } else {
+                lambda *= 10
+                if (lambda > 1e12) return UmapCurve(a, b)
+            }
+        }
+        return UmapCurve(a, b)
+    }
+
     private const val UMAP_GAMMA = 1.0
     private const val NEGATIVE_SAMPLE_RATE = 5
     private fun clip(v: Double): Double = v.coerceIn(-4.0, 4.0)
@@ -301,13 +379,14 @@ object Projections {
     private fun symmetricAffinities(sqDist: FloatArray, n: Int, perplexity: Double): DoubleArray {
         val target = ln(perplexity)
         val cond = DoubleArray(n * n)
-        for (i in 0 until n) {
+        // each row's own binary search over its own cells
+        Parallel.forEach(n) { i ->
             var nearest = Double.POSITIVE_INFINITY
             for (j in 0 until n) if (j != i) nearest = min(nearest, sqDist[i * n + j].toDouble())
             var beta = 1.0
             var lo = 0.0
             var hi = Double.POSITIVE_INFINITY
-            repeat(100) {
+            for (step in 0 until 100) {
                 var sum = 0.0
                 var weighted = 0.0
                 for (j in 0 until n) {
@@ -320,7 +399,7 @@ object Projections {
                     weighted += d * pj
                 }
                 val entropy = ln(sum) + beta * weighted / sum
-                if (abs(entropy - target) < 1e-5) return@repeat
+                if (abs(entropy - target) < 1e-5) break
                 if (entropy > target) {
                     lo = beta
                     beta = if (hi == Double.POSITIVE_INFINITY) beta * 2 else (beta + hi) / 2
@@ -335,9 +414,10 @@ object Projections {
         }
         val p = DoubleArray(n * n)
         val norm = 2.0 * n
-        for (i in 0 until n) for (j in 0 until n) {
-            if (i == j) continue
-            p[i * n + j] = max((cond[i * n + j] + cond[j * n + i]) / norm, 1e-12)
+        Parallel.forEach(n) { i ->
+            for (j in 0 until n) {
+                if (i != j) p[i * n + j] = max((cond[i * n + j] + cond[j * n + i]) / norm, 1e-12)
+            }
         }
         return p
     }

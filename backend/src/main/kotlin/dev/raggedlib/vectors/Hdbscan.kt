@@ -38,12 +38,17 @@ object Hdbscan {
 
     // ---------------------------------------------------------------------------------------------------------
 
-    private fun coreDistances(dist: FloatArray, n: Int, minSamples: Int): DoubleArray = DoubleArray(n) { i ->
-        val row = DoubleArray(n - 1)
-        var idx = 0
-        for (j in 0 until n) if (j != i) row[idx++] = dist[i * n + j].toDouble()
-        row.sort()
-        row[minSamples - 1]
+    /** Each point's distance to its [minSamples]-th nearest other point; points in parallel (a sort of n - 1 each). */
+    private fun coreDistances(dist: FloatArray, n: Int, minSamples: Int): DoubleArray {
+        val core = DoubleArray(n)
+        Parallel.forEach(n) { i ->
+            val row = DoubleArray(n - 1)
+            var idx = 0
+            for (j in 0 until n) if (j != i) row[idx++] = dist[i * n + j].toDouble()
+            row.sort()
+            core[i] = row[minSamples - 1]
+        }
+        return core
     }
 
     private class Edge(val a: Int, val b: Int, val weight: Double)

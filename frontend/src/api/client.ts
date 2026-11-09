@@ -15,6 +15,7 @@ import type {
   FavoriteListRequest,
   FavoriteLists,
   GrantableRole,
+  LayoutParams,
   Member,
   Me,
   Review,
@@ -241,11 +242,19 @@ export const api = {
   /** Global admins only. */
   updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) => putJson<ServerSettings>("/settings", body),
   vectors: (
-    q: { libraryId: number; level: VectorLevel; method: VectorMethod; size: number; dims: 2 | 3; seed?: number },
+    q: { libraryId: number; level: VectorLevel; method: VectorMethod; size: number; dims: 2 | 3; seed?: number } & LayoutParams,
     signal?: AbortSignal,
   ) => getJson<VectorSpace>(`/vectors${queryString(q)}`, signal),
   vectorTopics: (
-    q: { libraryId: number; level: VectorLevel; size: number; space: ClusterSpace; seed?: number },
+    q: {
+      libraryId: number;
+      level: VectorLevel;
+      size: number;
+      space: ClusterSpace;
+      seed?: number;
+      minClusterSize?: number | null;
+      minSamples?: number | null;
+    },
     signal?: AbortSignal,
   ) => getJson<TopicSpace>(`/vectors/topics${queryString(q)}`, signal),
   computeBookVectors: (libraryId?: number) =>

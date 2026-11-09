@@ -226,6 +226,18 @@ export interface VectorPoint {
   z: number | null; // 3-D layouts only
 }
 
+/**
+ * A projection's tunable parameters: UMAP's neighbors/minDist/epochs, t-SNE's perplexity/iterations (PCA has
+ * none). In a VectorSpace, the method's own as used (defaults filled in, capped for a small sample), the rest null.
+ */
+export type LayoutParams = {
+  neighbors?: number | null;
+  minDist?: number | null;
+  epochs?: number | null;
+  perplexity?: number | null;
+  iterations?: number | null;
+};
+
 export interface VectorSpace {
   libraryId: number;
   level: VectorLevel;
@@ -237,8 +249,11 @@ export interface VectorSpace {
   missingBookVectors: number; // books with passages but no book vector yet
   dimensions: number;
   explainedVariance: number[] | null;
+  params: LayoutParams;
   elapsedMs: number; // how long computing it took (also when served from the cache)
   points: VectorPoint[];
+  /** milliseconds per step of computing it, in order (sample, parse, pca, distances, umap/tsne) */
+  timings: Record<string, number>;
   cached: boolean; // served from the server's cache
 }
 
@@ -260,10 +275,15 @@ export interface TopicSpace {
   size: number; // points in the sample that were clustered
   total: number; // passages (or books) with a vector in this library
   space: ClusterSpace;
+  /** HDBSCAN's parameters as used (the defaults filled in) */
+  minClusterSize: number;
+  minSamples: number;
   elapsedMs: number;
   topics: Topic[];
   /** point id (matches VectorPoint.id for the same library/level/size/seed) -> topic id, or -1 for noise */
   pointTopics: Record<string, number>;
+  /** milliseconds per step of computing it, in order (sample, parse, distances, hdbscan, labels) */
+  timings: Record<string, number>;
   cached: boolean;
 }
 

@@ -20,7 +20,9 @@ import { useAsync } from "../hooks/useAsync";
 import { useSidePanel } from "../hooks/useSidePanel";
 import { roleAtLeast } from "../lib/auth";
 import { formatNumber } from "../lib/format";
-import { STORAGE_KEYS } from "../lib/storage";
+import { loadJson, saveJson, STORAGE_KEYS } from "../lib/storage";
+import { layoutParams, sanitizeVectorSettings, type VectorSettings } from "../lib/vectorSettings";
+import { VectorSettingsMenu } from "../components/vectors/VectorSettingsMenu";
 
 // deck.gl (WebGL) loads with the first plot, not with the app
 const DeckScatter = lazy(() => import("../components/vectors/DeckScatter"));
@@ -46,6 +48,12 @@ const CLUSTER_SPACES: { id: ClusterSpace; label: string; hint: string }[] = [
   { id: "raw", label: "Raw", hint: "Cluster the full embeddings directly (cosine distance)." },
   { id: "umap", label: "UMAP-reduced", hint: "Reduce to ~8 dimensions with UMAP first, like BERTopic does, then cluster that (slower)." },
 ];
+
+/** "sample 812 ms · parse 95 ms · …" for a tooltip: where the computing time went. */
+export function describeTimings(timings: Record<string, number> | undefined): string | undefined {
+  const steps = Object.entries(timings ?? {});
+  return steps.length ? steps.map(([step, ms]) => `${step} ${formatNumber(ms)} ms`).join(" · ") : undefined;
+}
 
 /** Stable hue per group (book or topic id) so the same one keeps its colour across reloads and methods. */
 function groupHue(id: number): number {
@@ -146,11 +154,24 @@ export function VectorSpaceView({ active }: { active: boolean }) {
   const [colorBy, setColorBy] = useState<"book" | "topic">("book");
   const [clusterSpace, setClusterSpace] = useState<ClusterSpace>("raw");
   const [highlightTopic, setHighlightTopic] = useState<number | null>(null);
+  const [settings, setSettingsState] = useState<VectorSettings>(() =>
+    sanitizeVectorSettings(loadJson<unknown>(STORAGE_KEYS.vectorSettings, null)),
+  );
+  const setSettings = (s: VectorSettings) => {
+    setSettingsState(s);
+    saveJson(STORAGE_KEYS.vectorSettings, s);
+  };
+  // only the active method's parameters: tuning t-SNE never recomputes a UMAP layout
+  const params = layoutParams(method, settings);
+  const paramsKey = JSON.stringify(params);
 
   const space = useAsync<VectorSpace | undefined>(
     (signal) =>
-      libraryId == null ? Promise.resolve(undefined) : api.vectors({ libraryId, level, method, size, dims, seed }, signal),
-    [libraryId, level, method, size, dims, seed],
+      libraryId == null
+        ? Promise.resolve(undefined)
+        : api.vectors({ libraryId, level, method, size, dims, seed, ...params }, signal),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- params by value (paramsKey)
+    [libraryId, level, method, size, dims, seed, paramsKey],
   );
 
   // independent of the projection (method/dims): switching PCA/UMAP/t-SNE or 2D/3D never refetches topics
@@ -158,8 +179,19 @@ export function VectorSpaceView({ active }: { active: boolean }) {
     (signal) =>
       libraryId == null || colorBy !== "topic"
         ? Promise.resolve(undefined)
-        : api.vectorTopics({ libraryId, level, size, seed, space: clusterSpace }, signal),
-    [libraryId, level, size, seed, clusterSpace, colorBy],
+        : api.vectorTopics(
+            {
+              libraryId,
+              level,
+              size,
+              seed,
+              space: clusterSpace,
+              minClusterSize: settings.minClusterSize,
+              minSamples: settings.minSamples,
+            },
+            signal,
+          ),
+    [libraryId, level, size, seed, clusterSpace, colorBy, settings.minClusterSize, settings.minSamples],
   );
 
   // a new library's passages are different points: drop the selection and highlight of the previous one, and show
@@ -308,9 +340,16 @@ export function VectorSpaceView({ active }: { active: boolean }) {
             ))}
           </ButtonGroup>
         )}
+        <VectorSettingsMenu
+          method={method}
+          settings={settings}
+          onApply={setSettings}
+          used={data?.method === method ? data.params : undefined}
+          usedTopics={topicsData}
+        />
         <span className="spacer" />
         {data && (
-          <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+          <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`} title={describeTimings(data.timings)}>
             {formatNumber(data.size)} of {formatNumber(data.total)} {byBook ? "books" : "passages"} · {data.dimensions}-D →{" "}
             {data.dims}-D in {formatNumber(data.elapsedMs)} ms{data.cached ? " (cached)" : ""} ·{" "}
             {gpu ? "WebGL" : "canvas"}
@@ -318,8 +357,9 @@ export function VectorSpaceView({ active }: { active: boolean }) {
         )}
       </div>
       {colorBy === "topic" && topicsData && (
-        <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} vectors-topics-status`}>
-          {formatNumber(topicsData.topics.length)} topics, {formatNumber(noiseCount)} unclustered in{" "}
+        <div className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL} vectors-topics-status`} title={describeTimings(topicsData.timings)}>
+          {formatNumber(topicsData.topics.length)} topics, {formatNumber(noiseCount)} unclustered (minimum size{" "}
+          {formatNumber(topicsData.minClusterSize)}, {formatNumber(topicsData.minSamples)} samples) in{" "}
           {formatNumber(topicsData.elapsedMs)} ms{topicsData.cached ? " (cached)" : ""}
         </div>
       )}

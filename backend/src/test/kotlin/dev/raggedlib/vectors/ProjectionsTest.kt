@@ -63,7 +63,8 @@ class ProjectionsTest {
         val x = twoClusters()
         val init = Projections.pca(x).coords
         val sq = Projections.squaredCosineDistances(Array(x.size) { i -> FloatArray(10) { x[i][it].toFloat() } })
-        val layout = Projections.tsne(sq, x.size, init, perplexity = 10.0, iterations = 400)
+        // the default iterations: at 400, whether the layout has settled yet comes down to rounding (summation order)
+        val layout = Projections.tsne(sq, x.size, init, perplexity = 10.0)
         assertEquals(x.size, layout.size)
         assertTrue(layout.all { row -> row.all { it.isFinite() } })
         assertTrue(separation(layout) > 2.0, "separation ${separation(layout)}")
@@ -87,12 +88,42 @@ class ProjectionsTest {
         val sq = Projections.squaredCosineDistances(Array(x.size) { i -> FloatArray(10) { x[i][it].toFloat() } })
         for (layout in listOf(
             Projections.umap(sq, x.size, init, neighbors = 10, epochs = 200, seed = 1),
-            Projections.tsne(sq, x.size, init, perplexity = 10.0, iterations = 400),
+            Projections.tsne(sq, x.size, init, perplexity = 10.0),
         )) {
             assertTrue(layout.all { row -> row.size == 3 && row.all { it.isFinite() } })
             // the third axis is used, not left at its starting value
             assertTrue(layout.map { it[2] }.distinct().size > 1)
             assertTrue(separation(layout) > 2.0, "separation ${separation(layout)}")
+        }
+    }
+
+    @Test
+    fun `the umap curve fit matches umap-learn's`() {
+        // umap-learn's find_ab_params(spread=1, min_dist=0.1)
+        val (a, b) = Projections.umapCurve(0.1)
+        assertEquals(1.5769434, a, 1e-3)
+        assertEquals(0.8950608, b, 1e-3)
+    }
+
+    @Test
+    fun `a larger min_dist flattens the umap curve near zero`() {
+        // the curve's value at a short distance: closer to 1 the more room min_dist leaves points
+        fun at(minDist: Double, x: Double = 0.3): Double {
+            val (a, b) = Projections.umapCurve(minDist)
+            return 1.0 / (1.0 + a * Math.pow(x, 2 * b))
+        }
+        assertTrue(at(0.0) < at(0.1) && at(0.1) < at(0.5) && at(0.5) < at(0.9), "${listOf(0.0, 0.1, 0.5, 0.9).map { at(it) }}")
+    }
+
+    @Test
+    fun `umap with another min_dist still keeps clusters apart`() {
+        val x = twoClusters()
+        val init = Projections.pca(x).coords
+        val sq = Projections.squaredCosineDistances(Array(x.size) { i -> FloatArray(10) { x[i][it].toFloat() } })
+        for (minDist in listOf(0.0, 0.5)) {
+            val layout = Projections.umap(sq, x.size, init, neighbors = 10, epochs = 200, seed = 1, minDist = minDist)
+            assertTrue(layout.all { row -> row.all { it.isFinite() } })
+            assertTrue(separation(layout) > 2.0, "min_dist $minDist: separation ${separation(layout)}")
         }
     }
 

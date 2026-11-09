@@ -72,6 +72,7 @@ export const STORAGE_KEYS = {
   sourcesPanel: "raggedlib.sourcesPanel.v1",
   bookPanel: "raggedlib.bookPanel.v1",
   vectorsPanel: "raggedlib.vectorsPanel.v1",
+  vectorSettings: "raggedlib.vectorSettings.v1",
   libraryColumns: "raggedlib.libraryColumns.v1",
   readerPrefs: "raggedlib.reader.prefs.v1",
   readerPositions: "raggedlib.reader.positions.v1",

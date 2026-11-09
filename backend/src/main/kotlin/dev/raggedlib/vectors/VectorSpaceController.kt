@@ -21,6 +21,16 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         @RequestParam(defaultValue = "2") dims: Int,
         /** a new sample (Reshuffle); default: the library's current one */
         @RequestParam(required = false) seed: Long?,
+        /** UMAP only (default 15) */
+        @RequestParam(required = false) neighbors: Int?,
+        /** UMAP only (default 0.1) */
+        @RequestParam(required = false) minDist: Double?,
+        /** UMAP only (default 300) */
+        @RequestParam(required = false) epochs: Int?,
+        /** t-SNE only (default 30, at most (points - 1) / 3) */
+        @RequestParam(required = false) perplexity: Double?,
+        /** t-SNE only (default 1000) */
+        @RequestParam(required = false) iterations: Int?,
     ): VectorSpace {
         val m = runCatching { VectorMethod.valueOf(method.uppercase()) }
             .getOrElse { badRequest("method must be one of pca, umap, tsne") }
@@ -28,9 +38,15 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
             .getOrElse { badRequest("level must be passages or books") }
         if (size !in 1..VectorSpaceService.MAX_SIZE) badRequest("size must be between 1 and ${VectorSpaceService.MAX_SIZE}")
         if (dims !in 2..3) badRequest("dims must be 2 or 3")
+        checkRange("neighbors", neighbors, LayoutParams.NEIGHBORS)
+        checkRange("minDist", minDist, LayoutParams.MIN_DIST)
+        checkRange("epochs", epochs, LayoutParams.EPOCHS)
+        checkRange("perplexity", perplexity, LayoutParams.PERPLEXITY)
+        checkRange("iterations", iterations, LayoutParams.ITERATIONS)
+        val params = LayoutParams(neighbors, minDist, epochs, perplexity, iterations).forMethod(m)
         // one library at a time; byId 404s an unknown one, and (first use) backfills pre-multi-library books' library_id
         access.requireLibrary(libraryId)
-        return service.space(libraryId, LayoutSpec(l, m, size, dims), seed)
+        return service.space(libraryId, LayoutSpec(l, m, size, dims, params), seed)
     }
 
     @GetMapping("/vectors/topics")
@@ -41,14 +57,20 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         @RequestParam(defaultValue = "raw") space: String,
         /** a new sample (Reshuffle); default: the library's current one */
         @RequestParam(required = false) seed: Long?,
+        /** HDBSCAN's smallest topic; default: about 2.5 % of size, between 5 and 50 */
+        @RequestParam(required = false) minClusterSize: Int?,
+        /** HDBSCAN's density estimate; default: minClusterSize */
+        @RequestParam(required = false) minSamples: Int?,
     ): TopicSpace {
         val l = runCatching { VectorLevel.valueOf(level.uppercase()) }
             .getOrElse { badRequest("level must be passages or books") }
         val sp = runCatching { ClusterSpace.valueOf(space.uppercase()) }
             .getOrElse { badRequest("space must be raw or umap") }
         if (size !in 1..VectorSpaceService.MAX_SIZE) badRequest("size must be between 1 and ${VectorSpaceService.MAX_SIZE}")
+        checkRange("minClusterSize", minClusterSize, TopicSpec.MIN_CLUSTER_SIZE)
+        checkRange("minSamples", minSamples, TopicSpec.MIN_SAMPLES)
         access.requireLibrary(libraryId)
-        return service.topics(libraryId, TopicSpec(l, size, sp), seed)
+        return service.topics(libraryId, TopicSpec(l, size, sp, minClusterSize, minSamples), seed)
     }
 
     /**
@@ -61,6 +83,16 @@ class VectorSpaceController(private val service: VectorSpaceService, private val
         else access.libraries(LibraryRole.CURATOR).toList()
         val computed = ids.sumOf { service.computeBookVectors(it) }
         return BookVectorsResult(computed, ids.sumOf { service.missingBookVectors(it) })
+    }
+}
+
+private fun checkRange(name: String, value: Int?, range: IntRange) {
+    if (value != null && value !in range) badRequest("$name must be between ${range.first} and ${range.last}")
+}
+
+private fun checkRange(name: String, value: Double?, range: ClosedFloatingPointRange<Double>) {
+    if (value != null && (value.isNaN() || value !in range)) {
+        badRequest("$name must be between ${range.start} and ${range.endInclusive}")
     }
 }
 
