@@ -35,11 +35,11 @@ class BookController(
 ) {
     private val sorts = setOf("title", "author", "publisher", "pubdate", "indexedAt", "id")
 
-    /** Syncs [libraryId], or every library the caller curates. */
+    /** Syncs [libraryId], or every library the caller administers (library admins only). */
     @PostMapping("/library/sync")
     fun sync(@RequestParam(required = false) libraryId: Long?): SyncResult {
-        val ids = if (libraryId != null) setOf(access.requireLibrary(libraryId, LibraryRole.CURATOR).id)
-        else access.libraries(LibraryRole.CURATOR).ifEmpty { throw ApiException(HttpStatus.FORBIDDEN, "you curate no library") }
+        val ids = if (libraryId != null) setOf(access.requireLibrary(libraryId, LibraryRole.ADMIN).id)
+        else access.libraries(LibraryRole.ADMIN).ifEmpty { throw ApiException(HttpStatus.FORBIDDEN, "only a library admin can sync") }
         return library.sync(ids)
     }
 

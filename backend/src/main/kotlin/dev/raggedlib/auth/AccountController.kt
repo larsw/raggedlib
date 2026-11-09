@@ -38,6 +38,8 @@ data class MeView(
     val canCurate: Boolean,
     /** Library admin in at least one library (or a global admin). */
     val canManageMembers: Boolean,
+    /** May start and stop indexing and sync libraries: library admin in at least one (or a global admin). */
+    val canRunIndexing: Boolean,
 )
 
 /** The caller's account and personal API keys. */
@@ -70,6 +72,7 @@ class AccountController(
             libraries = libs,
             canCurate = libs.any { it.role.atLeast(LibraryRole.CURATOR) },
             canManageMembers = libs.any { it.role == LibraryRole.ADMIN },
+            canRunIndexing = libs.any { it.role == LibraryRole.ADMIN },
         )
     }
 

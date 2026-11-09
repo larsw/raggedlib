@@ -186,6 +186,28 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `only library admins start, stop and sync, curators just watch`() {
+        assertTrue(meOf("librarian").path("canRunIndexing").asBoolean())
+        assertTrue(meOf("admin").path("canRunIndexing").asBoolean())
+        assertFalse(meOf("curator").path("canRunIndexing").asBoolean())
+        assertTrue(meOf("curator").path("canCurate").asBoolean()) // so it still gets the Indexing tab
+
+        val curator = as_("curator")
+        assertEquals(200, curator.get("/api/ingest/status").status)
+        assertEquals(403, curator.post("/api/ingest/start").status)
+        assertEquals(403, curator.post("/api/ingest/start", mapOf("retryFailed" to true)).status)
+        assertEquals(403, curator.post("/api/ingest/reprocess", mapOf("bookIds" to listOf(alphaBook))).status)
+        assertEquals(403, curator.post("/api/ingest/stop").status)
+        assertEquals(403, curator.post("/api/library/sync").status)
+        assertEquals(403, curator.post("/api/library/sync?libraryId=$alpha").status)
+        assertEquals(403, as_("reader").post("/api/ingest/stop").status)
+
+        // a library admin may (nothing is running, so stopping changes nothing)
+        val stop = as_("librarian").post("/api/ingest/stop")
+        assertEquals(200, stop.status, stop.body)
+    }
+
+    @Test
     fun `writes with a session need the CSRF token`() {
         val reader = as_("reader")
         assertEquals(403, reader.post("/api/lists", mapOf("name" to "no token"), csrf = false).status)

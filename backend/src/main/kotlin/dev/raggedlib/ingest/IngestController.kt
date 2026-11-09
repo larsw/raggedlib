@@ -13,8 +13,9 @@ import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
 
 /**
- * Indexing is one background run over every library. Curators start it for their libraries' books (others stay
- * pending until one of their curators does), and any curator may stop it. The status shows the caller's libraries.
+ * Indexing is one background run over every library. Library admins start it for their libraries' books (others
+ * stay pending until one of their admins does), and any library admin may stop it. Curators see the status (of
+ * their libraries) but neither start nor stop; they can still queue single books ([dev.raggedlib.library.BookController.reindex]).
  */
 @RestController
 @RequestMapping("/api/ingest")
@@ -26,21 +27,21 @@ class IngestController(
 
     @PostMapping("/start")
     fun start(@RequestBody(required = false) body: IngestStartRequest?): IngestStatus {
-        ingest.start(checkedBooks(body?.bookIds), body?.retryFailed == true, curatedOrAll())
+        ingest.start(checkedBooks(body?.bookIds), body?.retryFailed == true, administeredOrAll())
         return status()
     }
 
     /** Re-extracts indexed books (all, or [IngestReprocessRequest.bookIds] / formats), re-embedding only changed passages. */
     @PostMapping("/reprocess")
     fun reprocess(@RequestBody(required = false) body: IngestReprocessRequest?): IngestStatus {
-        ingest.reprocess(checkedBooks(body?.bookIds), body?.formats, curatedOrAll())
+        ingest.reprocess(checkedBooks(body?.bookIds), body?.formats, administeredOrAll())
         return status()
     }
 
     /** Graceful by default (waits for books in flight); `force=true` interrupts them and requeues them as PENDING. */
     @PostMapping("/stop")
     fun stop(@RequestParam(defaultValue = "false") force: Boolean): IngestStatus {
-        curated()
+        administered()
         if (force) ingest.forceStop() else ingest.stop()
         return status()
     }
@@ -48,18 +49,18 @@ class IngestController(
     @GetMapping("/status")
     fun status(): IngestStatus = ingest.status(access.libraries().takeIf { it != allLibraries() })
 
-    /** Libraries the caller curates; 403 if none. */
-    private fun curated(): Set<Long> =
-        access.libraries(LibraryRole.CURATOR).ifEmpty { throw ApiException(HttpStatus.FORBIDDEN, "you curate no library") }
+    /** Libraries the caller administers; 403 if none. */
+    private fun administered(): Set<Long> =
+        access.libraries(LibraryRole.ADMIN).ifEmpty { throw ApiException(HttpStatus.FORBIDDEN, "only a library admin can start or stop indexing") }
 
-    /** The libraries the caller curates, or null when that is every library. */
-    private fun curatedOrAll(): Set<Long>? = curated().takeIf { it != allLibraries() }
+    /** The libraries the caller administers, or null when that is every library. */
+    private fun administeredOrAll(): Set<Long>? = administered().takeIf { it != allLibraries() }
 
     private fun allLibraries(): Set<Long> = registry.all.mapTo(HashSet()) { it.id }
 
-    /** [requested] books, each of which must be in a library the caller curates (403 otherwise). */
+    /** [requested] books, each of which must be in a library the caller administers (403 otherwise). */
     private fun checkedBooks(requested: List<Long>?): List<Long>? {
-        requested?.distinct()?.forEach { access.requireBook(it, LibraryRole.CURATOR) }
+        requested?.distinct()?.forEach { access.requireBook(it, LibraryRole.ADMIN) }
         return requested
     }
 }

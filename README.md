@@ -219,5 +219,5 @@ skills/     Agent Skill for the MCP tools (skills/raggedlib/SKILL.md)
 - PDF sections come from a heuristic ("Chapter 3 …", "3.2 …" lines), so PDFs whose chapters are laid out differently get no section labels.
 - The reader can't open LIT, CHM or DJVU books; the drawer offers their files to download instead. A passage indexed from one of those formats is looked up in another format of the book, where its text can differ more.
 - Spelling correction learns its vocabulary from every library, so a correction can be a word that only occurs in a library the user can't see (the passages found are always from libraries they can).
-- Indexing is one queue for every library: a curator starts it for the books of their own libraries, but any curator can stop it.
+- Indexing is one queue for every library: a library admin starts it for the books of the libraries they administer, but any library admin can stop it. Curators see the Indexing tab and can re-index single books, but don't start, stop or sync.
 - Sessions live in the backend's memory: restarting it signs everyone out (API keys keep working). dex, as configured for development, keeps nothing either.

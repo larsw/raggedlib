@@ -42,8 +42,9 @@ function sessionTotal(s: IngestStatus): number {
 export function IndexingView({ active }: { active: boolean }) {
   const { libraries, me } = useApp();
   // Always every library the caller can see: one background run covers all of them, so filtering the view by the
-  // navbar's chooser would only hide what's happening, not change it. Start, retry and sync act on the libraries
-  // the caller curates (only curators get this tab).
+  // navbar's chooser would only hide what's happening, not change it. Curators get this tab to watch; library
+  // admins also start, stop, retry and sync, acting on the libraries they administer.
+  const canRun = me.canRunIndexing;
   const status = usePolling((signal) => api.ingestStatus(signal), POLL_MS, active);
   const { sync, syncing } = useSyncLibrary();
   const libraryNames = useMemo(() => new Map(libraries.map((l) => [l.id, l.name])), [libraries]);
@@ -112,40 +113,46 @@ export function IndexingView({ active }: { active: boolean }) {
           </span>
         )}
         <span className="spacer" />
-        <Button
-          icon="play"
-          intent={Intent.PRIMARY}
-          text="Start"
-          disabled={s.running}
-          loading={busy === "start"}
-          onClick={() => act("start")}
-        />
-        <Tooltip
-          content={
-            s.stopRequested
-              ? "Interrupt the books still being extracted (e.g. OCR) right now and put them back to pending, instead of waiting for them to finish"
-              : "Stop after the books currently being extracted/embedded finish"
-          }
-          placement="top"
-          disabled={!s.running}
-        >
-          <Button
-            icon={s.stopRequested ? "trash" : "stop"}
-            intent={s.stopRequested ? Intent.DANGER : Intent.NONE}
-            text={s.stopRequested ? "Discard & stop now" : "Stop"}
-            disabled={!s.running}
-            loading={busy === "stop" || busy === "forceStop"}
-            onClick={() => act(s.stopRequested ? "forceStop" : "stop")}
-          />
-        </Tooltip>
-        <Button
-          icon="repeat"
-          text={`Retry failed${s.counts.FAILED ? ` (${s.counts.FAILED})` : ""}`}
-          disabled={!s.counts.FAILED}
-          loading={busy === "retry"}
-          onClick={() => act("retry")}
-        />
-        <Button icon="refresh" text="Sync library" loading={syncing} onClick={() => sync().then(status.refresh)} />
+        {canRun ? (
+          <>
+            <Button
+              icon="play"
+              intent={Intent.PRIMARY}
+              text="Start"
+              disabled={s.running}
+              loading={busy === "start"}
+              onClick={() => act("start")}
+            />
+            <Tooltip
+              content={
+                s.stopRequested
+                  ? "Interrupt the books still being extracted (e.g. OCR) right now and put them back to pending, instead of waiting for them to finish"
+                  : "Stop after the books currently being extracted/embedded finish"
+              }
+              placement="top"
+              disabled={!s.running}
+            >
+              <Button
+                icon={s.stopRequested ? "trash" : "stop"}
+                intent={s.stopRequested ? Intent.DANGER : Intent.NONE}
+                text={s.stopRequested ? "Discard & stop now" : "Stop"}
+                disabled={!s.running}
+                loading={busy === "stop" || busy === "forceStop"}
+                onClick={() => act(s.stopRequested ? "forceStop" : "stop")}
+              />
+            </Tooltip>
+            <Button
+              icon="repeat"
+              text={`Retry failed${s.counts.FAILED ? ` (${s.counts.FAILED})` : ""}`}
+              disabled={!s.counts.FAILED}
+              loading={busy === "retry"}
+              onClick={() => act("retry")}
+            />
+            <Button icon="refresh" text="Sync library" loading={syncing} onClick={() => sync().then(status.refresh)} />
+          </>
+        ) : (
+          <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Only library admins start, stop and sync indexing.</span>
+        )}
       </div>
 
       <div className="indexing-scroll">

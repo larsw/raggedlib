@@ -322,6 +322,7 @@ export interface Me {
   libraries: { id: number; name: string; role: LibraryRole }[]; // the libraries the caller can see
   canCurate: boolean; // curator (or more) in at least one library
   canManageMembers: boolean; // library admin in at least one library (or a global admin)
+  canRunIndexing: boolean; // may start/stop indexing and sync: library admin in at least one library (or a global admin)
 }
 
 /** The body of a 401 from the web API. */

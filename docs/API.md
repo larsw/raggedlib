@@ -28,8 +28,10 @@ Roles gate data, per library: `VIEWER` < `CURATOR` < `ADMIN` (`NONE` = no access
 highest of: a role granted in the app, a role mapped from an IdP group (`raggedlib.auth.group-roles`), and
 `raggedlib.auth.default-library-role`; a global admin (admin claim, or granted in the app) is `ADMIN` everywhere.
 A system-wide key is `VIEWER`, or `CURATOR` with `library:curate`. A key restricted to some libraries has no role in
-the others. Viewers read; curators sync, index and re-index their libraries' books and remove reviews of them;
-library admins also grant roles in the library. A library or book the caller can't see is `404`, an action its role
+the others. Viewers read; curators re-index single books of their libraries, watch indexing and remove reviews of
+their books; library admins also sync their libraries, start, stop and retry indexing, and grant roles in the
+library. (So a system-wide key, never a library admin, can't sync or start indexing; a library admin's personal key
+with `library:curate` can.) A library or book the caller can't see is `404`, an action its role
 doesn't allow `403`.
 
 ## Types
@@ -130,7 +132,7 @@ interface SystemInfo {
 |---|---|---|
 | GET  | `/api/system` | `SystemInfo` |
 | GET  | `/api/libraries` | `Library[]`: the configured Calibre libraries the caller can see, with book counts and the caller's role. |
-| POST | `/api/library/sync?libraryId=` | Curator. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller curates, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
+| POST | `/api/library/sync?libraryId=` | Library admin. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller administers, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
 | GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library the caller can see). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |
 | GET  | `/api/books/{id}` | `Book` |
 | GET  | `/api/books/{id}/cover` | `image/jpeg` (404 if none) |
@@ -139,9 +141,9 @@ interface SystemInfo {
 | POST | `/api/books/{id}/reindex` | Curator of the book's library. Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
 | GET  | `/api/tags?libraryId=` | `{ name: string, count: number }[]` sorted by count desc; `libraryId` restricts to one library |
 | GET  | `/api/publishers?libraryId=` | `{ name: string, count: number }[]`: publishers by number of books, like `/api/tags` (books without one are left out) |
-| POST | `/api/ingest/start` | Curator. Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed) of the libraries the caller curates (`bookIds`: each must be in one). Returns `IngestStatus`. Idempotent if running. |
-| POST | `/api/ingest/reprocess` | Curator. Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books of the caller's curated libraries again (all when `bookIds` is absent; an empty list selects none; or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
-| POST | `/api/ingest/stop?force=` | Curator (of any library: the run is shared). Graceful by default: waits for books in flight. `force=true` interrupts them right away (killing e.g. an OCR process) and puts them back to PENDING instead of letting them finish. Returns `IngestStatus`. |
+| POST | `/api/ingest/start` | Library admin. Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed) of the libraries the caller administers (`bookIds`: each must be in one). Returns `IngestStatus`. Idempotent if running. |
+| POST | `/api/ingest/reprocess` | Library admin. Body optional `{ "bookIds"?: number[], "formats"?: string[] }`. Extracts INDEXED and DUPLICATE books of the caller's administered libraries again (all when `bookIds` is absent; an empty list selects none; or those ids / source formats), e.g. after extraction improved. Passages whose text and section are unchanged keep their embeddings; the rest are re-embedded. Old passages stay searchable until replaced. Returns `IngestStatus`. |
+| POST | `/api/ingest/stop?force=` | Library admin (of any library: the run is shared). Graceful by default: waits for books in flight. `force=true` interrupts them right away (killing e.g. an OCR process) and puts them back to PENDING instead of letting them finish. Returns `IngestStatus`. |
 | GET  | `/api/settings` | `ServerSettings` (below): settings changed at runtime, stored on the server. |
 | PUT  | `/api/settings` | Global admin. Body `{ "parallelBooks"?: number }` → `ServerSettings`. `parallelBooks` (1–`parallelBooksMax`) applies to a running indexing at once; `400` outside the range. |
 | GET  | `/api/ingest/status` | `IngestStatus` (frontend polls every 2s). One background run indexes every library together; counts, active books and errors are those of the libraries the caller can see. |
@@ -232,6 +234,7 @@ interface Me {
   libraries: { id: number; name: string; role: LibraryRole }[];   // the ones the caller can see
   canCurate: boolean;                   // curator (or more) somewhere
   canManageMembers: boolean;            // library admin somewhere
+  canRunIndexing: boolean;              // library admin somewhere: may sync and start/stop indexing
 }
 
 interface ApiKeyRequest {

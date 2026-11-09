@@ -68,8 +68,9 @@ function TagList({ tags }: { tags: string[] }) {
 export function LibraryView({ active }: { active: boolean }) {
   const { openReader, library, libraries, librariesLoading, me, roleIn } = useApp();
   const { askAbout, searchIn } = useBookNavigation();
-  // syncing: the chosen library if this user curates it; with every library shown, all the ones it curates
-  const canSync = library ? roleAtLeast(roleIn(library.id), "CURATOR") : me.canCurate;
+  // syncing (library admins): the chosen library if this user administers it; with every library shown, all the
+  // ones it administers
+  const canSync = library ? roleAtLeast(roleIn(library.id), "ADMIN") : me.canRunIndexing;
   const canReindex = (b: Book) => roleAtLeast(roleIn(b.libraryId), "CURATOR");
   const visible = usePageVisible();
   const [q, setQ] = useState("");
@@ -225,7 +226,7 @@ export function LibraryView({ active }: { active: boolean }) {
         <span className="spacer" />
         {canSync && (
           <Tooltip
-            content={library ? `Read ${library.name}'s Calibre metadata again` : "Read the Calibre metadata of every library you curate again"}
+            content={library ? `Read ${library.name}'s Calibre metadata again` : "Read the Calibre metadata of every library you administer again"}
             placement="bottom-end"
           >
             <Button icon="refresh" text="Sync library" onClick={() => sync().then(books.reload)} loading={syncing} />
@@ -251,7 +252,7 @@ export function LibraryView({ active }: { active: boolean }) {
             <NonIdealState
               icon="book"
               title="The library is empty"
-              description={canSync ? "Sync with Calibre to import your books." : "Its books show up here once a curator has synced it with Calibre."}
+              description={canSync ? "Sync with Calibre to import your books." : "Its books show up here once a library admin has synced it with Calibre."}
               action={
                 canSync ? (
                   <Button intent={Intent.PRIMARY} icon="refresh" text="Sync library" loading={syncing} onClick={() => sync().then(books.reload)} />
