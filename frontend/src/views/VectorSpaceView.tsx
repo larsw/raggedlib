@@ -317,7 +317,7 @@ export function VectorSpaceView({ active }: { active: boolean }) {
         <ButtonGroup aria-label="2-D or 3-D">
           <Button text="2D" active={dims === 2} onClick={() => setDims(2)} />
           <Tooltip
-            content={gpu ? "Lay out in three dimensions; drag to rotate" : "3-D needs WebGL2, which this browser doesn't offer"}
+            content={gpu ? "Lay out in three dimensions: drag to turn it any way, shift- or right-drag to pan, scroll to zoom" : "3-D needs WebGL2, which this browser doesn't offer"}
             placement="bottom"
           >
             <Button text="3D" active={dims === 3} disabled={!gpu} onClick={() => setDims(3)} />
