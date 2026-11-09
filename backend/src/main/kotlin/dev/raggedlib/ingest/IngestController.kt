@@ -15,7 +15,7 @@ import org.springframework.web.bind.annotation.RestController
 /**
  * Indexing is one background run over every library. Library admins start it for their libraries' books (others
  * stay pending until one of their admins does), and any library admin may stop it. Curators see the status (of
- * their libraries) but neither start nor stop; they can still queue single books ([dev.raggedlib.library.BookController.reindex]).
+ * their libraries) but neither start, stop nor re-index books ([dev.raggedlib.library.BookController.reindex]).
  */
 @RestController
 @RequestMapping("/api/ingest")

@@ -79,7 +79,7 @@ function DetailsContent({
   const { book, calibre, duplicateOf, sections } = details;
   const { openReader, libraries, roleIn } = useApp();
   const libraryName = libraries.find((l) => l.id === book.libraryId)?.name;
-  const canCurate = roleAtLeast(roleIn(book.libraryId), "CURATOR");
+  const canReindex = roleAtLeast(roleIn(book.libraryId), "ADMIN");
   const year = formatYear(book.pubdate);
   const isPdf = book.sourceFormat === "PDF";
   const readable = readerFormat(book.formats, book.sourceFormat);
@@ -120,7 +120,7 @@ function DetailsContent({
         )}
         <Button icon="chat" text="Ask" onClick={() => onAsk(book)} />
         <Button icon="search" text="Search in" onClick={() => onSearchIn(book)} />
-        {canCurate && (
+        {canReindex && (
           <Button
             icon="repeat"
             text="Reindex"

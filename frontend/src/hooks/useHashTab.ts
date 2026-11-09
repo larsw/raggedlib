@@ -9,7 +9,7 @@ export function tabFromHash(hash: string): TabId {
   return (TABS as readonly string[]).includes(h) ? (h as TabId) : "ask";
 }
 
-/** The tabs a user gets: Indexing only for curators and library admins (only admins start, stop and sync there). */
+/** The tabs a user gets: Indexing only for curators and library admins (only admins start, stop, sync and reindex). */
 export function tabsFor(canCurate: boolean): TabId[] {
   return TABS.filter((t) => t !== "indexing" || canCurate);
 }

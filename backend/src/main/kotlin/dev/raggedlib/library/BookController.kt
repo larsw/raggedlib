@@ -72,7 +72,7 @@ class BookController(
 
     @PostMapping("/books/{id}/reindex")
     fun reindex(@PathVariable id: Long): Book {
-        access.requireBook(id, LibraryRole.CURATOR)
+        access.requireBook(id, LibraryRole.ADMIN)
         return library.reindex(id)
     }
 

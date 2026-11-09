@@ -19,7 +19,7 @@ export function useBookNavigation() {
   return { askAbout, searchIn };
 }
 
-/** Queues books for reindexing (curators), with toasts; `onReindexed` gets the book's new state. */
+/** Queues books for reindexing (library admins), with toasts; `onReindexed` gets the book's new state. */
 export function useReindex(onReindexed?: (book: Book) => void) {
   const [reindexing, setReindexing] = useState<ReadonlySet<number>>(new Set());
   const reindex = async (book: Book) => {

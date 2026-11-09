@@ -28,11 +28,10 @@ Roles gate data, per library: `VIEWER` < `CURATOR` < `ADMIN` (`NONE` = no access
 highest of: a role granted in the app, a role mapped from an IdP group (`raggedlib.auth.group-roles`), and
 `raggedlib.auth.default-library-role`; a global admin (admin claim, or granted in the app) is `ADMIN` everywhere.
 A system-wide key is `VIEWER`, or `CURATOR` with `library:curate`. A key restricted to some libraries has no role in
-the others. Viewers read; curators re-index single books of their libraries, watch indexing and remove reviews of
-their books; library admins also sync their libraries, start, stop and retry indexing, and grant roles in the
-library. (So a system-wide key, never a library admin, can't sync or start indexing; a library admin's personal key
-with `library:curate` can.) A library or book the caller can't see is `404`, an action its role
-doesn't allow `403`.
+the others. Viewers read; curators also watch indexing and remove reviews of their libraries' books; library admins
+also sync their libraries, start, stop and retry indexing, re-index books, and grant roles in the library. (So a
+system-wide key, never a library admin, can't sync or index; a library admin's personal key with `library:curate`
+can.) A library or book the caller can't see is `404`, an action its role doesn't allow `403`.
 
 ## Types
 
@@ -138,7 +137,7 @@ interface SystemInfo {
 | GET  | `/api/books/{id}/cover` | `image/jpeg` (404 if none) |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
 | GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: description as plain text, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, and `sections: {title, firstPage, passages}[]`, the indexed outline in reading order. |
-| POST | `/api/books/{id}/reindex` | Curator of the book's library. Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
+| POST | `/api/books/{id}/reindex` | Library admin of the book's library. Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
 | GET  | `/api/tags?libraryId=` | `{ name: string, count: number }[]` sorted by count desc; `libraryId` restricts to one library |
 | GET  | `/api/publishers?libraryId=` | `{ name: string, count: number }[]`: publishers by number of books, like `/api/tags` (books without one are left out) |
 | POST | `/api/ingest/start` | Library admin. Body optional `{ "bookIds"?: number[], "retryFailed"?: boolean }`. Starts background ingestion of all PENDING books (plus FAILED if retryFailed) of the libraries the caller administers (`bookIds`: each must be in one). Returns `IngestStatus`. Idempotent if running. |

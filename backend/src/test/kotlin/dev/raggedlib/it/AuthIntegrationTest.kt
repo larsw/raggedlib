@@ -200,6 +200,7 @@ class AuthIntegrationTest {
         assertEquals(403, curator.post("/api/ingest/stop").status)
         assertEquals(403, curator.post("/api/library/sync").status)
         assertEquals(403, curator.post("/api/library/sync?libraryId=$alpha").status)
+        assertEquals(403, curator.post("/api/books/$alphaBook/reindex").status)
         assertEquals(403, as_("reader").post("/api/ingest/stop").status)
 
         // a library admin may (nothing is running, so stopping changes nothing)

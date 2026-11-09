@@ -71,7 +71,7 @@ export function LibraryView({ active }: { active: boolean }) {
   // syncing (library admins): the chosen library if this user administers it; with every library shown, all the
   // ones it administers
   const canSync = library ? roleAtLeast(roleIn(library.id), "ADMIN") : me.canRunIndexing;
-  const canReindex = (b: Book) => roleAtLeast(roleIn(b.libraryId), "CURATOR");
+  const canReindex = (b: Book) => roleAtLeast(roleIn(b.libraryId), "ADMIN");
   const visible = usePageVisible();
   const [q, setQ] = useState("");
   const query = useDebounced(q.trim(), 300);
