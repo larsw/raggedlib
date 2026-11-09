@@ -66,7 +66,7 @@ function TagList({ tags }: { tags: string[] }) {
 }
 
 export function LibraryView({ active }: { active: boolean }) {
-  const { openReader, library, libraries, me, roleIn } = useApp();
+  const { openReader, library, libraries, librariesLoading, me, roleIn } = useApp();
   const { askAbout, searchIn } = useBookNavigation();
   // syncing: the chosen library if this user curates it; with every library shown, all the ones it curates
   const canSync = library ? roleAtLeast(roleIn(library.id), "CURATOR") : me.canCurate;
@@ -99,22 +99,26 @@ export function LibraryView({ active }: { active: boolean }) {
   // back to the first page whenever the filter changes
   useEffect(() => setPage(0), [query, status, tag, publisher, sort, descending, library?.id]);
 
+  // Wait for the libraries: until they load, `library` is null (every library) even when one is chosen, and the
+  // request made for that would be thrown away (aborted mid-response) as soon as they arrive.
   const books = useAsync(
     (signal) =>
-      api.books(
-        {
-          q: query || undefined,
-          status: status || undefined,
-          tag: tag || undefined,
-          publisher: publisher || undefined,
-          libraryId: library?.id,
-          sort: sortParam(sort, descending),
-          page,
-          size: PAGE_SIZE,
-        },
-        signal,
-      ),
-    [query, status, tag, publisher, sort, descending, page, library?.id],
+      librariesLoading
+        ? Promise.resolve(undefined)
+        : api.books(
+            {
+              q: query || undefined,
+              status: status || undefined,
+              tag: tag || undefined,
+              publisher: publisher || undefined,
+              libraryId: library?.id,
+              sort: sortParam(sort, descending),
+              page,
+              size: PAGE_SIZE,
+            },
+            signal,
+          ),
+    [query, status, tag, publisher, sort, descending, page, library?.id, librariesLoading],
   );
 
   // Refresh when coming back to the tab (statuses change while indexing runs).
