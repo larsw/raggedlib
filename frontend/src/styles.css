@@ -1923,7 +1923,7 @@ body.is-resizing-x * {
   }
 }
 
-/* Vectors tab: scatter plot with a side panel for details and the book legend */
+/* Visualization tab (#/vectors): scatter plot with a side panel for details and the book legend */
 .vectors-view {
   position: relative;
   display: flex;

@@ -12,7 +12,7 @@ const TAB_META: Record<TabId, { label: string; icon: IconName }> = {
   search: { label: "Search", icon: "search" },
   library: { label: "Library", icon: "th" },
   lists: { label: "Lists", icon: "bookmark" },
-  vectors: { label: "Vectors", icon: "scatter-plot" },
+  vectors: { label: "Visualization", icon: "scatter-plot" },
   indexing: { label: "Indexing", icon: "database" },
 };
 
