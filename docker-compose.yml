@@ -155,8 +155,8 @@ services:
       RAGGEDLIB_LIBRARIES_1_NAME: ${CALIBRE_LIBRARY_1_NAME:-}
       RAGGEDLIB_LIBRARIES_1_PATH: /library/1
       # Library 2: uncomment here and the matching volume below, and set CALIBRE_LIBRARY_2 (+ _NAME) in .env, to add a third.
-      RAGGEDLIB_LIBRARIES_2_NAME: ${CALIBRE_LIBRARY_2_NAME:-}
-      RAGGEDLIB_LIBRARIES_2_PATH: /library/2
+      #RAGGEDLIB_LIBRARIES_2_NAME: ${CALIBRE_LIBRARY_2_NAME:-}
+      #RAGGEDLIB_LIBRARIES_2_PATH: /library/2
       RAGGEDLIB_RERANK_BASE_URL: http://reranker:8080
       # MCP endpoint http://localhost:3000/mcp (or :8090/mcp): clients send "Authorization: Bearer <key>", a key users
       # mint in the web UI (Account → API keys). MCP_API_KEY adds one system-wide key (library:read) from here.
@@ -166,7 +166,7 @@ services:
     volumes:
       - ${CALIBRE_LIBRARY:-${HOME}/Documents/CalibreLibrary}:/library/0:ro
       - ${CALIBRE_LIBRARY_1:-${HOME}/Documents/CalibreLibraryNonFiction}:/library/1:ro
-      - ${CALIBRE_LIBRARY_2:-${HOME}/Documents/CalibreLibraryMisc}:/library/2:ro
+      #- ${CALIBRE_LIBRARY_2:-${HOME}/Documents/CalibreLibraryMisc}:/library/2:ro
     ports:
       - "127.0.0.1:8090:8080"
 
