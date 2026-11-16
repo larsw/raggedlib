@@ -32,8 +32,12 @@ data class RaggedlibProperties(
     val ocr: Ocr = Ocr(),
     val auth: Auth = Auth(),
 ) {
-    /** One configured Calibre library. [name] is just a display label; blank defaults to the path's last segment. */
-    data class LibraryConfig(val name: String = "", val path: Path = Path.of(""))
+    /**
+     * One configured Calibre library. [name] is just a display label; blank defaults to the path's last segment.
+     * [writable] opts the library in to changes through raggedlib (uploads, metadata edits), made with calibredb; it
+     * also needs a read-write mount, and must not be open in desktop Calibre at the same time (see LibraryWriteCheck).
+     */
+    data class LibraryConfig(val name: String = "", val path: Path = Path.of(""), val writable: Boolean = false)
 
     /** [libraries] if configured, else one library from the legacy [libraryPath]; never empty once validated. */
     fun effectiveLibraries(): List<LibraryConfig> = when {
@@ -44,6 +48,7 @@ data class RaggedlibProperties(
 
     data class Tools(
         val calibredb: String = "calibredb",
+        val calibreDebug: String = "calibre-debug",
         val ebookConvert: String = "ebook-convert",
         val pdftotext: String = "pdftotext",
         val pdftoppm: String = "pdftoppm",

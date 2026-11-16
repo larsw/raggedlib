@@ -122,10 +122,13 @@ export interface Library {
   path: string | null; // where it is on disk; shown to global admins only
   bookCount: number;
   role: LibraryRole; // the caller's role in it (at least VIEWER)
+  writable: boolean; // books can be uploaded and edited through raggedlib
+  readOnlyReason: string | null; // why a library configured writable isn't; global admins only
 }
 
 export interface SystemInfo {
-  libraries: { name: string; path: string | null }[]; // the caller's libraries; path for global admins only
+  // the caller's libraries; path and readOnlyReason for global admins only
+  libraries: { name: string; path: string | null; writable: boolean; readOnlyReason: string | null }[];
   ollamaUrl: string;
   ollamaReachable: boolean;
   chatModel: string;

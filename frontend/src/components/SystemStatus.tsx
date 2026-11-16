@@ -12,6 +12,12 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/** " · writable", or why a library configured writable stays read-only (admins only see the reason). */
+function libraryAccess(l: { writable: boolean; readOnlyReason: string | null }): string {
+  if (l.writable) return " · writable";
+  return l.readOnlyReason ? ` · READ-ONLY: ${l.readOnlyReason}` : "";
+}
+
 /** Navbar dot: backend + ollama health, details in a tooltip. */
 export function SystemStatus() {
   const { system, systemError, systemLoading } = useApp();
@@ -28,7 +34,9 @@ export function SystemStatus() {
       : `Backend error: ${errorMessage(systemError)}`;
   } else if (system) {
     const rerankerOk = !system.rerankEnabled || system.rerankerReachable;
-    intent = system.ollamaReachable && rerankerOk ? Intent.SUCCESS : Intent.WARNING;
+    // a library configured writable that isn't (reason shown to admins only)
+    const librariesOk = system.libraries.every((l) => !l.readOnlyReason);
+    intent = system.ollamaReachable && rerankerOk && librariesOk ? Intent.SUCCESS : Intent.WARNING;
     label = system.chatModel;
     content = (
       <table className="status-table">
@@ -50,13 +58,17 @@ export function SystemStatus() {
           />
           {system.libraries.some((l) => l.path != null) ? (
             system.libraries.map((l) => (
-              <Row key={l.name} label={system.libraries.length > 1 ? `Library: ${l.name}` : "Library"} value={l.path ?? "—"} />
+              <Row
+                key={l.name}
+                label={system.libraries.length > 1 ? `Library: ${l.name}` : "Library"}
+                value={`${l.path ?? "—"}${libraryAccess(l)}`}
+              />
             ))
           ) : (
             // where libraries are on disk is for admins
             <Row
               label={system.libraries.length === 1 ? "Library" : "Libraries"}
-              value={system.libraries.map((l) => l.name).join(", ") || "—"}
+              value={system.libraries.map((l) => `${l.name}${l.writable ? " (writable)" : ""}`).join(", ") || "—"}
             />
           )}
         </tbody>

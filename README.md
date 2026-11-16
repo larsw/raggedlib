@@ -22,7 +22,8 @@ Sign-in goes through a development OpenID Connect provider, [dex](https://dexidp
 (see [Users and roles](#users-and-roles) for its users and for using your own provider instead). For just yourself,
 put `AUTH_MODE=single-user` in `.env`: no sign-in, as before raggedlib had users.
 
-The library is mounted **read-only** from `~/Documents/CalibreLibrary`. Set `CALIBRE_LIBRARY` to use another path, and `CHAT_MODEL` or `EMBED_MODEL` to swap models (see `.env.example`). Changing the embedding model also means changing `vector(1024)` in the migration and re-indexing. Scanned PDFs are OCR'd in English; set `OCR_LANGUAGES` to read others too, e.g. `OCR_LANGUAGES=eng+nor+deu` (Tesseract's language codes), and rebuild the backend, which installs them.
+The library is mounted **read-only** from `~/Documents/CalibreLibrary` (to let raggedlib add and edit books, see
+[Writable libraries](#writable-libraries)). Set `CALIBRE_LIBRARY` to use another path, and `CHAT_MODEL` or `EMBED_MODEL` to swap models (see `.env.example`). Changing the embedding model also means changing `vector(1024)` in the migration and re-indexing. Scanned PDFs are OCR'd in English; set `OCR_LANGUAGES` to read others too, e.g. `OCR_LANGUAGES=eng+nor+deu` (Tesseract's language codes), and rebuild the backend, which installs them.
 
 The backend image installs Calibre from its official Linux binaries, pinned to 9.18 (`CALIBRE_VERSION` and
 `CALIBRE_SHA512` in `backend/Dockerfile`), rather than the distribution's older package, so the `calibredb` and
@@ -43,6 +44,29 @@ library repeats the pattern at index 2, and so on — the same indexed-environme
 indexing run or a sweep for duplicate text across libraries always covers every configured library; the chooser only
 changes what's displayed. A library already indexed under the single-library `CALIBRE_LIBRARY`/`RAGGEDLIB_LIBRARY_PATH`
 setting keeps its books when you add more libraries, as long as its path doesn't change.
+
+### Writable libraries
+
+Libraries are read-only to raggedlib unless you opt one in. A **writable** library is one raggedlib may change through
+`calibredb`: uploading books and editing their metadata, for the users with at least the curator role in it. To make
+one writable in docker-compose:
+
+1. **Back it up first.** raggedlib writes to the library's `metadata.db` and its book folders as desktop Calibre does.
+2. Mount it read-write: swap its volume line in `docker-compose.yml` for the commented `:rw` one.
+3. Set `CALIBRE_LIBRARY_WRITABLE=true` in `.env` (`CALIBRE_LIBRARY_1_WRITABLE` for library 1, and so on); on the host,
+   `RAGGEDLIB_LIBRARIES_0_WRITABLE=true`.
+4. If the libraries aren't owned by uid/gid 1000, set `UID` and `GID` in `.env` to their owner: the backend runs as that
+   user, so the files it writes belong to you.
+
+At startup the backend checks every library configured writable: that it can create files in the library's directory,
+that `metadata.db` is writable, and that `metadata.db`'s schema is one the installed Calibre knows (a library last
+written by a newer desktop Calibre is left alone). A library that fails a check stays read-only, and System status (the
+dot in the navbar) turns yellow and tells global admins why. The first write may upgrade an older library's schema, as
+opening it in desktop Calibre 9.18 would.
+
+**Don't open a writable library in desktop Calibre while raggedlib is running.** `calibredb` normally refuses to touch a
+library the Calibre GUI has open, but inside the backend's container it can't see the GUI on the host, and the GUI would
+then work from a stale copy and could overwrite raggedlib's changes.
 
 ### Develop on the host
 

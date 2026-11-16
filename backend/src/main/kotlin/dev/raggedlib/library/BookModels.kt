@@ -54,4 +54,8 @@ data class Library(
     val path: String?,
     val bookCount: Int,
     val role: dev.raggedlib.auth.LibraryRole,
+    /** Books can be uploaded and edited through raggedlib (configured writable, and the checks passed). */
+    val writable: Boolean = false,
+    /** Why a library configured writable is read-only; for global admins only (it names paths). */
+    val readOnlyReason: String? = null,
 )
