@@ -6,7 +6,6 @@ import dev.raggedlib.calibre.Formats
 import dev.raggedlib.ingest.IngestService
 import dev.raggedlib.config.notFound
 import org.slf4j.LoggerFactory
-import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import java.util.Locale
@@ -18,7 +17,7 @@ class LibraryService(
     private val registry: LibraryRegistry,
     private val ingest: IngestService,
     private val tx: TransactionTemplate,
-    private val events: ApplicationEventPublisher,
+    private val deletions: BookDeletionService,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val syncLock = Any()
@@ -73,10 +72,12 @@ class LibraryService(
         value.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
 
     private fun syncOne(lib: LibraryInfo): SyncResult {
+        deletions.purgeExpiredIn(lib.id)
         val snapshot = calibre.load(lib.root)
-        val existing = books.findAllByLibrary(lib.id).associateBy { it.book.calibreId }
+        val existing = books.findAllIncludingDeletedByLibrary(lib.id).associateBy { it.book.calibreId }
         var added = 0
         var updated = 0
+        var restored = 0
         tx.executeWithoutResult {
             for (r in snapshot.records) {
                 val old = existing[r.id]
@@ -85,6 +86,15 @@ class LibraryService(
                     books.insert(lib.id, r, preferred)
                     added++
                     continue
+                }
+                if (old.deletedAt != null) {
+                    if (books.restore(old.book.id)) {
+                        restored++
+                    } else if (books.find(old.book.id) == null) {
+                        books.insert(lib.id, r, preferred)
+                        added++
+                        continue
+                    }
                 }
                 val changed = old.lastModified != r.lastModified || old.formatPaths.keys != r.formats.keys
                 // also refreshes what an older index didn't store (publisher, before V7) without re-indexing
@@ -96,17 +106,19 @@ class LibraryService(
                     updated++
                 } else if (metadataOnly) {
                     books.updateMetadata(old.book.id, r, old.book.sourceFormat ?: preferred, reset = false)
+                } else if (old.deletedAt != null) {
+                    updated++
                 }
             }
         }
         val seen = snapshot.records.mapTo(HashSet()) { it.id }
-        val gone = existing.values.filter { it.book.calibreId !in seen }.map { it.book.id }
-        val removed = books.delete(gone) // chunks go via ON DELETE CASCADE, duplicate_of via SET NULL
+        val gone = existing.values.filter { it.deletedAt == null && it.book.calibreId !in seen }.map { it.book.id }
+        val removed = deletions.markDeleted(gone, "Calibre sync").size
         // duplicates of removed books need passages of their own now (also catches one marked while deleting)
         val orphaned = books.requeueOrphanedDuplicates()
         if (orphaned.isNotEmpty()) log.info("Duplicates {} of removed books are pending again", orphaned)
+        deletions.visibilityChanged(restored)
         log.info("Library '{}' sync via {}: +{} ~{} -{} (total {})", lib.name, snapshot.source, added, updated, removed, snapshot.records.size)
-        if (removed > 0) events.publishEvent(BooksRemoved(removed))
         return SyncResult(added, updated, removed, snapshot.records.size, snapshot.source)
     }
 
@@ -118,6 +130,3 @@ class LibraryService(
         return books.find(id)!!.book
     }
 }
-
-/** Published after a library sync deleted [count] books (and, by cascade, their passages). */
-data class BooksRemoved(val count: Int)

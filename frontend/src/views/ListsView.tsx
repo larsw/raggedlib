@@ -7,6 +7,7 @@ import { ErrorState } from "../components/ErrorState";
 import { ListFormDialog } from "../components/lists/ListFormDialog";
 import { useAsync } from "../hooks/useAsync";
 import { useBookNavigation, useReindex } from "../hooks/useBookActions";
+import { clearFacetCache } from "../hooks/useFacet";
 import { listIdFromHash, tabFromHash } from "../hooks/useHashTab";
 import { useSidePanel } from "../hooks/useSidePanel";
 import { STORAGE_KEYS } from "../lib/storage";
@@ -145,6 +146,12 @@ export function ListsView({ active }: { active: boolean }) {
               onListsChanged={reloadAll}
               onBookMetadataChanged={() => {
                 setBookKey((k) => k + 1);
+                reloadAll();
+              }}
+              onBookDeleted={() => {
+                setBookId(null);
+                setBookKey((k) => k + 1);
+                clearFacetCache();
                 reloadAll();
               }}
             />

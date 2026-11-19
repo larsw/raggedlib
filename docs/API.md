@@ -200,6 +200,7 @@ interface BookUploadDecisionResult {
 | POST | `/api/library/sync?libraryId=` | Library admin. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller administers, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
 | GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library the caller can see). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |
 | GET  | `/api/books/{id}` | `Book` |
+| DELETE | `/api/books/{id}` | `library:edit` and curator in a writable, unpaused library. Moves the book to Calibre's 14-day trash, hides it in raggedlib, and logs `DELETE_BOOK`; the book's raggedlib data is retained for 14 days. |
 | GET  | `/api/books/{id}/cover?v=` | `image/jpeg` (404 if none); optional version is Calibre's `last_modified` value. |
 | PUT | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Multipart `file` upload (JPEG, PNG or WebP, max 10 MB). Changes apply immediately. |
 | DELETE | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Removes the cover immediately. |

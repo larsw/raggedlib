@@ -57,7 +57,7 @@ class ChunkStore(
         return named.query(
             """
             select v.book_id, count(distinct md5(v.content)) as shared, b.chunk_count
-            from vector_store v join books b on b.id = v.book_id
+            from vector_store v join active_books b on b.id = v.book_id
             where md5(v.content) = any(:hashes) and v.book_id <> :id
             group by v.book_id, b.chunk_count
             """.trimIndent(),

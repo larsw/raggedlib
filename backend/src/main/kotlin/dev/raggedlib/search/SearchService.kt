@@ -60,18 +60,18 @@ class SearchService(
         // a DUPLICATE book (also while queued again) has no passages of its own: its copy is searched instead
         val ownOrKept = "coalesce(duplicate_of, id)"
         if (bookIds != null) {
-            filters += "v.book_id in (select $ownOrKept from books where id in (:bookIds))"
+            filters += "v.book_id in (select $ownOrKept from active_books where id in (:bookIds))"
             params.addValue("bookIds", bookIds)
         }
         if (tags != null) {
-            filters += "v.book_id in (select $ownOrKept from books where tags && cast(:tags as text[]))"
+            filters += "v.book_id in (select $ownOrKept from active_books where tags && cast(:tags as text[]))"
             params.addValue("tags", tags.toTypedArray())
         }
         // always: the caller's libraries (a duplicate's passages are its kept copy's, which may be in another one)
-        filters += "v.book_id in (select $ownOrKept from books where library_id in (:libraryIds))"
+        filters += "v.book_id in (select $ownOrKept from active_books where library_id in (:libraryIds))"
         params.addValue("libraryIds", allowed)
         if (publishers != null) {
-            filters += "v.book_id in (select $ownOrKept from books where publisher in (:publishers))"
+            filters += "v.book_id in (select $ownOrKept from active_books where publisher in (:publishers))"
             params.addValue("publishers", publishers)
         }
         val filterSql = filters.joinToString("") { " and $it" }
@@ -149,7 +149,7 @@ class SearchService(
                 select * from (
                     select v.id, v.book_id, b.title, b.authors, v.page, v.section, v.content,
                            v.embedding <=> :emb as distance
-                    from vector_store v join books b on b.id = v.book_id
+                    from vector_store v join active_books b on b.id = v.book_id
                     where true $filterSql
                     order by v.embedding <=> :emb
                     limit :limit
@@ -182,7 +182,7 @@ class SearchService(
             """
             select v.id, v.book_id, b.title, b.authors, v.page, v.section, v.content,
                    ts_rank_cd(v.content_tsv, q.query) as rank
-            from vector_store v join books b on b.id = v.book_id,
+            from vector_store v join active_books b on b.id = v.book_id,
                  websearch_to_tsquery('english', :q) q(query)
             where v.content_tsv @@ q.query $filterSql
             order by rank desc
@@ -219,7 +219,7 @@ class SearchService(
                 select v.id, v.book_id, b.title, b.authors, v.page, v.section, v.content,
                        ($coverage) / cast(:total as float8) as coverage,
                        ts_rank_cd(v.content_tsv, cast(:rankQuery as tsquery)) as rank
-                from vector_store v join books b on b.id = v.book_id
+                from vector_store v join active_books b on b.id = v.book_id
                 where v.content_tsv @@ cast(:candidates as tsquery) $filterSql
             ) c
             where coverage >= :minCoverage

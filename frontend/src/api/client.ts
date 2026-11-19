@@ -241,6 +241,7 @@ export const api = {
   book: (id: number, signal?: AbortSignal) => getJson<Book>(`/books/${id}`, signal),
 
   bookDetails: (id: number, signal?: AbortSignal) => getJson<BookDetails>(`/books/${id}/details`, signal),
+  deleteBook: (id: number) => deleteJson(`/books/${id}`),
   updateBookMetadata: (id: number, fields: BookMetadataFields, original: BookMetadataOriginalFields) =>
     putJson<BookDetails>(`/books/${id}/metadata`, { fields, original }),
   uploadBookCover: async (id: number, file: File) => {

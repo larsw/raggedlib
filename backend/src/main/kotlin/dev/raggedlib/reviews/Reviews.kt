@@ -60,7 +60,7 @@ class ReviewService(private val jdbc: NamedParameterJdbcTemplate, private val ac
     private val select = """
         select r.id, r.book_id, b.title, r.user_id, coalesce(u.display_name, u.email, u.subject) as author,
                r.rating, r.body, r.created_at, r.updated_at
-        from book_reviews r join users u on u.id = r.user_id join books b on b.id = r.book_id
+        from book_reviews r join users u on u.id = r.user_id join active_books b on b.id = r.book_id
     """.trimIndent()
 
     private fun mapper(me: Long?) = RowMapper { rs, _ ->

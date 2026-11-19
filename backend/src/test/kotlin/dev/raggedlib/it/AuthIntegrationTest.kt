@@ -1,5 +1,14 @@
 package dev.raggedlib.it
 
+import dev.raggedlib.chat.ChatRequest
+import dev.raggedlib.chat.ChatService
+import dev.raggedlib.library.BookDeletionService
+import dev.raggedlib.library.LibraryRegistry
+import dev.raggedlib.library.LibraryService
+import org.mockito.ArgumentMatchers.anyString
+import org.mockito.Mockito
+import org.springframework.ai.embedding.EmbeddingModel
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Assumptions.assumeTrue
@@ -9,6 +18,7 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.test.context.ActiveProfiles
 import org.springframework.test.context.DynamicPropertyRegistry
 import org.springframework.test.context.DynamicPropertySource
+import org.springframework.test.context.bean.override.mockito.MockitoBean
 import org.testcontainers.containers.GenericContainer
 import org.testcontainers.containers.wait.strategy.Wait
 import org.testcontainers.images.builder.Transferable
@@ -35,13 +45,39 @@ import kotlin.test.assertTrue
  * Multi-user support end to end: real sign-in through dex (the same users as the docker-compose stack, from
  * infra/dex/config.yaml), sessions with CSRF, roles from groups and grants, favorite lists, reviews, and personal
  * and system-wide API keys on the REST API and the MCP endpoint. Postgres (pgvector) and dex run in containers;
- * Ollama and the reranker aren't needed, so nothing here searches or asks. Skipped without Docker.
+ * The embedding model and reranker are mocked for search visibility checks; other Ollama features aren't needed.
+ * Skipped without Docker.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
 @ActiveProfiles("dex")
 @Testcontainers(disabledWithoutDocker = true)
 class AuthIntegrationTest {
     @Autowired lateinit var jdbc: NamedParameterJdbcTemplate
+    @Autowired lateinit var chat: ChatService
+    @Autowired lateinit var library: LibraryService
+    @Autowired lateinit var deletions: BookDeletionService
+    @Autowired lateinit var registry: LibraryRegistry
+    @MockitoBean lateinit var embeddingModel: EmbeddingModel
+    private val softDeleteFixtureBooks = mutableSetOf<Long>()
+    private val softDeleteFixtureLists = mutableSetOf<Long>()
+
+    @AfterEach
+    fun cleanSoftDeleteFixtures() {
+        if (softDeleteFixtureLists.isNotEmpty()) {
+            jdbc.update("delete from favorite_list_books where list_id in (:ids)", mapOf("ids" to softDeleteFixtureLists))
+            jdbc.update("delete from favorite_lists where id in (:ids)", mapOf("ids" to softDeleteFixtureLists))
+        }
+        if (softDeleteFixtureBooks.isNotEmpty()) {
+            val params = mapOf("ids" to softDeleteFixtureBooks)
+            jdbc.update("delete from book_activity where book_id in (:ids)", params)
+            jdbc.update("delete from book_reviews where book_id in (:ids)", params)
+            jdbc.update("delete from favorite_list_books where book_id in (:ids)", params)
+            jdbc.update("delete from vector_store where book_id in (:ids)", params)
+            jdbc.update("delete from books where id in (:ids)", params)
+        }
+        softDeleteFixtureLists.clear()
+        softDeleteFixtureBooks.clear()
+    }
 
     companion object {
         private val appPort = freePort()
@@ -179,6 +215,229 @@ class AuthIntegrationTest {
             mapOf("name" to "edit-only uploader", "scopes" to listOf("library:edit"), "libraryIds" to listOf(alpha)),
         ).json.path("rawKey").asString()
         assertEquals(404, as_("curator").postMultipart("/api/libraries/9223372036854775807/books", listOf(part), editKey).status)
+    }
+
+    @Test
+    fun `soft deleted books disappear from search Ask lists reviews facets and MCP, and can be restored`() {
+        val title = "SoftDelete${System.nanoTime()}"
+        val phrase = "softdeletepassage${System.nanoTime()}"
+        val tag = "soft-delete-${System.nanoTime()}"
+        val publisher = "SoftDeletePublisher${System.nanoTime()}"
+        val bookId = jdbc.queryForObject(
+            """
+            insert into books (library_id, calibre_id, title, authors, tags, publisher, status, chunk_count, indexed_at)
+            values (:libraryId, :calibreId, :title, '{Ann Author}', array[:tag], :publisher, 'INDEXED', 1, now())
+            returning id
+            """.trimIndent(),
+            mapOf("libraryId" to alpha, "calibreId" to System.nanoTime(), "title" to title, "tag" to tag, "publisher" to publisher),
+            Long::class.java,
+        )!!
+        softDeleteFixtureBooks += bookId
+        jdbc.update(
+            "insert into vector_store (content, metadata, book_id, chunk_index) values (:content, '{}'::jsonb, :id, 0)",
+            mapOf("content" to phrase, "id" to bookId),
+        )
+        val reader = as_("reader")
+        val listId = reader.post("/api/lists", mapOf("name" to "Soft delete $bookId")).json.path("id").asLong()
+        softDeleteFixtureLists += listId
+        reader.put("/api/lists/$listId/books/$bookId")
+        reader.put("/api/books/$bookId/reviews/mine", mapOf("body" to "Keep this review while deleted"))
+        Mockito.`when`(embeddingModel.embed(anyString())).thenReturn(FloatArray(1024))
+
+        val searchRequest = mapOf(
+            "query" to phrase,
+            "bookIds" to listOf(bookId),
+            "libraryIds" to listOf(alpha),
+            "rerank" to false,
+            "correct" to false,
+        )
+        val found = reader.post("/api/search", searchRequest)
+        assertEquals(200, found.status, found.body)
+        assertTrue(found.json.path("results").values().any { it.path("bookId").asLong() == bookId })
+        assertEquals(
+            1,
+            chat.retrieve(ChatRequest(query = phrase, bookIds = listOf(bookId), rerank = false, correct = false), phrase, setOf(alpha))
+                .results.count { it.bookId == bookId },
+        )
+
+        val duplicateId = jdbc.queryForObject(
+            """
+            insert into books (library_id, calibre_id, title, authors, status, duplicate_of)
+            values (:libraryId, :calibreId, 'Requeued duplicate ${System.nanoTime()}', '{Soft Delete Duplicate Author}', 'DUPLICATE', :keeper)
+            returning id
+            """.trimIndent(),
+            mapOf("libraryId" to alpha, "calibreId" to System.nanoTime(), "keeper" to bookId),
+            Long::class.java,
+        )!!
+        softDeleteFixtureBooks += duplicateId
+        assertEquals(1, deletions.markDeleted(listOf(bookId), "Calibre sync").size)
+        assertEquals(
+            "PENDING",
+            jdbc.queryForObject("select status from books where id = :id", mapOf("id" to duplicateId), String::class.java),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "select count(*) from book_activity where book_id = :id and action = 'DELETE_BOOK'",
+                mapOf("id" to bookId),
+                Long::class.java,
+            ),
+        )
+        assertFalse(reader.get("/api/books?q=$title").json.path("items").values().any { it.path("id").asLong() == bookId })
+        assertEquals(404, reader.get("/api/books/$bookId").status)
+        assertEquals(404, reader.get("/api/books/$bookId/reviews").status)
+        assertFalse(reader.get("/api/me/reviews").body.contains(title))
+        assertFalse(reader.get("/api/lists/$listId").body.contains(title))
+        val listMembership = reader.get("/api/lists?bookId=$bookId").json.path("mine").values()
+            .first { it.path("id").asLong() == listId }
+        assertFalse(listMembership.path("containsBook").asBoolean())
+        assertFalse(reader.get("/api/tags?libraryId=$alpha").body.contains(tag))
+        assertFalse(reader.get("/api/publishers?libraryId=$alpha").body.contains(publisher))
+        assertTrue(reader.post("/api/search", searchRequest).json.path("results").isEmpty)
+        assertTrue(
+            chat.retrieve(ChatRequest(query = phrase, bookIds = listOf(bookId), rerank = false, correct = false), phrase, setOf(alpha))
+                .results.isEmpty(),
+        )
+
+        val key = reader.post(
+            "/api/me/api-keys",
+            mapOf("name" to "soft delete visibility", "scopes" to listOf("library:read", "favorites:read"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+        val listed = reader.callTool("list_books", mapOf("query" to title), key)
+        val listedBooks = listed.path("structuredContent").takeIf { it.isObject }
+            ?: Browser.MAPPER.readTree(listed.path("content").path(0).path("text").asString())
+        assertTrue(listedBooks.path("books").isEmpty, listedBooks.toString())
+        val favoriteContents = reader.callTool("get_favorite_list", mapOf("listId" to listId), key)
+        val favoriteBooks = favoriteContents.path("structuredContent").takeIf { it.isObject }
+            ?: Browser.MAPPER.readTree(favoriteContents.path("content").path(0).path("text").asString())
+        assertTrue(favoriteBooks.path("books").isEmpty, favoriteBooks.toString())
+        assertEquals(1, jdbc.queryForObject("select count(*) from book_reviews where book_id = :id", mapOf("id" to bookId), Long::class.java))
+        assertEquals(1, jdbc.queryForObject("select count(*) from favorite_list_books where book_id = :id", mapOf("id" to bookId), Long::class.java))
+
+        val beforeRestore = jdbc.queryForObject("select indexed_at from books where id = :id", mapOf("id" to bookId), java.sql.Timestamp::class.java)
+        assertTrue(jdbc.update("update books set deleted_at = null where id = :id", mapOf("id" to bookId)) == 1)
+        val restored = reader.get("/api/books/$bookId")
+        assertEquals(200, restored.status)
+        assertEquals("INDEXED", restored.json.path("status").asString())
+        assertEquals(1, restored.json.path("chunkCount").asInt())
+        assertEquals(
+            beforeRestore,
+            jdbc.queryForObject("select indexed_at from books where id = :id", mapOf("id" to bookId), java.sql.Timestamp::class.java),
+        )
+        assertEquals(1, reader.get("/api/books/$bookId/reviews").json.path("count").asInt())
+        assertTrue(reader.get("/api/lists/$listId").body.contains(title))
+    }
+
+    @Test
+    fun `book deletion requires curator role edit scope and unpaused editing`() {
+        assertEquals(403, as_("reader").delete("/api/books/$alphaBook").status)
+        val key = as_("curator").post(
+            "/api/me/api-keys",
+            mapOf("name" to "read-only deleter", "scopes" to listOf("library:read"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+        assertEquals(403, Browser(base).delete("/api/books/$alphaBook", key).status)
+
+        registry.setEditingPaused(alpha, true)
+        try {
+            assertEquals(403, as_("curator").delete("/api/books/$alphaBook").status)
+        } finally {
+            registry.setEditingPaused(alpha, false)
+        }
+    }
+
+    @Test
+    fun `nightly purge removes only books deleted more than fourteen days ago`() {
+        fun deletedBook(title: String, daysAgo: Int): Long {
+            val id = jdbc.queryForObject(
+                """
+                insert into books (library_id, calibre_id, title, authors, status, deleted_at)
+                values (:libraryId, :calibreId, :title, '{Purge Test Author}', 'INDEXED', now() - make_interval(days => :days))
+                returning id
+                """.trimIndent(),
+                mapOf("libraryId" to alpha, "calibreId" to System.nanoTime(), "title" to title, "days" to daysAgo),
+                Long::class.java,
+            )!!
+            softDeleteFixtureBooks += id
+            jdbc.update(
+                "insert into vector_store (content, metadata, book_id, chunk_index) values (:content, '{}'::jsonb, :id, 0)",
+                mapOf("content" to title, "id" to id),
+            )
+            return id
+        }
+
+        val expiredId = deletedBook("Expired soft-delete fixture", 15)
+        val retainedId = deletedBook("Retained soft-delete fixture", 13)
+        deletions.purgeExpired()
+
+        assertEquals(0, jdbc.queryForObject("select count(*) from books where id = :id", mapOf("id" to expiredId), Long::class.java))
+        assertEquals(1, jdbc.queryForObject("select count(*) from books where id = :id", mapOf("id" to retainedId), Long::class.java))
+        assertEquals(0, jdbc.queryForObject("select count(*) from vector_store where book_id = :id", mapOf("id" to expiredId), Long::class.java))
+        assertEquals(1, jdbc.queryForObject("select count(*) from vector_store where book_id = :id", mapOf("id" to retainedId), Long::class.java))
+    }
+
+    @Test
+    fun `Calibre deletion uses trash and sync restores retained raggedlib data`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val libraryInfo = as_("admin").get("/api/libraries").json.values()
+            .first { it.path("name").asString() == "Alpha" }
+        assumeTrue(libraryInfo.path("writable").asBoolean(), libraryInfo.path("readOnlyReason").asString())
+
+        val title = "Soft delete integration ${System.nanoTime()}"
+        val output = runCalibredb("add", "--empty", "--title", title, "--authors", "Ann Author", "--library-path", libraryRoots[0].toString())
+        val calibreId = Regex("""Added book ids: (\d+)""").find(output)?.groupValues?.get(1)?.toLong()
+            ?: error("calibredb didn't return a new book id: $output")
+        library.sync(setOf(alpha))
+        val bookId = jdbc.queryForObject(
+            "select id from books where library_id = :libraryId and calibre_id = :calibreId",
+            mapOf("libraryId" to alpha, "calibreId" to calibreId),
+            Long::class.java,
+        )!!
+        softDeleteFixtureBooks += bookId
+        jdbc.update(
+            "update books set status = 'INDEXED', chunk_count = 1, indexed_at = now() where id = :id",
+            mapOf("id" to bookId),
+        )
+        jdbc.update(
+            "insert into vector_store (content, metadata, book_id, chunk_index) values ('retained passage', '{}'::jsonb, :id, 0)",
+            mapOf("id" to bookId),
+        )
+        val reader = as_("reader")
+        val listId = reader.post("/api/lists", mapOf("name" to "Restore $bookId")).json.path("id").asLong()
+        softDeleteFixtureLists += listId
+        reader.put("/api/lists/$listId/books/$bookId")
+        reader.put("/api/books/$bookId/reviews/mine", mapOf("body" to "Retained review"))
+        var inTrash = false
+        try {
+            val deleted = as_("curator").delete("/api/books/$bookId")
+            assertEquals(204, deleted.status, deleted.body)
+            inTrash = true
+            assertEquals(1, jdbc.queryForObject("select count(*) from books where id = :id and deleted_at is not null", mapOf("id" to bookId), Long::class.java))
+            assertEquals(1, jdbc.queryForObject("select count(*) from vector_store where book_id = :id", mapOf("id" to bookId), Long::class.java))
+
+            runCalibredb("trash", "restore", calibreId.toString(), "--library-path", libraryRoots[0].toString())
+            inTrash = false
+            library.sync(setOf(alpha))
+            val restored = as_("reader").get("/api/books/$bookId")
+            assertEquals(200, restored.status, restored.body)
+            assertEquals("INDEXED", restored.json.path("status").asString())
+            assertEquals(1, restored.json.path("chunkCount").asInt())
+            assertEquals(1, reader.get("/api/books/$bookId/reviews").json.path("count").asInt())
+            assertTrue(reader.get("/api/lists/$listId").body.contains(title))
+
+            runCalibredb("remove", calibreId.toString(), "--library-path", libraryRoots[0].toString())
+            inTrash = true
+            library.sync(setOf(alpha))
+            assertEquals(404, reader.get("/api/books/$bookId").status)
+            assertEquals(
+                1,
+                jdbc.queryForObject("select count(*) from books where id = :id and deleted_at is not null", mapOf("id" to bookId), Long::class.java),
+            )
+        } finally {
+            if (inTrash) {
+                runCalibredb("trash", "restore", calibreId.toString(), "--library-path", libraryRoots[0].toString())
+                library.sync(setOf(alpha))
+            }
+        }
     }
 
     @Test

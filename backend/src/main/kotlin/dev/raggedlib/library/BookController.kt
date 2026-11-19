@@ -15,6 +15,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.MediaType
 import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
+import org.springframework.web.bind.annotation.DeleteMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
 import org.springframework.web.bind.annotation.PutMapping
@@ -34,6 +35,7 @@ class BookController(
     private val paths: LibraryPaths,
     private val details: BookDetailsService,
     private val metadata: BookMetadataService,
+    private val deletions: BookDeletionService,
     private val access: Access,
 ) {
     private val sorts = setOf("title", "author", "publisher", "pubdate", "indexedAt", "id")
@@ -75,6 +77,12 @@ class BookController(
 
     @PutMapping("/books/{id}/metadata")
     fun updateMetadata(@PathVariable id: Long, @RequestBody req: MetadataUpdateRequest): BookDetails = metadata.update(id, req)
+
+    @DeleteMapping("/books/{id}")
+    fun delete(@PathVariable id: Long): ResponseEntity<Void> {
+        deletions.delete(id)
+        return ResponseEntity.noContent().build()
+    }
 
     @PostMapping("/books/{id}/reindex")
     fun reindex(@PathVariable id: Long): Book {

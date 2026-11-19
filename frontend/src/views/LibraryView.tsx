@@ -31,6 +31,7 @@ import { useSidePanel } from "../hooks/useSidePanel";
 import { STORAGE_KEYS } from "../lib/storage";
 import { usePageVisible } from "../hooks/usePageVisible";
 import { useSyncLibrary } from "../hooks/useSyncLibrary";
+import { clearFacetCache } from "../hooks/useFacet";
 import { roleAtLeast } from "../lib/auth";
 import { formatAuthors, formatDateTime, formatNumber, formatYear } from "../lib/format";
 import { readerFormat } from "../lib/reader";
@@ -559,6 +560,12 @@ export function LibraryView({ active }: { active: boolean }) {
             onBookMetadataChanged={(updated) => {
               books.setData((p) => p && { ...p, items: p.items.map((b) => (b.id === updated.id ? updated : b)) });
               setRefreshKey((k) => k + 1);
+            }}
+            onBookDeleted={() => {
+              setSelectedId(null);
+              setRefreshKey((k) => k + 1);
+              clearFacetCache();
+              void books.reload();
             }}
             metadataNavigation={metadataNavigation}
             editMetadataRequest={editMetadataRequest}

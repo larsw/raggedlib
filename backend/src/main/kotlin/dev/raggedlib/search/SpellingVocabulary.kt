@@ -2,7 +2,7 @@ package dev.raggedlib.search
 
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.ingest.IngestionFinished
-import dev.raggedlib.library.BooksRemoved
+import dev.raggedlib.library.BooksVisibilityChanged
 import org.slf4j.LoggerFactory
 import org.springframework.boot.context.event.ApplicationReadyEvent
 import org.springframework.context.event.EventListener
@@ -20,7 +20,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  * Built with `ts_stat` over every passage, a full scan of `vector_store` that takes a few minutes, so it runs in
  * the background: at startup when the vocabulary is missing, stale (older than the last indexed book, or built
  * with other settings) or the library is empty; after an indexing run that stored passages; and after a library
- * sync removed books. The rebuild replaces the rows in one transaction; searches keep using the old vocabulary
+ * book visibility changes. The rebuild replaces the rows in one transaction; searches keep using the old vocabulary
  * until it commits.
  */
 @Component
@@ -54,8 +54,8 @@ class SpellingVocabulary(
             """
             select coalesce((select words from search_vocabulary_meta), 0) as words,
                    coalesce((select params from search_vocabulary_meta), '') as params,
-                   exists (select 1 from vector_store) as has_passages,
-                   coalesce((select max(indexed_at) from books), '-infinity')
+                   exists (select 1 from vector_store v join active_books b on b.id = v.book_id) as has_passages,
+                   coalesce((select max(indexed_at) from active_books), '-infinity')
                        > coalesce((select built_at from search_vocabulary_meta), '-infinity') as newer_books
             """.trimIndent(),
             emptyMap<String, Any>(),
@@ -79,8 +79,8 @@ class SpellingVocabulary(
     }
 
     @EventListener
-    fun onBooksRemoved(e: BooksRemoved) {
-        if (props.search.spelling.enabled && e.count > 0) rebuildAsync("${e.count} books were removed from the library")
+    fun onBooksVisibilityChanged(e: BooksVisibilityChanged) {
+        if (props.search.spelling.enabled && e.count > 0) rebuildAsync("visibility changed for ${e.count} books")
     }
 
     /** Starts a rebuild in the background; one requested during a rebuild runs after it. */
@@ -116,7 +116,9 @@ class SpellingVocabulary(
                 val n = jdbc.update(
                     """
                     insert into search_vocabulary (word, ndoc)
-                    select word, ndoc from ts_stat('select to_tsvector(''simple'', content) from vector_store')
+                    select word, ndoc from ts_stat(
+                        'select to_tsvector(''simple'', v.content) from vector_store v join active_books b on b.id = v.book_id'
+                    )
                     where ndoc >= :minDocs and word ~ :pattern
                     """.trimIndent(),
                     MapSqlParameterSource("minDocs", s.minWordDocs)

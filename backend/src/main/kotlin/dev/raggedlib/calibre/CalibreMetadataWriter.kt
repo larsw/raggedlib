@@ -88,6 +88,17 @@ class CalibreMetadataWriter(
         parseAddedCalibreBookId(result.stdout, result.stderr)
     }
 
+    fun removeBook(library: LibraryInfo, calibreId: Long) = writeLock.withLibrary(library.root) {
+        val result = processRunner.run(
+            listOf(props.tools.calibredb, "remove", calibreId.toString(), "--library-path", library.root.toString()),
+            props.tools.calibredbTimeout,
+        )
+        check(result.exitCode == 0) {
+            "calibredb remove failed for book $calibreId in library '${library.name}' " +
+                "(${result.exitCode}): ${result.stderr.take(500)}"
+        }
+    }
+
     fun removeFormat(library: LibraryInfo, calibreId: Long, format: String) =
         writeLock.withLibrary(library.root) {
             val result = processRunner.run(

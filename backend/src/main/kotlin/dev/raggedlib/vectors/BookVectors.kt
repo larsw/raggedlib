@@ -51,7 +51,7 @@ class BookVectors(private val jdbc: NamedParameterJdbcTemplate) {
     private fun missingBooksSql(libraryId: Long?): String {
         val inLibrary = if (libraryId != null) "and b.library_id = :libraryId" else ""
         return """
-            select b.id from books b
+            select b.id from active_books b
             where b.chunk_count > 0 $inLibrary
               and not exists (
                   select 1 from book_vectors bv

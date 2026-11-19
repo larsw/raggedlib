@@ -40,6 +40,7 @@ data class BookRow(
     val formatPaths: Map<String, String>,
     val coverPath: String?,
     val lastModified: Instant?,
+    val deletedAt: Instant?,
 )
 
 data class Page<T>(val items: List<T>, val total: Long, val page: Int, val size: Int)

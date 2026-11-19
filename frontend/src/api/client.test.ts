@@ -7,7 +7,7 @@ let calls: { url: string; init: RequestInit }[] = [];
 function respondWith(status: number, body: string, contentType = "application/json") {
   globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
     calls.push({ url: String(url), init: init ?? {} });
-    return new Response(body, { status, headers: { "content-type": contentType } });
+    return new Response(status === 204 ? null : body, { status, headers: { "content-type": contentType } });
   }) as unknown as typeof fetch;
 }
 
@@ -69,6 +69,14 @@ describe("CSRF", () => {
     expect(calls[0]!.url).toBe("/api/libraries/7/books/a4d8c925-11ae-41df-b9e0-cb48bc4ed800/decision");
     expect(calls[0]!.init.method).toBe("POST");
     expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ choice: "ADD_FORMAT", bookId: 12 });
+    expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
+  });
+
+  test("deleting a book uses the protected book route", async () => {
+    respondWith(204, "");
+    await api.deleteBook(12);
+    expect(calls[0]!.url).toBe("/api/books/12");
+    expect(calls[0]!.init.method).toBe("DELETE");
     expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
   });
 
