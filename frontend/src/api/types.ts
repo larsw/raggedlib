@@ -57,10 +57,20 @@ export interface BookUploadItem {
   files: string[];
   book: Book | null;
   alreadyInLibrary: boolean;
+  duplicateBooks?: Book[];
+  pendingId?: string | null;
+  duplicateLookupError?: string | null;
 }
 
 export interface BookUploadResult {
   items: BookUploadItem[];
+}
+
+export type BookUploadChoice = "ADD_FORMAT" | "REPLACE_FORMAT" | "ADD_SEPARATE" | "SKIP";
+
+export interface BookUploadDecisionResult {
+  choice: BookUploadChoice;
+  book: Book | null;
 }
 
 export interface BookMetadataFields {

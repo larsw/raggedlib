@@ -135,6 +135,8 @@ class SecurityConfig {
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers(HttpMethod.POST, "/api/libraries/*/books")
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
+                a.requestMatchers(HttpMethod.POST, "/api/libraries/*/books/*/decision")
+                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers("/api/**").hasAuthority(ApiScope.LIBRARY_READ.authority)
                 a.anyRequest().denyAll()
             }

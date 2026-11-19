@@ -21,7 +21,7 @@ Every endpoint except `/api/auth/**` and `/actuator/health` needs a caller:
 Unauthenticated: `401 {"error", "loginUrl"}` (`/mcp`, or a request with a key: `401` with `WWW-Authenticate: Bearer`).
 
 Scopes (`GET /api/me/api-keys/scopes`) gate endpoints: `library:read` everything that reads libraries and books,
-`library:curate` sync/index/re-index/book vectors, `library:edit` book metadata, cover and format edits,
+`library:curate` sync/index/re-index/book vectors, `library:edit` book uploads and duplicate choices, metadata, cover and format edits,
 `favorites:read|write` `/api/lists`, `reviews:read|write` reviews.
 Key management, `/api/admin/**` and library members need a browser session.
 
@@ -173,7 +173,17 @@ interface BookUploadResult {
     files: string[];
     book: Book | null;             // null when Calibre refused a duplicate
     alreadyInLibrary: boolean;
+    duplicateBooks: Book[];        // same title and authors in the target library
+    pendingId: string | null;      // pending upload decision, retained for up to 24 hours
+    duplicateLookupError: string | null;
   }[];
+}
+
+type BookUploadChoice = "ADD_FORMAT" | "REPLACE_FORMAT" | "ADD_SEPARATE" | "SKIP";
+
+interface BookUploadDecisionResult {
+  choice: BookUploadChoice;
+  book: Book | null;               // null for SKIP
 }
 ```
 
@@ -184,7 +194,8 @@ interface BookUploadResult {
 | GET  | `/api/system` | `SystemInfo` |
 | GET  | `/api/libraries` | `Library[]`: the configured Calibre libraries the caller can see, with book counts, the caller's role, writable status, and `editingPaused`. |
 | PUT | `/api/libraries/{id}/editing` | Library admin (or global admin), browser session only. Body `{ "paused": boolean }`; pausing or resuming is recorded in activity. Resume syncs that library before editing is enabled; a failed sync leaves it paused. |
-| POST | `/api/libraries/{id}/books` | `library:edit` and curator in a writable, unpaused library. Multipart `files` (repeat the field for multiple files) accepts Calibre ebook formats, grouped as one book when basenames match case-insensitively. Files are limited to `raggedlib.upload.max-format-size` (default 500 MB each); the request limit defaults to 2 GB and is configurable with `RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE`. Calibre fills available metadata and cover information; the library is synced and added books are queued for indexing. Duplicates are returned with `alreadyInLibrary: true`. Each new book gets an `UPLOAD` activity record. |
+| POST | `/api/libraries/{id}/books` | `library:edit` and curator in a writable, unpaused library. Multipart `files` (repeat the field for multiple files) accepts Calibre ebook formats, grouped as one book when basenames match case-insensitively. Files are limited to `raggedlib.upload.max-format-size` (default 500 MB each); the request limit defaults to 2 GB and is configurable with `RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE`. Calibre fills available metadata and cover information; the library is synced and added books are queued for indexing. Duplicates include same-title-and-author matches from this library only, plus a `pendingId` for a decision. Pending files are removed after 24 hours and on startup when expired. Each new book gets an `UPLOAD` activity record. |
+| POST | `/api/libraries/{id}/books/{pendingId}/decision` | `library:edit` and curator in the same writable, unpaused library. Body `{ "choice": "ADD_FORMAT" \| "REPLACE_FORMAT" \| "ADD_SEPARATE" \| "SKIP", "bookId"?: number }`. Add/replace uses the matching book's format rules and activity log; separate adds a new Calibre record; skip drops the files. A successful choice removes the pending upload. |
 | GET | `/api/activity?libraryId=&user=&action=&page=0&size=50` | Library admin in one or more libraries, or global admin. Returns `BookActivityPage` from administered libraries only; `libraryId`, exact actor text in `user`, action code, and paging are optional filters. Actions: `UPLOAD`, `ADD_FORMAT`, `REMOVE_FORMAT`, `REPLACE_FORMAT`, `EDIT_METADATA`, `EDIT_COVER`, `DELETE_BOOK`, `PAUSE_EDITING`, `RESUME_EDITING`. |
 | POST | `/api/library/sync?libraryId=` | Library admin. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller administers, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
 | GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library the caller can see). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |

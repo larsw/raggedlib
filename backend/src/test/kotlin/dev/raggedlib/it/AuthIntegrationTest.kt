@@ -194,6 +194,48 @@ class AuthIntegrationTest {
             Browser.MultipartPart("files", "$title.txt", "text/plain", "Plain text format.".toByteArray()),
         )
         val curator = as_("curator")
+        runCalibredb(
+            "add", "--empty", "--title", title, "--authors", "Upload Author",
+            "--library-path", libraryRoots[1].toString(),
+        )
+        assertEquals(200, as_("admin").post("/api/library/sync?libraryId=$beta", emptyMap<String, Any>()).status)
+
+        val formatTitle = "Format target ${System.nanoTime()}"
+        runCalibredb(
+            "add", "--empty", "--title", formatTitle, "--authors", "Format Author",
+            "--library-path", libraryRoots[0].toString(),
+        )
+        assertEquals(200, as_("admin").post("/api/library/sync?libraryId=$alpha", emptyMap<String, Any>()).status)
+        val formatTargetId = jdbc.queryForObject(
+            "select id from books where library_id = :library and title = :title",
+            mapOf("library" to alpha, "title" to formatTitle),
+            Long::class.java,
+        )!!
+        val formatDuplicate = curator.postMultipart(
+            "/api/libraries/$alpha/books",
+            listOf(
+                Browser.MultipartPart(
+                    "files",
+                    "$formatTitle.epub",
+                    "application/epub+zip",
+                    epubBytes(formatTitle, "Format Author"),
+                ),
+            ),
+        )
+        assertEquals(200, formatDuplicate.status, formatDuplicate.body)
+        val addFormatItem = formatDuplicate.json.path("items")[0]
+        assertEquals(formatTargetId, addFormatItem.path("duplicateBooks")[0].path("id").asLong())
+        val addFormat = curator.post(
+            "/api/libraries/$alpha/books/${addFormatItem.path("pendingId").asString()}/decision",
+            mapOf("choice" to "ADD_FORMAT", "bookId" to formatTargetId),
+        )
+        assertEquals(200, addFormat.status, addFormat.body)
+        assertTrue(addFormat.json.path("book").path("formats").any { it.asString() == "EPUB" })
+        assertEquals(1L, jdbc.queryForObject(
+            "select count(*) from book_activity where book_id = :id and action = 'ADD_FORMAT'",
+            mapOf("id" to formatTargetId), Long::class.java,
+        ))
+
         val uploaded = curator.postMultipart("/api/libraries/$alpha/books", groupedFiles)
         assertEquals(200, uploaded.status, uploaded.body)
         val item = uploaded.json.path("items")[0]
@@ -210,8 +252,42 @@ class AuthIntegrationTest {
 
         val duplicate = curator.postMultipart("/api/libraries/$alpha/books", groupedFiles)
         assertEquals(200, duplicate.status, duplicate.body)
-        assertTrue(duplicate.json.path("items")[0].path("alreadyInLibrary").asBoolean())
-        assertTrue(duplicate.json.path("items")[0].path("book").isNull)
+        val duplicateItem = duplicate.json.path("items")[0]
+        assertTrue(duplicateItem.path("alreadyInLibrary").asBoolean())
+        assertTrue(duplicateItem.path("book").isNull)
+        assertEquals(1, duplicateItem.path("duplicateBooks").size())
+        assertEquals(bookId, duplicateItem.path("duplicateBooks")[0].path("id").asLong())
+        assertEquals(alpha, duplicateItem.path("duplicateBooks")[0].path("libraryId").asLong())
+        val pendingId = duplicateItem.path("pendingId").asString()
+        val replace = curator.post(
+            "/api/libraries/$alpha/books/$pendingId/decision",
+            mapOf("choice" to "REPLACE_FORMAT", "bookId" to bookId),
+        )
+        assertEquals(200, replace.status, replace.body)
+        assertEquals(bookId, replace.json.path("book").path("id").asLong())
+        assertEquals(1L, jdbc.queryForObject(
+            "select count(*) from book_activity where book_id = :id and action = 'REPLACE_FORMAT'",
+            mapOf("id" to bookId), Long::class.java,
+        ))
+
+        val separatePending = curator.postMultipart("/api/libraries/$alpha/books", groupedFiles).json
+            .path("items")[0].path("pendingId").asString()
+        val separate = curator.post(
+            "/api/libraries/$alpha/books/$separatePending/decision",
+            mapOf("choice" to "ADD_SEPARATE"),
+        )
+        assertEquals(200, separate.status, separate.body)
+        assertFalse(separate.json.path("book").isNull)
+        assertTrue(separate.json.path("book").path("id").asLong() != bookId)
+
+        val skipPending = curator.postMultipart("/api/libraries/$alpha/books", groupedFiles).json
+            .path("items")[0].path("pendingId").asString()
+        val skipped = curator.post(
+            "/api/libraries/$alpha/books/$skipPending/decision",
+            mapOf("choice" to "SKIP"),
+        )
+        assertEquals(200, skipped.status, skipped.body)
+        assertTrue(skipped.json.path("book").isNull)
 
         val key = curator.post(
             "/api/me/api-keys",
@@ -231,6 +307,15 @@ class AuthIntegrationTest {
         val keyResult = curator.postMultipart("/api/libraries/$alpha/books", listOf(keyUpload), key)
         assertEquals(200, keyResult.status, keyResult.body)
         assertFalse(keyResult.json.path("items")[0].path("alreadyInLibrary").asBoolean())
+        val keyDuplicate = as_("curator").postMultipart("/api/libraries/$alpha/books", listOf(keyUpload), key)
+        assertEquals(200, keyDuplicate.status, keyDuplicate.body)
+        val keyPendingId = keyDuplicate.json.path("items")[0].path("pendingId").asString()
+        val keySeparate = as_("curator").post(
+            "/api/libraries/$alpha/books/$keyPendingId/decision",
+            mapOf("choice" to "ADD_SEPARATE"),
+            key,
+        )
+        assertEquals(200, keySeparate.status, keySeparate.body)
     }
 
     private fun epubBytes(title: String, author: String): ByteArray = ByteArrayOutputStream().also { output ->

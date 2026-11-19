@@ -63,6 +63,15 @@ describe("CSRF", () => {
     expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
   });
 
+  test("duplicate upload decisions send the selected action and matching book", async () => {
+    respondWith(200, '{"choice":"ADD_FORMAT","book":{"id":12}}');
+    await api.decideBookUpload(7, "a4d8c925-11ae-41df-b9e0-cb48bc4ed800", "ADD_FORMAT", 12);
+    expect(calls[0]!.url).toBe("/api/libraries/7/books/a4d8c925-11ae-41df-b9e0-cb48bc4ed800/decision");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ choice: "ADD_FORMAT", bookId: 12 });
+    expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
+  });
+
   test("cover URLs are versioned using Calibre's last modified value", () => {
     expect(bookCoverUrl(12, "2024-01-02T03:04:05Z")).toBe("/api/books/12/cover?v=2024-01-02T03%3A04%3A05Z");
   });
