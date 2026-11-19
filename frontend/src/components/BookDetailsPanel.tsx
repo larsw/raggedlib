@@ -1,4 +1,4 @@
-import { AnchorButton, Button, ButtonGroup, Classes, NonIdealState, Spinner, Tag, Tooltip } from "@blueprintjs/core";
+import { AnchorButton, Button, ButtonGroup, Callout, Classes, Intent, NonIdealState, Spinner, Tag, Tooltip } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
 import { api, bookFileUrl } from "../api/client";
 import type { Book, BookDetails } from "../api/types";
@@ -122,6 +122,7 @@ function DetailsContent({
   const library = libraries.find((l) => l.id === book.libraryId);
   const libraryName = library?.name;
   const canEdit = roleAtLeast(roleIn(book.libraryId), "CURATOR") && library?.writable === true;
+  const editingPaused = library?.editingPaused === true;
   const canReindex = roleAtLeast(roleIn(book.libraryId), "ADMIN");
   const year = formatYear(book.pubdate);
   const isPdf = book.sourceFormat === "PDF";
@@ -182,7 +183,7 @@ function DetailsContent({
 
       <div className="book-panel-secondary">
         <AddToListButton bookId={book.id} onChanged={onListsChanged} />
-        {canEdit && <Button variant="minimal" icon="edit" text="Edit metadata" onClick={onEditMetadata} />}
+        {canEdit && <Button variant="minimal" icon="edit" text="Edit metadata" disabled={editingPaused} onClick={onEditMetadata} />}
         {rated && rated.averageRating != null && (
           <button
             type="button"
@@ -196,6 +197,12 @@ function DetailsContent({
           </button>
         )}
       </div>
+
+      {canEdit && editingPaused && (
+        <Callout intent={Intent.WARNING} icon="pause" compact>
+          Editing is paused (the library is open in desktop Calibre).
+        </Callout>
+      )}
 
       {calibre?.description && <Description text={calibre.description} />}
 

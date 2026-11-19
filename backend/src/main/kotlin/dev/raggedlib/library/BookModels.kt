@@ -67,4 +67,6 @@ data class Library(
     val writable: Boolean = false,
     /** Why a library configured writable is read-only; for global admins only (it names paths). */
     val readOnlyReason: String? = null,
+    /** Editing was paused by a library admin while desktop Calibre is open. */
+    val editingPaused: Boolean = false,
 )

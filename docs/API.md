@@ -112,6 +112,11 @@ interface Library {
   role: LibraryRole;                    // the caller's
   writable: boolean;                    // books can be uploaded and edited through raggedlib
   readOnlyReason: string | null;        // admins only: why a library configured writable isn't
+  editingPaused: boolean;               // admins paused edits while desktop Calibre is open
+}
+
+interface LibraryEditingView {
+  editingPaused: boolean;
 }
 
 interface SystemInfo {
@@ -167,7 +172,8 @@ interface BookDetails {
 | Method | Path | Description |
 |---|---|---|
 | GET  | `/api/system` | `SystemInfo` |
-| GET  | `/api/libraries` | `Library[]`: the configured Calibre libraries the caller can see, with book counts and the caller's role. |
+| GET  | `/api/libraries` | `Library[]`: the configured Calibre libraries the caller can see, with book counts, the caller's role, writable status, and `editingPaused`. |
+| PUT | `/api/libraries/{id}/editing` | Library admin (or global admin), browser session only. Body `{ "paused": boolean }`; pausing or resuming is recorded in activity. Resume syncs that library before editing is enabled; a failed sync leaves it paused. |
 | POST | `/api/library/sync?libraryId=` | Library admin. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller administers, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
 | GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library the caller can see). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |
 | GET  | `/api/books/{id}` | `Book` |

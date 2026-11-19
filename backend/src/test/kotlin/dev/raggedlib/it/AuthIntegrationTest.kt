@@ -262,6 +262,42 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `library admins can pause editing and resume it after a successful sync`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val alphaLibrary = as_("admin").get("/api/libraries").json.values()
+            .first { it.path("name").asString() == "Alpha" }
+        assumeTrue(alphaLibrary.path("writable").asBoolean(), alphaLibrary.path("readOnlyReason").asString())
+        val lastActivityId = jdbc.queryForObject("select coalesce(max(id), 0) from book_activity", emptyMap<String, Any>(), Long::class.java)!!
+        val librarian = as_("librarian")
+        val pause = librarian.put("/api/libraries/$alpha/editing", mapOf("paused" to true))
+        assertEquals(200, pause.status, pause.body)
+        assertTrue(pause.json.path("editingPaused").asBoolean())
+        assertTrue(as_("curator").get("/api/libraries").json.values().first { it.path("id").asLong() == alpha }
+            .path("editingPaused").asBoolean())
+
+        assertEquals(403, as_("reader").put("/api/libraries/$alpha/editing", mapOf("paused" to false)).status)
+        val metadata = mapOf(
+            "fields" to mapOf("tags" to listOf("new")),
+            "original" to mapOf("tags" to listOf<String>()),
+        )
+        val refused = as_("curator").put("/api/books/$alphaBook/metadata", metadata)
+        assertEquals(403, refused.status, refused.body)
+        assertTrue(refused.body.contains("Editing is paused"), refused.body)
+
+        val resume = librarian.put("/api/libraries/$alpha/editing", mapOf("paused" to false))
+        assertEquals(200, resume.status, resume.body)
+        assertFalse(resume.json.path("editingPaused").asBoolean())
+        assertEquals(
+            listOf("PAUSE_EDITING", "RESUME_EDITING"),
+            jdbc.queryForList(
+                "select action from book_activity where library_id = :library and id > :lastId order by id",
+                mapOf("library" to alpha, "lastId" to lastActivityId),
+                String::class.java,
+            ),
+        )
+    }
+
+    @Test
     fun `metadata autocomplete values are restricted to the requested library`() {
         jdbc.update(
             """

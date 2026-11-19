@@ -64,9 +64,14 @@ written by a newer desktop Calibre is left alone). A library that fails a check 
 dot in the navbar) turns yellow and tells global admins why. The first write may upgrade an older library's schema, as
 opening it in desktop Calibre 9.18 would.
 
-**Don't open a writable library in desktop Calibre while raggedlib is running.** `calibredb` normally refuses to touch a
-library the Calibre GUI has open, but inside the backend's container it can't see the GUI on the host, and the GUI would
-then work from a stale copy and could overwrite raggedlib's changes.
+For a short desktop Calibre session while raggedlib is running, follow this routine: **Pause editing → use desktop
+Calibre → close it → Resume editing.** Library admins can pause and resume each writable library in Administration →
+Library members. While paused, raggedlib refuses edits; reading, search, sync and indexing continue. Resume syncs the
+library so desktop changes appear in raggedlib. The paused state survives backend restarts.
+
+This pause is a safety switch, not automatic detection: inside the backend's container raggedlib can't see whether the
+Calibre GUI is open on the host. Don't resume until desktop Calibre has closed; otherwise the GUI and raggedlib could
+work from stale copies and overwrite each other's changes.
 
 ### Develop on the host
 

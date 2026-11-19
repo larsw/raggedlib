@@ -14,10 +14,10 @@ type AdminTab = "users" | "members" | "keys";
 export function AdministrationDialog({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const { me } = useApp();
   const tabs: AdminTab[] = [];
-  // single-user mode: no one else signs in, so there is no one to grant roles to; Users stays, to disable users
-  // from a multi-user past, whose API keys would keep working
+  // single-user mode: no one else signs in, but pause controls remain available for desktop Calibre sessions
+  // and Users stays to disable users from a multi-user past, whose API keys would keep working
   if (me.admin) tabs.push("users");
-  if (me.canManageMembers && me.authMode !== "single-user") tabs.push("members");
+  if (me.canManageMembers) tabs.push("members");
   if (me.admin) tabs.push("keys");
   const [chosen, setChosen] = useState<AdminTab | null>(null);
   const tab = chosen && tabs.includes(chosen) ? chosen : tabs[0];

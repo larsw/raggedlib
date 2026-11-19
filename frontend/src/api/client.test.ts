@@ -25,6 +25,15 @@ afterEach(() => {
 });
 
 describe("CSRF", () => {
+  test("pausing library editing uses the session-protected endpoint", async () => {
+    respondWith(200, '{"editingPaused":true}');
+    await api.setLibraryEditingPaused(7, true);
+    expect(calls[0]!.url).toBe("/api/libraries/7/editing");
+    expect(calls[0]!.init.method).toBe("PUT");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({ paused: true });
+    expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
+  });
+
   test("writes carry the token from the cookie, reads don't", async () => {
     respondWith(201, '{"id":1}');
     await api.createList({ name: "x" });

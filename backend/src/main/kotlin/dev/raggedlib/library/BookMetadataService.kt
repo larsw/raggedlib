@@ -2,7 +2,6 @@ package dev.raggedlib.library
 
 import dev.raggedlib.auth.Access
 import dev.raggedlib.auth.ApiScope
-import dev.raggedlib.auth.LibraryRole
 import dev.raggedlib.calibre.CalibreExtras
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.calibre.CalibreMetadataWriter
@@ -39,12 +38,8 @@ class BookMetadataService(
 ) {
     fun update(bookId: Long, request: MetadataUpdateRequest): BookDetails {
         access.requireScope(ApiScope.LIBRARY_EDIT)
-        val authorized = access.requireBook(bookId, LibraryRole.CURATOR)
-        val library = accessLibrary(authorized.book.libraryId)
-        if (!library.writable) {
-            val reason = library.readOnlyReason?.replace(library.root.toString(), library.name)
-            throw ApiException(HttpStatus.FORBIDDEN, reason ?: "library '${library.name}' is read-only")
-        }
+        val authorized = access.requireEditableBook(bookId)
+        val library = access.requireEditableLibrary(authorized.book.libraryId)
 
         val requested = parse(request.fields)
         if (requested.isEmpty()) badRequest("change at least one metadata field")
@@ -54,6 +49,7 @@ class BookMetadataService(
         val original = parse(request.original, allowNullBaseline = true)
 
         writeLock.withLibrary(library.root) {
+            access.requireEditableLibrary(authorized.book.libraryId)
             val current = books.find(bookId) ?: dev.raggedlib.config.notFound("book $bookId not found")
             val currentRecord = calibre.find(library.root, current.book.calibreId)
                 ?: dev.raggedlib.config.notFound("book ${current.book.calibreId} no longer exists in Calibre")
@@ -95,8 +91,6 @@ class BookMetadataService(
         }
         return details.details(bookId)
     }
-
-    private fun accessLibrary(id: Long) = access.requireLibrary(id, LibraryRole.CURATOR)
 
     private fun parse(fields: Map<String, JsonNode>, allowNullBaseline: Boolean = false): Map<String, Any?> {
         if (fields.isEmpty()) badRequest("provide fields to change")

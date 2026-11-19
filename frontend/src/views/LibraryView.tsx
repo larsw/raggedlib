@@ -228,7 +228,7 @@ export function LibraryView({ active }: { active: boolean }) {
     const id = rowId ? Number(rowId) : selectedId;
     const book = books.data?.items.find((item) => item.id === id);
     const bookLibrary = libraries.find((item) => item.id === book?.libraryId);
-    if (!book || !bookLibrary?.writable || !roleAtLeast(roleIn(book.libraryId), "CURATOR")) return;
+    if (!book || !bookLibrary?.writable || bookLibrary.editingPaused || !roleAtLeast(roleIn(book.libraryId), "CURATOR")) return;
     e.preventDefault();
     setSelectedId(book.id);
     setEditMetadataRequest((request) => request + 1);
