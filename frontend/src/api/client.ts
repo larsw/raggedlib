@@ -7,6 +7,7 @@ import type {
   Book,
   BookDetails,
   BookMetadataFields,
+  BookMetadataOriginalFields,
   BookQuery,
   BookReviews,
   ClusterSpace,
@@ -54,6 +55,8 @@ export class ApiError extends Error {
     readonly unreachable: boolean = false,
     /** 401: where to send the browser to sign in. */
     readonly loginUrl: string | null = null,
+    /** Structured API response details, such as metadata conflict values. */
+    readonly details: unknown = null,
   ) {
     super(message);
     this.name = "ApiError";
@@ -93,12 +96,14 @@ export function errorMessage(err: unknown): string {
 async function errorFromResponse(res: Response): Promise<ApiError> {
   let message = `${res.status} ${res.statusText}`.trim();
   let loginUrl: string | null = null;
+  let details: unknown = null;
   try {
     const text = await res.text();
     try {
-      const body = JSON.parse(text) as { error?: unknown; loginUrl?: unknown };
+      const body = JSON.parse(text) as { error?: unknown; loginUrl?: unknown; details?: unknown };
       if (body && typeof body.error === "string") message = body.error;
       if (body && typeof body.loginUrl === "string") loginUrl = body.loginUrl;
+      if (body && body.details !== undefined) details = body.details;
     } catch {
       if (text && text.length < 300) message = text;
     }
@@ -106,7 +111,7 @@ async function errorFromResponse(res: Response): Promise<ApiError> {
     /* ignore */
   }
   const unreachable = res.status === 502 && message === "backend unreachable";
-  return new ApiError(message, res.status, unreachable, loginUrl);
+  return new ApiError(message, res.status, unreachable, loginUrl, details);
 }
 
 async function send(path: string, init?: RequestInit): Promise<Response> {
@@ -224,8 +229,8 @@ export const api = {
   book: (id: number, signal?: AbortSignal) => getJson<Book>(`/books/${id}`, signal),
 
   bookDetails: (id: number, signal?: AbortSignal) => getJson<BookDetails>(`/books/${id}/details`, signal),
-  updateBookMetadata: (id: number, fields: BookMetadataFields) =>
-    putJson<BookDetails>(`/books/${id}/metadata`, { fields }),
+  updateBookMetadata: (id: number, fields: BookMetadataFields, original: BookMetadataOriginalFields) =>
+    putJson<BookDetails>(`/books/${id}/metadata`, { fields, original }),
   metadataSuggestions: (libraryId: number, signal?: AbortSignal) =>
     getJson<MetadataSuggestions>(`/libraries/${libraryId}/metadata-values`, signal),
 

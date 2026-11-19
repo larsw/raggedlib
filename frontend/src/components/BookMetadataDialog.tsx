@@ -1,7 +1,7 @@
 import { Button, ButtonGroup, Callout, Classes, Dialog, DialogBody, DialogFooter, FormGroup, InputGroup, Intent, TextArea } from "@blueprintjs/core";
 import { useEffect, useState } from "react";
-import { api, errorMessage } from "../api/client";
-import type { Book, BookDetails, BookMetadataFields, CalibreExtras, MetadataSuggestions } from "../api/types";
+import { api, ApiError, errorMessage } from "../api/client";
+import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataSuggestions } from "../api/types";
 import { BookCover } from "./BookCover";
 import { MetadataValueSelect } from "./MetadataValueSelect";
 
@@ -48,7 +48,7 @@ function draftFrom(book: Book, calibre: CalibreExtras | null): Draft {
     tags: book.tags,
     series: book.series ?? "",
     seriesIndex: book.seriesIndex?.toString() ?? "",
-    publisher: book.publisher ?? calibre?.publisher ?? "",
+    publisher: calibre?.publisher ?? book.publisher ?? "",
     pubdate: book.pubdate?.slice(0, 10) ?? "",
     languages: book.languages,
     titleSort: calibre?.titleSort ?? "",
@@ -58,6 +58,114 @@ function draftFrom(book: Book, calibre: CalibreExtras | null): Draft {
     rating: calibre?.rating?.toString() ?? "",
     addedAt: localDateTime(calibre?.addedAt),
   };
+}
+
+function metadataValuesFrom(book: Book, calibre: CalibreExtras | null): Record<string, unknown> {
+  return {
+    title: book.title,
+    authors: book.authors,
+    tags: book.tags,
+    series: book.series,
+    seriesIndex: book.seriesIndex,
+    publisher: calibre?.publisher ?? book.publisher ?? null,
+    pubdate: book.pubdate?.slice(0, 10) ?? null,
+    languages: book.languages,
+    titleSort: calibre?.titleSort ?? null,
+    authorSort: calibre?.authorSort ?? null,
+    description: calibre?.description ?? null,
+    identifiers: calibre?.identifiers ?? {},
+    rating: calibre?.rating ?? null,
+    addedAt: calibre?.addedAt ?? null,
+  };
+}
+
+const METADATA_FIELD_LABELS: Record<keyof BookMetadataFields, string> = {
+  title: "Title",
+  authors: "Authors",
+  tags: "Tags",
+  series: "Series",
+  seriesIndex: "Series number",
+  publisher: "Publisher",
+  pubdate: "Published",
+  languages: "Languages",
+  titleSort: "Title sort",
+  authorSort: "Author sort",
+  description: "Description",
+  identifiers: "Identifiers",
+  rating: "Rating",
+  addedAt: "Date added",
+};
+
+function isMetadataField(field: string): field is keyof BookMetadataFields {
+  return Object.prototype.hasOwnProperty.call(METADATA_FIELD_LABELS, field);
+}
+
+function metadataConflicts(details: unknown): Partial<Record<keyof BookMetadataFields, unknown>> | null {
+  if (typeof details !== "object" || details === null || Array.isArray(details)) return null;
+  const rawConflicts = (details as { conflicts?: unknown }).conflicts;
+  if (typeof rawConflicts !== "object" || rawConflicts === null || Array.isArray(rawConflicts)) return null;
+  const result: Partial<Record<keyof BookMetadataFields, unknown>> = {};
+  for (const [field, value] of Object.entries(rawConflicts)) {
+    if (isMetadataField(field)) result[field] = value;
+  }
+  return result;
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function stringList(value: unknown): string[] {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function stringMap(value: unknown): Record<string, string> {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
+  const result: Record<string, string> = {};
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string") result[key] = item;
+  }
+  return result;
+}
+
+function draftWithValue(draft: Draft, field: keyof BookMetadataFields, value: unknown): Draft {
+  switch (field) {
+    case "title": return { ...draft, title: stringValue(value) };
+    case "authors": return { ...draft, authors: stringList(value) };
+    case "tags": return { ...draft, tags: stringList(value) };
+    case "series": return { ...draft, series: stringValue(value) };
+    case "seriesIndex": return { ...draft, seriesIndex: typeof value === "number" ? String(value) : "" };
+    case "publisher": return { ...draft, publisher: stringValue(value) };
+    case "pubdate": return { ...draft, pubdate: stringValue(value).slice(0, 10) };
+    case "languages": return { ...draft, languages: stringList(value) };
+    case "titleSort": return { ...draft, titleSort: stringValue(value) };
+    case "authorSort": return { ...draft, authorSort: stringValue(value) };
+    case "description": return { ...draft, description: stringValue(value) };
+    case "identifiers": return {
+      ...draft,
+      identifiers: Object.entries(stringMap(value)).map(([type, identifier]) => `${type}: ${identifier}`).join("\n"),
+    };
+    case "rating": return { ...draft, rating: typeof value === "number" ? String(value) : "" };
+    case "addedAt": return { ...draft, addedAt: localDateTime(stringValue(value)) };
+  }
+}
+
+function metadataValueText(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "(empty)";
+  if (Array.isArray(value)) return value.length > 0 ? value.map(String).join(", ") : "(empty)";
+  if (typeof value === "object") {
+    const entries = Object.entries(value).map(([key, item]) => `${key}: ${String(item)}`);
+    return entries.length > 0 ? entries.join(", ") : "(empty)";
+  }
+  return String(value);
+}
+
+function originalFields(fields: BookMetadataFields, baseline: Record<string, unknown>): BookMetadataOriginalFields {
+  const original: BookMetadataOriginalFields = {};
+  for (const field of Object.keys(fields)) {
+    if (isMetadataField(field)) Object.assign(original, { [field]: baseline[field] });
+  }
+  return original;
 }
 
 function identifiers(value: string): Record<string, string> {
@@ -99,6 +207,8 @@ function changedFields(initial: Draft, draft: Draft): BookMetadataFields {
 export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose, onSaved }: Props) {
   const [initial, setInitial] = useState(() => draftFrom(book, calibre));
   const [draft, setDraft] = useState(() => draftFrom(book, calibre));
+  const [initialValues, setInitialValues] = useState(() => metadataValuesFrom(book, calibre));
+  const [conflicts, setConflicts] = useState<Partial<Record<keyof BookMetadataFields, unknown>>>({});
   const [suggestions, setSuggestions] = useState<MetadataSuggestions>();
   const [suggestionError, setSuggestionError] = useState<string>();
   const [error, setError] = useState<string | null>(null);
@@ -111,6 +221,8 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     const next = draftFrom(book, calibre);
     setInitial(next);
     setDraft(next);
+    setInitialValues(metadataValuesFrom(book, calibre));
+    setConflicts({});
     setError(null);
     setSaving(false);
     setNavigating(false);
@@ -136,6 +248,10 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     identifierLines.every((line) => /^[A-Za-z0-9_.-]+:\s*[^,]+$/.test(line));
 
   const save = async (close: boolean): Promise<boolean> => {
+    if (Object.keys(conflicts).length > 0) {
+      setError("Resolve each metadata conflict before saving.");
+      return false;
+    }
     if (!draft.title.trim()) {
       setError("A book needs a title.");
       return false;
@@ -163,15 +279,39 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setSaving(true);
     setError(null);
     try {
-      onSaved(await api.updateBookMetadata(book.id, fields), close);
+      onSaved(await api.updateBookMetadata(book.id, fields, originalFields(fields, initialValues)), close);
+      setConflicts({});
       setConfirmClose(false);
       return true;
     } catch (err) {
+      if (err instanceof ApiError && err.status === 409) {
+        const nextConflicts = metadataConflicts(err.details);
+        if (nextConflicts && Object.keys(nextConflicts).length > 0) {
+          setConflicts(nextConflicts);
+          setError(err.message);
+          return false;
+        }
+      }
       setError(errorMessage(err));
       return false;
     } finally {
       setSaving(false);
     }
+  };
+
+  const resolveConflict = (field: keyof BookMetadataFields, useMine: boolean) => {
+    const currentValue = conflicts[field];
+    setInitialValues((previous) => ({ ...previous, [field]: currentValue }));
+    if (!useMine) {
+      setInitial((previous) => draftWithValue(previous, field, currentValue));
+      setDraft((previous) => draftWithValue(previous, field, currentValue));
+    }
+    setConflicts((previous) => {
+      const next = { ...previous };
+      delete next[field];
+      return next;
+    });
+    setError(null);
   };
 
   const requestClose = () => {
@@ -218,7 +358,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 <>
                   <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving} />
                   <Button type="button" text="Discard" onClick={onClose} disabled={saving} />
-                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving} />
+                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving || Object.keys(conflicts).length > 0} />
                 </>
               }
             />
@@ -304,6 +444,21 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 <TextArea id="metadata-description" fill rows={6} value={draft.description}
                   onChange={(e) => setDraft({ ...draft, description: e.currentTarget.value })} />
               </FormGroup>
+              {Object.entries(conflicts).map(([field, currentValue]) => {
+                if (!isMetadataField(field)) return null;
+                return (
+                  <Callout key={field} intent={Intent.WARNING} icon="warning-sign" compact>
+                    <p>
+                      <strong>{METADATA_FIELD_LABELS[field]}</strong> changed in Calibre.
+                      Current value: {metadataValueText(currentValue)}. Your value: {metadataValueText(fields[field])}.
+                    </p>
+                    <ButtonGroup>
+                      <Button type="button" small text="Use mine" onClick={() => resolveConflict(field, true)} />
+                      <Button type="button" small text="Use theirs" onClick={() => resolveConflict(field, false)} />
+                    </ButtonGroup>
+                  </Callout>
+                );
+              })}
               {calibre?.descriptionHasFormatting && fields.description !== undefined && (
                 <Callout intent={Intent.WARNING} icon="warning-sign" compact>
                   Saving this description will replace its existing formatting with simple paragraphs and line breaks.
@@ -331,7 +486,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-left"
                 aria-label="Previous book"
                 title="Save changes and open the previous book"
-                disabled={!navigation.previous || saving || navigating}
+                disabled={!navigation.previous || saving || navigating || Object.keys(conflicts).length > 0}
                 onClick={() => void step(-1)}
               />
               <Button
@@ -339,7 +494,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-right"
                 aria-label="Next book"
                 title="Save changes and open the next book"
-                disabled={!navigation.next || saving || navigating}
+                disabled={!navigation.next || saving || navigating || Object.keys(conflicts).length > 0}
                 onClick={() => void step(1)}
               />
             </ButtonGroup>
@@ -355,7 +510,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="floppy-disk"
                 text="Save"
                 loading={saving}
-                disabled={saving || navigating || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
+                disabled={saving || navigating || Object.keys(conflicts).length > 0 || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
               />
             </>
             }

@@ -16,6 +16,7 @@ import org.testcontainers.junit.jupiter.Container
 import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
+import tools.jackson.databind.JsonNode
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
@@ -292,6 +293,29 @@ class AuthIntegrationTest {
 
     @Test
     fun `a metadata edit writes only changed fields, logs it, and sync does not requeue it`() {
+        fun jsonValue(node: JsonNode): Any? = when {
+            node.isNull || node.isMissingNode -> null
+            node.isArray -> node.values().map(::jsonValue)
+            node.isObject -> node.properties().associate { it.key to jsonValue(it.value) }
+            node.isBoolean -> node.booleanValue()
+            node.isNumber -> node.doubleValue()
+            node.isTextual -> node.stringValue()
+            else -> null
+        }
+        fun original(details: JsonNode, vararg fields: String): Map<String, Any?> = fields.associateWith { field ->
+            if (field == "publisher") {
+                val extrasValue = details.path("calibre").path(field)
+                jsonValue(if (!extrasValue.isNull && !extrasValue.isMissingNode) extrasValue else details.path("book").path(field))
+            } else {
+                val source = if (field in setOf("titleSort", "authorSort", "description", "identifiers", "rating", "addedAt")) {
+                    details.path("calibre")
+                } else {
+                    details.path("book")
+                }
+                jsonValue(source.path(field))
+            }
+        }
+
         assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
         val alphaLibrary = as_("admin").get("/api/libraries").json.values()
             .first { it.path("name").asString() == "Alpha" }
@@ -302,9 +326,13 @@ class AuthIntegrationTest {
             "--field", "title:Changed outside raggedlib",
             "--field", "comments:<p><strong>Original</strong> description</p>",
         )
+        val beforeTags = as_("curator").get("/api/books/$alphaBook/details").json
         val edited = as_("curator").put(
             "/api/books/$alphaBook/metadata",
-            mapOf("fields" to mapOf("tags" to listOf("updated"))),
+            mapOf(
+                "fields" to mapOf("tags" to listOf("updated")),
+                "original" to original(beforeTags, "tags"),
+            ),
         )
         assertEquals(200, edited.status, edited.body)
         assertEquals("Changed outside raggedlib", edited.json.path("book").path("title").asString())
@@ -322,10 +350,58 @@ class AuthIntegrationTest {
             ),
         )
 
+        val beforeConflict = as_("curator").get("/api/books/$alphaBook/details").json
+        val activityCount = jdbc.queryForObject(
+            "select count(*) from book_activity where book_id = :id",
+            mapOf("id" to alphaBook),
+            Long::class.java,
+        )!!
+        runCalibredb(
+            "set_metadata", "1", "--library-path", libraryRoots[0].toString(),
+            "--field", "tags:external-conflict",
+        )
+        val conflict = as_("curator").put(
+            "/api/books/$alphaBook/metadata",
+            mapOf(
+                "fields" to mapOf("tags" to listOf("mine")),
+                "original" to original(beforeConflict, "tags"),
+            ),
+        )
+        assertEquals(409, conflict.status, conflict.body)
+        assertEquals(
+            listOf("external-conflict"),
+            conflict.json.path("details").path("conflicts").path("tags").values().map { it.asString() },
+        )
+        assertEquals(
+            activityCount,
+            jdbc.queryForObject(
+                "select count(*) from book_activity where book_id = :id",
+                mapOf("id" to alphaBook),
+                Long::class.java,
+            ),
+        )
+        val calibreTags = Browser.MAPPER.readTree(
+            runCalibredb(
+                "list", "--library-path", libraryRoots[0].toString(), "--for-machine", "--fields", "tags", "--search", "id:1",
+            ),
+        )
+        assertTrue(calibreTags.toString().contains("external-conflict"), calibreTags.toString())
+        assertFalse(calibreTags.toString().contains("\"mine\""), calibreTags.toString())
+
+        val mine = as_("curator").put(
+            "/api/books/$alphaBook/metadata",
+            mapOf(
+                "fields" to mapOf("tags" to listOf("mine")),
+                "original" to mapOf("tags" to listOf("external-conflict")),
+            ),
+        )
+        assertEquals(200, mine.status, mine.body)
+        assertEquals(listOf("mine"), mine.json.path("book").path("tags").values().map { it.asString() })
+
         val sync = as_("librarian").post("/api/library/sync?libraryId=$alpha")
         assertEquals(200, sync.status, sync.body)
         assertEquals("INDEXED", as_("curator").get("/api/books/$alphaBook").json.path("status").asString())
-        assertEquals(listOf("updated"), as_("curator").get("/api/books/$alphaBook").json.path("tags").values().map { it.asString() })
+        assertEquals(listOf("mine"), as_("curator").get("/api/books/$alphaBook").json.path("tags").values().map { it.asString() })
 
         val systemKey = as_("admin").post(
             "/api/admin/api-keys",
@@ -336,9 +412,13 @@ class AuthIntegrationTest {
             ),
         )
         assertEquals(201, systemKey.status, systemKey.body)
+        val beforePublisher = as_("curator").get("/api/books/$alphaBook/details").json
         val bot = Browser(base).put(
             "/api/books/$alphaBook/metadata",
-            mapOf("fields" to mapOf("publisher" to "Bot Press")),
+            mapOf(
+                "fields" to mapOf("publisher" to "Bot Press"),
+                "original" to original(beforePublisher, "publisher"),
+            ),
             key = systemKey.json.path("rawKey").asString(),
         )
         assertEquals(200, bot.status, bot.body)
@@ -347,6 +427,7 @@ class AuthIntegrationTest {
             as_("curator").get("/api/books/$alphaBook/details").json.path("lastEdit").path("actor").asString().contains("metadata bot"),
         )
 
+        val beforeExtras = as_("curator").get("/api/books/$alphaBook/details").json
         val extras = as_("curator").put(
             "/api/books/$alphaBook/metadata",
             mapOf(
@@ -357,6 +438,7 @@ class AuthIntegrationTest {
                     "rating" to 4.5,
                     "addedAt" to "2020-01-02T03:04:00Z",
                 ),
+                "original" to original(beforeExtras, "titleSort", "authorSort", "identifiers", "rating", "addedAt"),
             ),
         )
         assertEquals(200, extras.status, extras.body)
@@ -373,18 +455,26 @@ class AuthIntegrationTest {
             jdbc.queryForObject("select changes -> 'rating' ->> 'new' from book_activity where book_id = :id", mapOf("id" to alphaBook), String::class.java),
         )
 
+        val beforeDescription = as_("curator").get("/api/books/$alphaBook/details").json
         val description = as_("curator").put(
             "/api/books/$alphaBook/metadata",
-            mapOf("fields" to mapOf("description" to "First paragraph\n\nSecond paragraph")),
+            mapOf(
+                "fields" to mapOf("description" to "First paragraph\n\nSecond paragraph"),
+                "original" to original(beforeDescription, "description"),
+            ),
         )
         assertEquals(200, description.status, description.body)
         assertEquals("First paragraph\n\nSecond paragraph", description.json.path("calibre").path("description").asString())
         assertFalse(description.json.path("calibre").path("descriptionHasFormatting").asBoolean())
         assertEquals("INDEXED", description.json.path("book").path("status").asString())
 
+        val beforeRename = as_("curator").get("/api/books/$alphaBook/details").json
         val renamed = as_("curator").put(
             "/api/books/$alphaBook/metadata",
-            mapOf("fields" to mapOf("title" to "Reindex this book")),
+            mapOf(
+                "fields" to mapOf("title" to "Reindex this book"),
+                "original" to original(beforeRename, "title"),
+            ),
         )
         assertEquals(200, renamed.status, renamed.body)
         assertEquals("Reindex this book", renamed.json.path("book").path("title").asString())
