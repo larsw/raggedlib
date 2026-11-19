@@ -42,6 +42,35 @@ class CalibreMetadataWriter(
             }
         }
 
+    fun addFormat(library: LibraryInfo, calibreId: Long, file: Path, replace: Boolean) =
+        writeLock.withLibrary(library.root) {
+            val command = buildList {
+                addAll(listOf(props.tools.calibredb, "add_format", "--library-path", library.root.toString()))
+                if (!replace) add("--dont-replace")
+                addAll(listOf(calibreId.toString(), file.toString()))
+            }
+            val result = processRunner.run(command, props.tools.calibredbTimeout)
+            check(result.exitCode == 0) {
+                "calibredb add_format failed for book $calibreId in library '${library.name}' " +
+                    "(${result.exitCode}): ${result.stderr.take(500)}"
+            }
+        }
+
+    fun removeFormat(library: LibraryInfo, calibreId: Long, format: String) =
+        writeLock.withLibrary(library.root) {
+            val result = processRunner.run(
+                listOf(
+                    props.tools.calibredb, "remove_format", calibreId.toString(), format,
+                    "--library-path", library.root.toString(),
+                ),
+                props.tools.calibredbTimeout,
+            )
+            check(result.exitCode == 0) {
+                "calibredb remove_format failed for book $calibreId in library '${library.name}' " +
+                    "(${result.exitCode}): ${result.stderr.take(500)}"
+            }
+        }
+
     private companion object {
         val SET_COVER_SCRIPT = """
             import os

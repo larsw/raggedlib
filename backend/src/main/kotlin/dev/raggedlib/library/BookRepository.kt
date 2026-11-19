@@ -59,6 +59,9 @@ class BookRepository(
     fun find(id: Long): BookRow? =
         jdbc.query("select $columns from books where id = :id", mapOf("id" to id), rowMapper).firstOrNull()
 
+    fun findForUpdate(id: Long): BookRow? =
+        jdbc.query("select $columns from books where id = :id for update", mapOf("id" to id), rowMapper).firstOrNull()
+
     fun findAll(): List<BookRow> = jdbc.query("select $columns from books", rowMapper)
 
     fun findAllByLibrary(libraryId: Long): List<BookRow> =

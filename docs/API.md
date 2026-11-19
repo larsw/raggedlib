@@ -21,7 +21,7 @@ Every endpoint except `/api/auth/**` and `/actuator/health` needs a caller:
 Unauthenticated: `401 {"error", "loginUrl"}` (`/mcp`, or a request with a key: `401` with `WWW-Authenticate: Bearer`).
 
 Scopes (`GET /api/me/api-keys/scopes`) gate endpoints: `library:read` everything that reads libraries and books,
-`library:curate` sync/index/re-index/book vectors, `library:edit` book metadata and cover edits,
+`library:curate` sync/index/re-index/book vectors, `library:edit` book metadata, cover and format edits,
 `favorites:read|write` `/api/lists`, `reviews:read|write` reviews.
 Key management, `/api/admin/**` and library members need a browser session.
 
@@ -183,6 +183,8 @@ interface BookDetails {
 | PUT | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Multipart `file` upload (JPEG, PNG or WebP, max 10 MB). Changes apply immediately. |
 | DELETE | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Removes the cover immediately. |
 | POST | `/api/books/{id}/cover/from-format?format=` | `library:edit` and curator in a writable library. Extracts and applies the embedded cover from an available book format immediately. |
+| PUT | `/api/books/{id}/formats?replace=` | `library:edit` and curator in a writable library. Multipart `file` upload of a Calibre ebook format (extension required), up to `raggedlib.upload.max-format-size` (default 500 MB). Existing formats return `409` unless `replace=true`; format changes apply immediately and re-index only when the selected source changes or is replaced. Set `RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE` to change the limit; also raise `RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE` above it. |
+| DELETE | `/api/books/{id}/formats/{format}` | `library:edit` and curator in a writable library. Removes that format; removing the last format clears the book's passages immediately. |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
 | GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: plain-text description and formatting flag, title/author sort, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, and `lastEdit` for the latest raggedlib metadata or cover edit. |
 | GET | `/api/libraries/{id}/metadata-values` | Curator of the library. `MetadataSuggestions` from that library only, for author/tag/series/publisher/language autocomplete. |

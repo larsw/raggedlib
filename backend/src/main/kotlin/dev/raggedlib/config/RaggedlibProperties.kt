@@ -1,6 +1,7 @@
 package dev.raggedlib.config
 
 import org.springframework.boot.context.properties.ConfigurationProperties
+import org.springframework.util.unit.DataSize
 import java.nio.file.Path
 import java.time.Duration
 
@@ -23,6 +24,7 @@ data class RaggedlibProperties(
     val corsOrigins: List<String> = listOf("http://localhost:3000"),
     val tools: Tools = Tools(),
     val ingest: Ingest = Ingest(),
+    val upload: Upload = Upload(),
     val chunking: Chunking = Chunking(),
     val search: Search = Search(),
     val chat: Chat = Chat(),
@@ -86,6 +88,10 @@ data class RaggedlibProperties(
          * least as long becomes DUPLICATE of it instead of being embedded (see Duplicates). 0 turns this off.
          */
         val duplicateMinShare: Double = 0.9,
+    )
+
+    data class Upload(
+        val maxFormatSize: DataSize = DataSize.ofMegabytes(500),
     )
 
     /**

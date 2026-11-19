@@ -3,11 +3,19 @@ package dev.raggedlib.calibre
 object Formats {
     /** Preference order for text extraction. */
     val PREFERENCE = listOf("EPUB", "AZW3", "MOBI", "FB2", "PDF", "LIT", "CHM", "DJVU")
+    val UPLOADABLE = setOf(
+        "AZW", "AZW1", "AZW3", "AZW4", "CB7", "CBC", "CBR", "CBZ", "CHM", "DOCX", "DJVU", "EPUB", "FB2", "FBZ",
+        "HTML", "HTMLZ", "IMP", "KEPUB", "LIT", "LRF", "LRX", "MOBI", "ODT", "OEBZIP", "PDB", "PDF", "PML",
+        "PMLZ", "POBI", "PRC", "RTF", "SNB", "TPZ", "TXT", "TXTZ", "UPDB", "ZIP",
+    )
 
     fun choose(available: Collection<String>): String? {
         val upper = available.map { it.uppercase() }.toSet()
         return PREFERENCE.firstOrNull { it in upper }
     }
+
+    fun fromFilename(filename: String): String? =
+        filename.substringAfterLast('.', "").uppercase().takeIf { it in UPLOADABLE }
 
     fun contentType(format: String): String = when (format.uppercase()) {
         "PDF" -> "application/pdf"

@@ -647,6 +647,95 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `format edits validate, confirm replacements, log, and clear passages with the last format`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val library = as_("admin").get("/api/libraries").json.values()
+            .first { it.path("name").asString() == "Alpha" }
+        assumeTrue(library.path("writable").asBoolean(), library.path("readOnlyReason").asString())
+
+        val title = "Format upload test ${System.nanoTime()}"
+        val output = runCalibredb(
+            "add", "--empty", "--title", title, "--authors", "Ann Author",
+            "--library-path", libraryRoots[0].toString(),
+        )
+        val calibreId = Regex("""Added book ids: (\d+)""").find(output)?.groupValues?.get(1)?.toLong()
+            ?: error("calibredb didn't return a new book id: $output")
+        val bookId = jdbc.queryForObject(
+            """
+            insert into books (library_id, calibre_id, title, authors, status, chunk_count)
+            values (:libraryId, :calibreId, :title, '{Ann Author}', 'INDEXED', 1)
+            returning id
+            """.trimIndent(),
+            mapOf("libraryId" to alpha, "calibreId" to calibreId, "title" to title),
+            Long::class.java,
+        )!!
+        jdbc.update(
+            "insert into vector_store (content, metadata, book_id, chunk_index) values ('old passage', '{}'::jsonb, :id, 0)",
+            mapOf("id" to bookId),
+        )
+        val archive = ByteArrayOutputStream().also { bytes ->
+            ZipOutputStream(bytes).use { zip ->
+                zip.putNextEntry(ZipEntry("comic.txt"))
+                zip.write("A comic page".toByteArray())
+                zip.closeEntry()
+            }
+        }.toByteArray()
+        val curator = as_("curator")
+
+        assertEquals(
+            400,
+            curator.putMultipart("/api/books/$bookId/formats?replace=false", "file", "notes.exe", "application/octet-stream", byteArrayOf(1)).status,
+        )
+        assertEquals(
+            403,
+            as_("reader").putMultipart("/api/books/$bookId/formats?replace=false", "file", "comic.cbz", "application/zip", archive).status,
+        )
+
+        val added = curator.putMultipart("/api/books/$bookId/formats?replace=false", "file", "comic.cbz", "application/zip", archive)
+        assertEquals(200, added.status, added.body)
+        assertEquals(listOf("CBZ"), added.json.path("book").path("formats").values().map { it.asString() })
+        assertEquals("INDEXED", added.json.path("book").path("status").asString())
+        assertEquals(1, added.json.path("book").path("chunkCount").asInt())
+
+        val conflict = curator.putMultipart("/api/books/$bookId/formats?replace=false", "file", "comic.cbz", "application/zip", archive)
+        assertEquals(409, conflict.status, conflict.body)
+        val replaced = curator.putMultipart("/api/books/$bookId/formats?replace=true", "file", "comic.cbz", "application/zip", archive)
+        assertEquals(200, replaced.status, replaced.body)
+        assertEquals(1, replaced.json.path("book").path("chunkCount").asInt())
+
+        val removed = curator.delete("/api/books/$bookId/formats/CBZ")
+        assertEquals(200, removed.status, removed.body)
+        assertTrue(removed.json.path("book").path("formats").isEmpty)
+        assertEquals("SKIPPED", removed.json.path("book").path("status").asString())
+        assertEquals(0, removed.json.path("book").path("chunkCount").asInt())
+        assertEquals(0, jdbc.queryForObject("select count(*) from vector_store where book_id = :id", mapOf("id" to bookId), Long::class.java))
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "select count(*) from book_activity where book_id = :id and action = 'ADD_FORMAT'",
+                mapOf("id" to bookId),
+                Long::class.java,
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "select count(*) from book_activity where book_id = :id and action = 'REPLACE_FORMAT'",
+                mapOf("id" to bookId),
+                Long::class.java,
+            ),
+        )
+        assertEquals(
+            1,
+            jdbc.queryForObject(
+                "select count(*) from book_activity where book_id = :id and action = 'REMOVE_FORMAT'",
+                mapOf("id" to bookId),
+                Long::class.java,
+            ),
+        )
+    }
+
+    @Test
     fun `writes with a session need the CSRF token`() {
         val reader = as_("reader")
         assertEquals(403, reader.post("/api/lists", mapOf("name" to "no token"), csrf = false).status)

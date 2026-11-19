@@ -2,6 +2,7 @@ package dev.raggedlib.calibre
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 
 class FormatsTest {
@@ -21,5 +22,20 @@ class FormatsTest {
     fun `unsupported formats yield null`() {
         assertNull(Formats.choose(listOf("ZIP", "ORIGINAL_EPUB")))
         assertNull(Formats.choose(emptyList()))
+    }
+
+    @Test
+    fun `upload format is selected from filename extension`() {
+        assertEquals("EPUB", Formats.fromFilename("Novel.ePub"))
+        assertEquals("PDF", Formats.fromFilename("scan.PDF"))
+        assertNull(Formats.fromFilename("Novel.exe"))
+        assertNull(Formats.fromFilename("Novel"))
+    }
+
+    @Test
+    fun `accepted Calibre upload formats include indexable and archive formats`() {
+        assertNotNull(Formats.fromFilename("novel.epub"))
+        assertNotNull(Formats.fromFilename("comic.cbz"))
+        assertNull(Formats.fromFilename("image.jpg"))
     }
 }
