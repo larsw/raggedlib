@@ -5,6 +5,7 @@ import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.config.ApiException
 import dev.raggedlib.config.RaggedlibProperties
+import dev.raggedlib.config.badRequest
 import dev.raggedlib.extract.ProcessRunner
 import dev.raggedlib.extract.ProcessTimeoutException
 import dev.raggedlib.settings.AppSettings
@@ -33,7 +34,7 @@ data class MetadataCandidate(
 )
 
 data class MetadataLookupRequest(
-    val title: String,
+    val title: String?,
     val authors: List<String>,
     val identifiers: Map<String, String>,
     val mode: String = "metadata",
@@ -70,8 +71,22 @@ class MetadataSourceLookupService(
     private val processRunner: ProcessRunner,
     private val mapper: ObjectMapper,
 ) {
-    fun candidates(bookId: Long): List<MetadataCandidate> =
-        mapper.readValue<List<MetadataCandidate>>(runLookup(lookupRequest(bookId)))
+    fun candidates(bookId: Long): List<MetadataCandidate> = lookup(lookupRequest(bookId))
+
+    fun candidates(title: String?, authors: List<String>?, isbn: String?): List<MetadataCandidate> {
+        requireLookupEnabled()
+        access.requireScope(ApiScope.LIBRARY_EDIT)
+
+        val queryTitle = title?.trim()?.takeIf(String::isNotEmpty)
+        val queryIsbn = isbn?.trim()?.takeIf(String::isNotEmpty)
+        if (queryTitle == null && queryIsbn == null) badRequest("provide a title or ISBN for metadata lookup")
+        val identifiers = queryIsbn?.let { mapOf("isbn" to it) }.orEmpty()
+        val queryAuthors = authors.orEmpty().map(String::trim).filter(String::isNotEmpty)
+        return lookup(MetadataLookupRequest(queryTitle, queryAuthors, identifiers))
+    }
+
+    private fun lookup(request: MetadataLookupRequest): List<MetadataCandidate> =
+        mapper.readValue<List<MetadataCandidate>>(runLookup(request))
 
     fun coverCandidates(bookId: Long): MetadataCoverLookupResult {
         val result = mapper.readValue<MetadataCoverPayloadResult>(
@@ -100,14 +115,18 @@ class MetadataSourceLookupService(
     }
 
     private fun lookupRequest(bookId: Long): MetadataLookupRequest {
-        if (!settings.metadataLookupEnabled) {
-            throw ApiException(HttpStatus.FORBIDDEN, "metadata downloads are disabled by the administrator")
-        }
+        requireLookupEnabled()
         access.requireScope(ApiScope.LIBRARY_EDIT)
         val authorized = access.requireEditableBook(bookId)
         val library = access.requireEditableLibrary(authorized.book.libraryId)
         val identifiers = calibre.extras(library.root, authorized.book.calibreId)?.identifiers.orEmpty()
         return MetadataLookupRequest(authorized.book.title, authorized.book.authors, identifiers)
+    }
+
+    private fun requireLookupEnabled() {
+        if (!settings.metadataLookupEnabled) {
+            throw ApiException(HttpStatus.FORBIDDEN, "metadata downloads are disabled by the administrator")
+        }
     }
 
     private fun runLookup(request: MetadataLookupRequest): String {

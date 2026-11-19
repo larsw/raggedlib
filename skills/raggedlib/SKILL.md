@@ -2,8 +2,8 @@
 name: raggedlib
 description: >-
   Search and cite the user's own ebook library (Calibre, indexed by raggedlib) through its MCP tools:
-  search_library, ask_library, list_books, list_tags, library_status, book metadata editing such as tagging books
-  or filling missing ISBNs, favorite lists and book reviews. Use this skill whenever the user asks
+  search_library, ask_library, list_books, list_tags, library_status, book metadata lookup and editing such as
+  tagging books or filling missing ISBNs, favorite lists and book reviews. Use this skill whenever the user asks
   what their books, ebook library, Calibre library or "my library" say about something, wants passages, quotes
   or page references from books or documents they own, wants an answer grounded in (or checked against) their
   books, asks which of their books cover a topic, or asks what is indexed in raggedlib — even if they don't name
@@ -33,12 +33,14 @@ available at all, see "When the tools aren't connected" below.
 | `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` | Keeping the user's lists (`create_favorite_list` with `bookIds`, or `add_books_to_favorite_list`: a search's books in one call) | instant |
 | `get_book_metadata` | Read every editable field and an `original` snapshot for safe updates | instant |
 | `update_book_metadata` | Change selected metadata fields, with per-field conflict detection | instant |
+| `fetch_book_metadata` | Fetch Calibre metadata candidates by book id or title/authors/ISBN | a few seconds |
 | `get_book_reviews`, `list_my_reviews`, `write_book_review` | Book reviews (rating 1–5 and/or text) | instant |
 
 raggedlib is multi-user: the tools see only the libraries the API key's owner may see, and which tools exist
-depends on the key's scopes. Metadata tools require `library:edit` and operate only in writable, unpaused libraries.
-The favorites and reviews tools act as the user; a system-wide key doesn't have them. Only change metadata, lists or
-write a review when the user asks for it, and write reviews in their words.
+depends on the key's scopes. Metadata tools require `library:edit`; book edits require a writable, unpaused library,
+and metadata lookup is hidden while the global download setting is off. The favorites and reviews tools act as the
+user; a system-wide key doesn't have them. Only fetch or change metadata, change lists or write a review when the
+user asks for it, and write reviews in their words.
 
 ### search_library — start here
 
@@ -114,6 +116,18 @@ The update is all-or-nothing for the requested fields. A result with `status="co
 or more fields since the snapshot; no fields were written. Inspect the returned `conflicts` and `snapshot`, then
 decide whether to retry with the refreshed original values. Don't blindly retry a conflict. The activity log records
 the API key's name, and for a personal key also its owner's name.
+
+### fetch_book_metadata
+
+Use `fetch_book_metadata(bookId=...)` for a library book, or provide `title` with optional `authors` and `isbn`.
+It returns `{status, message, candidates}` from the same Calibre sources as the editor's Download metadata.
+Statuses are `found`, `no_results` and `timeout`; no result or timeout is reported as a readable tool result.
+Candidates are suggestions only; they are not saved to the book.
+
+**Privacy:** A lookup sends the book title, author names and identifiers (including ISBN) to configured external
+Calibre metadata providers. With a book id, these values come from the stored book; with a title-based query, they
+come from the tool arguments. Only call this tool when the user explicitly asks for a metadata lookup, and do not
+send private or unrelated information. The global admin setting must allow metadata downloads.
 
 ## A good workflow
 
