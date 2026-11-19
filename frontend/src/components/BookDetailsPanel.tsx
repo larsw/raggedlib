@@ -1,6 +1,6 @@
 import { AnchorButton, Button, ButtonGroup, Callout, Classes, Intent, NonIdealState, Spinner, Tag, Tooltip } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
-import { api, bookFileUrl } from "../api/client";
+import { api, bookFileUrl, errorMessage } from "../api/client";
 import type { Book, BookDetails } from "../api/types";
 import { useApp } from "../AppContext";
 import { useAsync } from "../hooks/useAsync";
@@ -9,6 +9,7 @@ import { isReaderFormat, readerFormat, type ReaderTarget } from "../lib/reader";
 import { formatRating } from "../lib/reviews";
 import { formatBytes, formatDate, formatDateTime, formatNumber, formatYear, pluralize } from "../lib/format";
 import { BookCover } from "./BookCover";
+import { ConfirmButton } from "./ConfirmButton";
 import { BookMetadataDialog } from "./BookMetadataDialog";
 import { ErrorState } from "./ErrorState";
 import { AddToListButton } from "./lists/AddToListButton";
@@ -40,6 +41,7 @@ interface Props {
   onReindex: (book: Book) => void;
   /** the book was put on or taken off one of the caller's lists */
   onListsChanged?: () => void;
+  onBookDeleted?: () => void;
   onBookMetadataChanged?: (book: Book) => void;
   metadataNavigation?: MetadataNavigation;
   editMetadataRequest?: number;
@@ -109,6 +111,7 @@ function DetailsContent({
   details,
   reindexing,
   onSelectBook,
+  onClose,
   onFilterTag,
   onFilterPublisher,
   onAsk,
@@ -116,6 +119,7 @@ function DetailsContent({
   onReindex,
   onEditMetadata,
   onListsChanged,
+  onBookDeleted,
 }: Props & { details: BookDetails; onEditMetadata: () => void }) {
   const { book, calibre, duplicateOf, sections } = details;
   const { openReader, libraries, roleIn } = useApp();
@@ -131,6 +135,16 @@ function DetailsContent({
   const reviews = useAsync((signal) => api.bookReviews(book.id, signal), [book.id]);
   const rated = reviews.data?.bookId === book.id ? reviews.data : undefined;
   const reviewsRef = useRef<HTMLDivElement>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const deleteBook = async () => {
+    try {
+      await api.deleteBook(book.id);
+      if (onBookDeleted) onBookDeleted();
+      else onClose();
+    } catch (error) {
+      setDeleteError(errorMessage(error));
+    }
+  };
 
   return (
     <>
@@ -189,6 +203,14 @@ function DetailsContent({
       <div className="book-panel-secondary">
         <AddToListButton bookId={book.id} onChanged={onListsChanged} />
         {canEdit && <Button variant="minimal" icon="edit" text="Edit metadata" disabled={editingPaused} onClick={onEditMetadata} />}
+        {canEdit && (
+          <ConfirmButton
+            text="Delete book"
+            confirmText="Delete"
+            disabled={editingPaused}
+            onConfirm={deleteBook}
+          />
+        )}
         {rated && rated.averageRating != null && (
           <button
             type="button"
@@ -208,6 +230,7 @@ function DetailsContent({
           Editing is paused (the library is open in desktop Calibre).
         </Callout>
       )}
+      {deleteError && <Callout intent={Intent.DANGER}>{deleteError}</Callout>}
 
       {calibre?.description && <Description text={calibre.description} />}
 

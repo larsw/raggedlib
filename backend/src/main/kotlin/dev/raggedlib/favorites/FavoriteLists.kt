@@ -79,9 +79,12 @@ class FavoriteListService(
     private val select = """
         select l.id, l.name, l.description, l.shared, l.owner_id, l.created_at, l.updated_at,
                coalesce(u.display_name, u.email, u.subject) as owner_name,
-               (select count(*) from favorite_list_books fb join books b on b.id = fb.book_id
+               (select count(*) from favorite_list_books fb join active_books b on b.id = fb.book_id
                  where fb.list_id = l.id and b.library_id in (:visible)) as book_count,
-               exists (select 1 from favorite_list_books fb where fb.list_id = l.id and fb.book_id = :bookId) as contains_book
+               exists (
+                   select 1 from favorite_list_books fb join active_books b on b.id = fb.book_id
+                   where fb.list_id = l.id and fb.book_id = :bookId and b.library_id in (:visible)
+               ) as contains_book
         from favorite_lists l join users u on u.id = l.owner_id
     """.trimIndent()
 
@@ -121,7 +124,7 @@ class FavoriteListService(
         val list = readable(id)
         val entries = jdbc.query(
             """
-            select fb.book_id, fb.note, fb.added_at from favorite_list_books fb join books b on b.id = fb.book_id
+            select fb.book_id, fb.note, fb.added_at from favorite_list_books fb join active_books b on b.id = fb.book_id
             where fb.list_id = :id and b.library_id in (:visible) order by fb.added_at desc, fb.book_id
             """.trimIndent(),
             params(access.userId()).addValue("id", id),

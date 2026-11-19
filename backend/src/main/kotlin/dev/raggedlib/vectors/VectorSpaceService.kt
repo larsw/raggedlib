@@ -222,8 +222,8 @@ class VectorSpaceService(
         select count(*) || ':' || coalesce(sum(chunk_count), 0) || ':' || count(indexed_at) || ':' ||
                coalesce(max(indexed_at)::text, '') || ':' ||
                (select count(*) || ':' || coalesce(max(bv.computed_at)::text, '')
-                from book_vectors bv join books vb on vb.id = bv.book_id where vb.library_id = ?)
-        from books where library_id = ?
+                from book_vectors bv join active_books vb on vb.id = bv.book_id where vb.library_id = ?)
+        from active_books where library_id = ?
         """.trimIndent(),
         String::class.java, libraryId, libraryId,
     )!!
@@ -454,20 +454,20 @@ class VectorSpaceService(
 
         private val PASSAGE_COUNT_SQL = """
             select count(*)
-            from vector_store v join books b on b.id = v.book_id
+            from vector_store v join active_books b on b.id = v.book_id
             where v.embedding is not null and b.library_id = ?
         """.trimIndent()
 
         private val PASSAGE_SAMPLE_SQL = """
             select v.id::text, v.book_id, b.title, v.page, v.section, left(v.content, $SNIPPET_CHARS), v.embedding::text
-            from vector_store v join books b on b.id = v.book_id
+            from vector_store v join active_books b on b.id = v.book_id
             where v.embedding is not null and b.library_id = ?
             order by md5(v.id::text || ?)
             limit ?
         """.trimIndent()
 
         private val BOOK_COUNT_SQL = """
-            select count(*) from book_vectors bv join books b on b.id = bv.book_id where b.library_id = ?
+            select count(*) from book_vectors bv join active_books b on b.id = bv.book_id where b.library_id = ?
         """.trimIndent()
 
         private val BOOK_SAMPLE_SQL = """
@@ -475,7 +475,7 @@ class VectorSpaceService(
                    concat_ws(' · ', nullif(array_to_string(b.authors, ', '), ''), b.publisher,
                              extract(year from b.pubdate)::int::text),
                    bv.embedding::text
-            from book_vectors bv join books b on b.id = bv.book_id
+            from book_vectors bv join active_books b on b.id = bv.book_id
             where b.library_id = ?
             order by md5(b.id::text || ?)
             limit ?
@@ -486,7 +486,7 @@ class VectorSpaceService(
         """.trimIndent()
 
         private val WORD_COUNT_BOOKS_SQL = """
-            select b.id::text, unnest(tsvector_to_array(to_tsvector('english', b.title))) from books b where b.id::text in (:ids)
+            select b.id::text, unnest(tsvector_to_array(to_tsvector('english', b.title))) from active_books b where b.id::text in (:ids)
         """.trimIndent()
     }
 }

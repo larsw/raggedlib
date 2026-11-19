@@ -133,6 +133,8 @@ class SecurityConfig {
                     .access(all(hasAuthority(Authorities.ADMIN), hasAuthority(ApiScope.LIBRARY_CURATE.authority)))
                 a.requestMatchers(HttpMethod.PUT, "/api/books/*/metadata")
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
+                a.requestMatchers(HttpMethod.DELETE, "/api/books/*")
+                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers(HttpMethod.POST, "/api/libraries/*/books")
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers(HttpMethod.POST, "/api/libraries/*/books/*/decision")

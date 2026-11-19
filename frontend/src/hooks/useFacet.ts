@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { api, errorMessage } from "../api/client";
 import type { TagCount } from "../api/types";
 import { useApp } from "../AppContext";
@@ -39,6 +39,8 @@ export const FACET_LABELS: Record<Facet, FacetLabels> = {
 };
 
 const cache = new Map<string, Promise<TagCount[]>>();
+let cacheVersion = 0;
+const cacheListeners = new Set<() => void>();
 
 /** Tags and publishers rarely change: fetched once per (facet, library) until a library sync clears them. */
 function loadFacet(facet: Facet, libraryId?: number): Promise<TagCount[]> {
@@ -57,21 +59,32 @@ function loadFacet(facet: Facet, libraryId?: number): Promise<TagCount[]> {
 /** Forgets every fetched list, e.g. after a library sync changed the books. */
 export function clearFacetCache() {
   cache.clear();
+  cacheVersion++;
+  cacheListeners.forEach((listener) => listener());
+}
+
+function subscribeToFacetCache(listener: () => void) {
+  cacheListeners.add(listener);
+  return () => {
+    cacheListeners.delete(listener);
+  };
 }
 
 /** The values of [facet] in the library chosen in the navbar (or all of them), most books first. */
 export function useFacet(facet: Facet) {
   const { library } = useApp();
+  const version = useSyncExternalStore(subscribeToFacetCache, () => cacheVersion, () => cacheVersion);
   const [items, setItems] = useState<TagCount[]>([]);
   const [error, setError] = useState<string>();
   useEffect(() => {
     let alive = true;
+    setError(undefined);
     loadFacet(facet, library?.id)
       .then((t) => alive && setItems(t))
       .catch((err) => alive && setError(errorMessage(err)));
     return () => {
       alive = false;
     };
-  }, [facet, library?.id]);
+  }, [facet, library?.id, version]);
   return { items, error };
 }

@@ -9,6 +9,7 @@ import tools.jackson.databind.ObjectMapper
 import tools.jackson.module.kotlin.readValue
 import java.sql.ResultSet
 import java.sql.Timestamp
+import java.time.Instant
 
 @Repository
 class BookRepository(
@@ -18,7 +19,7 @@ class BookRepository(
     private val columns = """
         id, library_id, calibre_id, title, authors, tags, series, series_index, languages, pubdate, publisher, formats,
         source_format, cover_path, calibre_last_modified, status, chunk_count, error, indexed_at, duplicate_of,
-        ocr_pages
+        ocr_pages, deleted_at
     """.trimIndent()
 
     private val rowMapper = RowMapper { rs, _ -> mapRow(rs) }
@@ -53,18 +54,22 @@ class BookRepository(
             formatPaths = formatPaths,
             coverPath = cover,
             lastModified = rs.getTimestamp("calibre_last_modified")?.toInstant(),
+            deletedAt = rs.getTimestamp("deleted_at")?.toInstant(),
         )
     }
 
     fun find(id: Long): BookRow? =
-        jdbc.query("select $columns from books where id = :id", mapOf("id" to id), rowMapper).firstOrNull()
+        jdbc.query("select $columns from active_books where id = :id", mapOf("id" to id), rowMapper).firstOrNull()
 
     fun findForUpdate(id: Long): BookRow? =
-        jdbc.query("select $columns from books where id = :id for update", mapOf("id" to id), rowMapper).firstOrNull()
+        jdbc.query("select $columns from active_books where id = :id for update", mapOf("id" to id), rowMapper).firstOrNull()
 
-    fun findAll(): List<BookRow> = jdbc.query("select $columns from books", rowMapper)
+    fun findAll(): List<BookRow> = jdbc.query("select $columns from active_books", rowMapper)
 
     fun findAllByLibrary(libraryId: Long): List<BookRow> =
+        jdbc.query("select $columns from active_books where library_id = :libraryId", mapOf("libraryId" to libraryId), rowMapper)
+
+    fun findAllIncludingDeletedByLibrary(libraryId: Long): List<BookRow> =
         jdbc.query("select $columns from books where library_id = :libraryId", mapOf("libraryId" to libraryId), rowMapper)
 
     /** Books matching the filters, in libraries [libraryIds] (null: every library; empty: none). */
@@ -105,9 +110,9 @@ class BookRepository(
             "id" -> "id ${dir(desc)}"
             else -> "lower(title) ${dir(desc)}, id"
         }
-        val total = jdbc.queryForObject("select count(*) from books $whereSql", params, Long::class.java) ?: 0L
+        val total = jdbc.queryForObject("select count(*) from active_books $whereSql", params, Long::class.java) ?: 0L
         params.addValue("limit", size).addValue("offset", page.toLong() * size)
-        val items = jdbc.query("select $columns from books $whereSql order by $orderSql limit :limit offset :offset", params, rowMapper)
+        val items = jdbc.query("select $columns from active_books $whereSql order by $orderSql limit :limit offset :offset", params, rowMapper)
             .map { it.book }
         return Page(items, total, page, size)
     }
@@ -119,7 +124,7 @@ class BookRepository(
         if (libraryIds != null && libraryIds.isEmpty()) return emptyList()
         val filter = if (libraryIds != null) "where library_id in (:libraryIds)" else ""
         return jdbc.query(
-            "select t, count(*) c from books, unnest(tags) t $filter group by t order by c desc, t",
+            "select t, count(*) c from active_books, unnest(tags) t $filter group by t order by c desc, t",
             mapOf("libraryIds" to libraryIds),
         ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
     }
@@ -129,7 +134,7 @@ class BookRepository(
         if (libraryIds != null && libraryIds.isEmpty()) return emptyList()
         val filter = if (libraryIds != null) "and library_id in (:libraryIds)" else ""
         return jdbc.query(
-            "select publisher, count(*) c from books where publisher is not null $filter group by publisher order by c desc, publisher",
+            "select publisher, count(*) c from active_books where publisher is not null $filter group by publisher order by c desc, publisher",
             mapOf("libraryIds" to libraryIds),
         ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
     }
@@ -146,7 +151,7 @@ class BookRepository(
         require(column in setOf("authors", "tags", "languages"))
         return jdbc.query(
             """
-            select u.value from books b cross join lateral unnest(b.$column) as u(value)
+            select u.value from active_books b cross join lateral unnest(b.$column) as u(value)
             where b.library_id = :libraryId and u.value <> ''
             group by u.value
             order by lower(u.value), u.value
@@ -159,7 +164,7 @@ class BookRepository(
         require(column in setOf("series", "publisher"))
         return jdbc.query(
             """
-            select $column from books
+            select $column from active_books
             where library_id = :libraryId and $column is not null and $column <> ''
             group by $column
             order by lower($column), $column
@@ -169,11 +174,11 @@ class BookRepository(
     }
 
     fun findByIds(ids: Collection<Long>): List<Book> = if (ids.isEmpty()) emptyList() else
-        jdbc.query("select $columns from books where id in (:ids)", mapOf("ids" to ids), rowMapper).map { it.book }
+        jdbc.query("select $columns from active_books where id in (:ids)", mapOf("ids" to ids), rowMapper).map { it.book }
 
     /** Library of each of [ids] that exists. */
     fun libraryOf(ids: Collection<Long>): Map<Long, Long> = if (ids.isEmpty()) emptyMap() else jdbc.query(
-        "select id, library_id from books where id in (:ids)", mapOf("ids" to ids),
+        "select id, library_id from active_books where id in (:ids)", mapOf("ids" to ids),
     ) { rs, _ -> rs.getLong(1) to rs.getLong(2) }.toMap()
 
     /**
@@ -184,7 +189,7 @@ class BookRepository(
         if (ids.isEmpty() || libraryIds.isEmpty()) return emptyMap()
         return jdbc.query(
             """
-            select distinct on (duplicate_of) $columns from books
+            select distinct on (duplicate_of) $columns from active_books
             where duplicate_of in (:ids) and library_id in (:libraryIds) order by duplicate_of, id
             """.trimIndent(),
             mapOf("ids" to ids, "libraryIds" to libraryIds), rowMapper,
@@ -192,7 +197,7 @@ class BookRepository(
     }
 
     fun countsByLibrary(): Map<Long, Int> = jdbc.query(
-        "select library_id, count(*) from books group by library_id", emptyMap<String, Any>(),
+        "select library_id, count(*) from active_books group by library_id", emptyMap<String, Any>(),
     ) { rs, _ -> rs.getLong(1) to rs.getInt(2) }.toMap()
 
     /** Inserts a newly-seen book of [libraryId]; the surrogate id is assigned by the database. */
@@ -241,15 +246,31 @@ class BookRepository(
         .addValue("cover", r.coverPath)
         .addValue("lastModified", r.lastModified?.let(Timestamp::from))
 
-    fun delete(ids: Collection<Long>): Int =
-        if (ids.isEmpty()) 0 else jdbc.update("delete from books where id in (:ids)", mapOf("ids" to ids))
+    fun softDelete(ids: Collection<Long>): List<BookRow> = if (ids.isEmpty()) emptyList() else jdbc.query(
+        "update books set deleted_at = now(), updated_at = now() where id in (:ids) and deleted_at is null returning $columns",
+        mapOf("ids" to ids),
+        rowMapper,
+    )
+
+    fun restore(id: Long): Boolean =
+        jdbc.update("update books set deleted_at = null, updated_at = now() where id = :id and deleted_at is not null", mapOf("id" to id)) > 0
+
+    fun purgeDeletedBefore(before: Instant, libraryId: Long? = null): Int {
+        val libraryFilter = if (libraryId == null) "" else "and library_id = :libraryId"
+        val params = MapSqlParameterSource("before", Timestamp.from(before))
+        if (libraryId != null) params.addValue("libraryId", libraryId)
+        return jdbc.update(
+            "delete from books where deleted_at < :before $libraryFilter",
+            params,
+        )
+    }
 
     fun setStatus(id: Long, status: BookStatus, error: String? = null, sourceFormat: String? = null) {
         jdbc.update(
             """
             update books set status = :status, error = :error, updated_at = now(),
                    source_format = coalesce(:sourceFormat, source_format)
-            where id = :id
+            where id = :id and deleted_at is null
             """.trimIndent(),
             MapSqlParameterSource().addValue("id", id).addValue("status", status.name).addValue("error", error)
                 .addValue("sourceFormat", sourceFormat),
@@ -261,7 +282,7 @@ class BookRepository(
             """
             update books set status = 'INDEXED', chunk_count = :n, error = null, indexed_at = now(), updated_at = now(),
                    source_format = :fmt, duplicate_of = null, ocr_pages = :ocr
-            where id = :id
+            where id = :id and deleted_at is null
             """.trimIndent(),
             mapOf("id" to id, "n" to chunkCount, "fmt" to sourceFormat, "ocr" to ocrPages),
         )
@@ -271,7 +292,7 @@ class BookRepository(
     fun requeueWithoutTextLayer(): List<Long> = jdbc.queryForList(
         """
         update books set status = 'PENDING', error = null, updated_at = now()
-        where status = 'SKIPPED' and (error = 'no text layer' or error like 'no text layer (%') returning id
+        where deleted_at is null and status = 'SKIPPED' and (error = 'no text layer' or error like 'no text layer (%') returning id
         """.trimIndent(),
         emptyMap<String, Any>(), Long::class.java,
     ).filterNotNull()
@@ -281,7 +302,7 @@ class BookRepository(
      * duplicate keeps pointing at its copy until it is decided again.
      */
     fun requeue(ids: Collection<Long>): Int = if (ids.isEmpty()) 0 else jdbc.update(
-        "update books set status = 'PENDING', error = null, updated_at = now() where id in (:ids)",
+        "update books set status = 'PENDING', error = null, updated_at = now() where id in (:ids) and deleted_at is null",
         mapOf("ids" to ids),
     )
 
@@ -293,7 +314,7 @@ class BookRepository(
             """
             update books set status = :status, error = :error, chunk_count = 0, indexed_at = null, duplicate_of = null,
                    ocr_pages = 0, source_format = coalesce(:sourceFormat, source_format), updated_at = now()
-            where id = :id
+            where id = :id and deleted_at is null
             """.trimIndent(),
             MapSqlParameterSource().addValue("id", id).addValue("status", status.name).addValue("error", error)
                 .addValue("sourceFormat", sourceFormat),
@@ -306,18 +327,18 @@ class BookRepository(
      */
     fun markDuplicate(id: Long, of: Long, note: String, sourceFormat: String?): Boolean {
         // the keeper must not be deleted (library sync) between this check and the commit
-        if (jdbc.queryForList("select id from books where id = :of for key share", mapOf("of" to of), Long::class.java).isEmpty()) {
+        if (jdbc.queryForList("select id from active_books where id = :of for key share", mapOf("of" to of), Long::class.java).isEmpty()) {
             return false
         }
         jdbc.update(
-            "update books set duplicate_of = :of, updated_at = now() where duplicate_of = :id and status = 'DUPLICATE'",
+            "update books set duplicate_of = :of, updated_at = now() where duplicate_of = :id and status = 'DUPLICATE' and deleted_at is null",
             mapOf("id" to id, "of" to of),
         )
         jdbc.update(
             """
             update books set status = 'DUPLICATE', duplicate_of = :of, error = :note, chunk_count = 0, indexed_at = now(),
                    source_format = coalesce(:fmt, source_format), updated_at = now()
-            where id = :id
+            where id = :id and deleted_at is null
             """.trimIndent(),
             MapSqlParameterSource().addValue("id", id).addValue("of", of).addValue("note", note).addValue("fmt", sourceFormat),
         )
@@ -327,7 +348,7 @@ class BookRepository(
     /** Keeps the book's passages but records a failure (a re-index failed; the old passages are still good). */
     fun markFailedKeepingPassages(id: Long, error: String) {
         jdbc.update(
-            "update books set status = 'FAILED', error = :error, updated_at = now() where id = :id",
+            "update books set status = 'FAILED', error = :error, updated_at = now() where id = :id and deleted_at is null",
             mapOf("id" to id, "error" to error),
         )
     }
@@ -341,7 +362,7 @@ class BookRepository(
         return jdbc.queryForList(
             """
             update books set status = 'PENDING', error = null, duplicate_of = null, updated_at = now()
-            where status = 'DUPLICATE' and duplicate_of in (:ids) returning id
+            where deleted_at is null and status = 'DUPLICATE' and duplicate_of in (:ids) returning id
             """.trimIndent(),
             mapOf("ids" to keepers), Long::class.java,
         ).filterNotNull()
@@ -351,21 +372,21 @@ class BookRepository(
     fun requeueOrphanedDuplicates(): List<Long> = jdbc.queryForList(
         """
         update books set status = 'PENDING', error = null, updated_at = now()
-        where status = 'DUPLICATE' and duplicate_of is null returning id
+        where deleted_at is null and status = 'DUPLICATE' and duplicate_of is null returning id
         """.trimIndent(),
         emptyMap<String, Any>(), Long::class.java,
     ).filterNotNull()
 
     /** Books (DUPLICATE or queued again) standing in for [id]'s text. */
     fun duplicatesOf(id: Long): List<Long> = jdbc.queryForList(
-        "select id from books where duplicate_of = :id", mapOf("id" to id), Long::class.java,
+        "select id from active_books where duplicate_of = :id", mapOf("id" to id), Long::class.java,
     ).filterNotNull()
 
 
     /** Ids of books in [statuses], only of [restrictTo] and in [libraryIds] if given. */
     fun idsWithStatus(statuses: Collection<BookStatus>, restrictTo: Collection<Long>?, libraryIds: Collection<Long>? = null): List<Long> {
         val params = MapSqlParameterSource("statuses", statuses.map { it.name })
-        var sql = "select id from books where status in (:statuses)"
+        var sql = "select id from active_books where status in (:statuses)"
         if (restrictTo != null) {
             if (restrictTo.isEmpty()) return emptyList()
             sql += " and id in (:ids)"
@@ -380,7 +401,7 @@ class BookRepository(
     }
 
     fun statusOf(id: Long): BookStatus? = jdbc.queryForList(
-        "select status from books where id = :id", mapOf("id" to id), String::class.java,
+        "select status from active_books where id = :id", mapOf("id" to id), String::class.java,
     ).firstOrNull()?.let(BookStatus::valueOf)
 
     /** Books by status, in [libraryIds] (null: every library). */
@@ -388,7 +409,7 @@ class BookRepository(
         val counts = BookStatus.entries.associateWith { 0 }.toMutableMap()
         if (libraryIds != null && libraryIds.isEmpty()) return counts
         val filter = if (libraryIds != null) "where library_id in (:libraryIds)" else ""
-        jdbc.query("select status, count(*) from books $filter group by status", mapOf("libraryIds" to libraryIds)) { rs ->
+        jdbc.query("select status, count(*) from active_books $filter group by status", mapOf("libraryIds" to libraryIds)) { rs ->
             counts[BookStatus.valueOf(rs.getString(1))] = rs.getInt(2)
         }
         return counts
@@ -398,7 +419,7 @@ class BookRepository(
     fun totalChunks(libraryIds: Collection<Long>? = null): Long {
         if (libraryIds != null && libraryIds.isEmpty()) return 0L
         val filter = if (libraryIds != null) "where library_id in (:libraryIds)" else ""
-        return jdbc.queryForObject("select coalesce(sum(chunk_count), 0) from books $filter", mapOf("libraryIds" to libraryIds), Long::class.java) ?: 0L
+        return jdbc.queryForObject("select coalesce(sum(chunk_count), 0) from active_books $filter", mapOf("libraryIds" to libraryIds), Long::class.java) ?: 0L
     }
 
     /**
@@ -414,7 +435,7 @@ class BookRepository(
                 select coalesce(sum(chunk_count) filter (where chunk_count > 0), 0),
                        count(*) filter (where chunk_count = 0 and duplicate_of is null),
                        count(*) filter (where chunk_count = 0 and duplicate_of is not null)
-                from books where id in (:ids)
+                from active_books where id in (:ids)
                 """.trimIndent(),
                 mapOf("ids" to part),
             ) { rs -> total += rs.getLong(1) + rs.getLong(2) * unknownAvg + rs.getLong(3) * DUPLICATE_WEIGHT }
@@ -423,7 +444,7 @@ class BookRepository(
     }
 
     fun avgChunksPerIndexedBook(): Double? = jdbc.queryForObject(
-        "select avg(chunk_count)::float8 from books where status = 'INDEXED' and chunk_count > 0",
+        "select avg(chunk_count)::float8 from active_books where status = 'INDEXED' and chunk_count > 0",
         emptyMap<String, Any>(), Double::class.java,
     )
 
