@@ -1,7 +1,7 @@
 import { Button, ButtonGroup, Callout, Checkbox, Classes, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, Intent, TextArea } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, errorMessage } from "../api/client";
-import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataCandidate, MetadataSuggestions } from "../api/types";
+import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataCandidate, MetadataCoverCandidate, MetadataSuggestions } from "../api/types";
 import { formatBytes } from "../lib/format";
 import { BookCover } from "./BookCover";
 import { MetadataValueSelect } from "./MetadataValueSelect";
@@ -228,6 +228,14 @@ function fieldsToSelect(candidate: MetadataCandidate, draft: Draft): Set<Metadat
   );
 }
 
+function coverCandidateFile(candidate: MetadataCoverCandidate): File {
+  const binary = atob(candidate.image);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+  const extension = candidate.mediaType.slice("image/".length);
+  return new File([bytes.buffer], `cover.${extension}`, { type: candidate.mediaType });
+}
+
 function originalFields(fields: BookMetadataFields, baseline: Record<string, unknown>): BookMetadataOriginalFields {
   const original: BookMetadataOriginalFields = {};
   for (const field of Object.keys(fields)) {
@@ -292,12 +300,17 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
   const [navigating, setNavigating] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
   const [coverError, setCoverError] = useState<string>();
+  const [coverCandidates, setCoverCandidates] = useState<MetadataCoverCandidate[]>([]);
+  const [coverLookupLoading, setCoverLookupLoading] = useState(false);
+  const [coverLookupMessage, setCoverLookupMessage] = useState<string>();
+  const [coverLookupWarning, setCoverLookupWarning] = useState(true);
   const [formatBusy, setFormatBusy] = useState(false);
   const [formatError, setFormatError] = useState<string>();
   const [confirmClose, setConfirmClose] = useState(false);
   const coverInput = useRef<HTMLInputElement>(null);
   const formatInput = useRef<HTMLInputElement>(null);
   const metadataLookupAbort = useRef<AbortController | null>(null);
+  const coverLookupAbort = useRef<AbortController | null>(null);
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const fileBusy = coverBusy || formatBusy;
@@ -323,6 +336,9 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setMetadataLookupLoading(false);
     setMetadataLookupError(undefined);
     setMetadataLookupNoResults(false);
+    setCoverCandidates([]);
+    setCoverLookupLoading(false);
+    setCoverLookupMessage(undefined);
     const ctrl = new AbortController();
     api.metadataSuggestions(book.libraryId, ctrl.signal)
       .then(setSuggestions)
@@ -337,8 +353,45 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     return () => {
       ctrl.abort();
       metadataLookupAbort.current?.abort();
+      coverLookupAbort.current?.abort();
     };
   }, [book.id, isOpen]);
+
+  const lookupCoverCandidates = async () => {
+    coverLookupAbort.current?.abort();
+    const ctrl = new AbortController();
+    coverLookupAbort.current = ctrl;
+    setCoverLookupLoading(true);
+    setCoverLookupMessage(undefined);
+    setCoverCandidates([]);
+    try {
+      const result = await api.metadataCoverCandidates(book.id, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      setCoverCandidates(result.candidates);
+      if (result.candidates.length === 0) {
+        setCoverLookupWarning(!result.timedOut);
+        setCoverLookupMessage(result.timedOut
+          ? "Cover lookup timed out. Try again."
+          : result.failedSources.length > 0
+            ? `No covers were found. Unavailable sources: ${result.failedSources.join(", ")}.`
+            : "No covers were found.");
+      } else if (result.timedOut || result.failedSources.length > 0) {
+        setCoverLookupWarning(true);
+        setCoverLookupMessage(result.timedOut
+          ? "Some sources timed out. Showing the covers received so far."
+          : `Some sources failed: ${result.failedSources.join(", ")}.`);
+      }
+    } catch (err) {
+      if (!ctrl.signal.aborted) {
+        setCoverLookupWarning(err instanceof ApiError && err.status === 504);
+        setCoverLookupMessage(err instanceof ApiError && err.status === 504
+          ? "Cover lookup timed out. Try again."
+          : errorMessage(err));
+      }
+    } finally {
+      if (!ctrl.signal.aborted) setCoverLookupLoading(false);
+    }
+  };
 
   const lookupMetadata = async () => {
     metadataLookupAbort.current?.abort();
@@ -459,11 +512,12 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setError(null);
   };
 
-  const changeCover = async (action: () => Promise<BookDetails>) => {
+  const changeCover = async (action: () => Promise<BookDetails>, onSuccess?: () => void) => {
     setCoverBusy(true);
     setCoverError(undefined);
     try {
       onSaved(await action(), false);
+      onSuccess?.();
     } catch (err) {
       setCoverError(errorMessage(err));
     } finally {
@@ -580,6 +634,47 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                     disabled={saving || navigating || fileBusy || !book.hasCover}
                   />
                 </ButtonGroup>
+                {metadataLookupEnabled && (
+                  <Button
+                    type="button"
+                    small
+                    icon="cloud-download"
+                    text="Download cover"
+                    loading={coverLookupLoading}
+                    disabled={saving || navigating || fileBusy || coverLookupLoading}
+                    onClick={() => void lookupCoverCandidates()}
+                  />
+                )}
+                {coverLookupLoading && <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Searching cover sources…</p>}
+                {coverLookupMessage && (
+                  <Callout intent={coverLookupWarning ? Intent.WARNING : Intent.DANGER} icon={coverLookupWarning ? "warning-sign" : "error"} compact>
+                    {coverLookupMessage}
+                  </Callout>
+                )}
+                {coverCandidates.length > 0 && (
+                  <section className="metadata-cover-candidates" aria-label="Cover candidates">
+                    {coverCandidates.map((candidate, index) => (
+                      <button
+                        key={`${candidate.source}-${index}`}
+                        type="button"
+                        className="metadata-cover-candidate"
+                        aria-label={`Use ${candidate.source} cover, ${candidate.width} by ${candidate.height} pixels`}
+                        disabled={saving || navigating || fileBusy}
+                        onClick={() => void changeCover(
+                          () => api.uploadBookCover(book.id, coverCandidateFile(candidate)),
+                          () => {
+                            setCoverCandidates([]);
+                            setCoverLookupMessage(undefined);
+                          },
+                        )}
+                      >
+                        <img src={`data:${candidate.mediaType};base64,${candidate.image}`} alt="" />
+                        <span>{candidate.source}</span>
+                        <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>{candidate.width} × {candidate.height}</span>
+                      </button>
+                    ))}
+                  </section>
+                )}
                 <label className="metadata-editor-cover-format-label" htmlFor="metadata-cover-format">Use cover from file</label>
                 <select
                   id="metadata-cover-format"

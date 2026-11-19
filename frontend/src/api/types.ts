@@ -124,6 +124,20 @@ export interface MetadataCandidate {
   description: string | null;
 }
 
+export interface MetadataCoverCandidate {
+  source: string;
+  width: number;
+  height: number;
+  mediaType: "image/jpeg" | "image/png" | "image/webp";
+  image: string;
+}
+
+export interface MetadataCoverLookupResult {
+  candidates: MetadataCoverCandidate[];
+  timedOut: boolean;
+  failedSources: string[];
+}
+
 export interface Page<T> {
   items: T[];
   total: number;

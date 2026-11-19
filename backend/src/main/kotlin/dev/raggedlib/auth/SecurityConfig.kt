@@ -135,6 +135,8 @@ class SecurityConfig {
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers(HttpMethod.POST, "/api/books/*/metadata-candidates")
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
+                a.requestMatchers(HttpMethod.POST, "/api/books/*/cover-candidates")
+                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers(HttpMethod.DELETE, "/api/books/*")
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers(HttpMethod.POST, "/api/libraries/*/books")

@@ -726,8 +726,11 @@ class AuthIntegrationTest {
             mapOf("name" to "metadata lookup reader", "scopes" to listOf("library:read")),
         ).json.path("rawKey").asString()
         val candidatesPath = "/api/books/$alphaBook/metadata-candidates"
+        val coverCandidatesPath = "/api/books/$alphaBook/cover-candidates"
         assertEquals(403, as_("reader").post(candidatesPath).status)
+        assertEquals(403, as_("reader").post(coverCandidatesPath).status)
         assertEquals(403, Browser(base).post(candidatesPath, key = readOnlyKey).status)
+        assertEquals(403, Browser(base).post(coverCandidatesPath, key = readOnlyKey).status)
         assertEquals(403, as_("curator").put("/api/settings", mapOf("metadataLookupEnabled" to false)).status)
 
         try {
@@ -737,6 +740,7 @@ class AuthIntegrationTest {
             val refused = as_("curator").post(candidatesPath)
             assertEquals(403, refused.status)
             assertTrue(refused.body.contains("disabled"), refused.body)
+            assertEquals(403, as_("curator").post(coverCandidatesPath).status)
         } finally {
             val enabled = settings.put("/api/settings", mapOf("metadataLookupEnabled" to true))
             assertEquals(200, enabled.status, enabled.body)

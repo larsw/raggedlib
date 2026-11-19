@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream
 import java.util.Base64
 import javax.imageio.ImageIO
 import kotlin.test.Test
+import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 import kotlin.test.assertTrue
 
@@ -15,7 +16,10 @@ class CoverImageValidatorTest {
         listOf("jpeg", "png").forEach { format ->
             val output = ByteArrayOutputStream()
             assertTrue(ImageIO.write(BufferedImage(2, 3, BufferedImage.TYPE_INT_RGB), format, output))
-            CoverImageValidator.validate(output.toByteArray())
+            val info = CoverImageValidator.inspect(output.toByteArray())
+            assertEquals(2, info.width)
+            assertEquals(3, info.height)
+            assertEquals(if (format == "jpeg") "image/jpeg" else "image/png", info.mediaType)
         }
     }
 

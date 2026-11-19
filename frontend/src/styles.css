@@ -2461,6 +2461,44 @@ body.is-resizing-x * {
   gap: 8px;
   margin-top: 8px;
 }
+.metadata-cover-candidates {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  gap: 8px;
+}
+.metadata-cover-candidate {
+  align-content: start;
+  background: var(--app-surface);
+  border: 1px solid var(--app-border);
+  border-radius: 4px;
+  color: var(--app-text);
+  cursor: pointer;
+  display: grid;
+  font: inherit;
+  gap: 4px;
+  min-width: 0;
+  padding: 4px;
+  text-align: left;
+}
+.metadata-cover-candidate:focus-visible {
+  outline: 2px solid var(--app-accent);
+  outline-offset: 2px;
+}
+.metadata-cover-candidate:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+.metadata-cover-candidate img {
+  aspect-ratio: 2 / 3;
+  background: var(--app-surface-2);
+  object-fit: contain;
+  width: 100%;
+}
+.metadata-cover-candidate > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .metadata-editor-cover-actions p {
   margin: 8px 0 0;
   text-align: center;

@@ -32,10 +32,33 @@ data class MetadataCandidate(
     val description: String?,
 )
 
-class MetadataLookupRequest(
+data class MetadataLookupRequest(
     val title: String,
     val authors: List<String>,
     val identifiers: Map<String, String>,
+    val mode: String = "metadata",
+)
+
+data class MetadataCoverCandidate(
+    val source: String,
+    val width: Int,
+    val height: Int,
+    val mediaType: String,
+    val image: ByteArray,
+)
+
+data class MetadataCoverLookupResult(
+    val candidates: List<MetadataCoverCandidate>,
+    val timedOut: Boolean,
+    val failedSources: List<String>,
+)
+
+private data class MetadataCoverPayload(val source: String, val image: String)
+
+private data class MetadataCoverPayloadResult(
+    val candidates: List<MetadataCoverPayload>,
+    val timedOut: Boolean,
+    val failedSources: List<String>,
 )
 
 @Service
@@ -47,7 +70,36 @@ class MetadataSourceLookupService(
     private val processRunner: ProcessRunner,
     private val mapper: ObjectMapper,
 ) {
-    fun candidates(bookId: Long): List<MetadataCandidate> {
+    fun candidates(bookId: Long): List<MetadataCandidate> =
+        mapper.readValue<List<MetadataCandidate>>(runLookup(lookupRequest(bookId)))
+
+    fun coverCandidates(bookId: Long): MetadataCoverLookupResult {
+        val result = mapper.readValue<MetadataCoverPayloadResult>(
+            runLookup(lookupRequest(bookId).copy(mode = "covers")),
+        )
+        val failedSources = result.failedSources.toMutableSet()
+        val candidates = result.candidates.mapNotNull { candidate ->
+            if (candidate.image.length > MAX_ENCODED_COVER_LENGTH) {
+                failedSources += candidate.source
+                return@mapNotNull null
+            }
+            val image = try {
+                java.util.Base64.getDecoder().decode(candidate.image)
+            } catch (e: IllegalArgumentException) {
+                throw ApiException(HttpStatus.BAD_GATEWAY, "Calibre cover lookup returned invalid image data")
+            }
+            val info = try {
+                CoverImageValidator.inspect(image)
+            } catch (e: ApiException) {
+                failedSources += candidate.source
+                return@mapNotNull null
+            }
+            MetadataCoverCandidate(candidate.source, info.width, info.height, info.mediaType, image)
+        }
+        return MetadataCoverLookupResult(candidates, result.timedOut, failedSources.sorted())
+    }
+
+    private fun lookupRequest(bookId: Long): MetadataLookupRequest {
         if (!settings.metadataLookupEnabled) {
             throw ApiException(HttpStatus.FORBIDDEN, "metadata downloads are disabled by the administrator")
         }
@@ -55,8 +107,10 @@ class MetadataSourceLookupService(
         val authorized = access.requireEditableBook(bookId)
         val library = access.requireEditableLibrary(authorized.book.libraryId)
         val identifiers = calibre.extras(library.root, authorized.book.calibreId)?.identifiers.orEmpty()
-        val request = MetadataLookupRequest(authorized.book.title, authorized.book.authors, identifiers)
+        return MetadataLookupRequest(authorized.book.title, authorized.book.authors, identifiers)
+    }
 
+    private fun runLookup(request: MetadataLookupRequest): String {
         Files.createDirectories(props.tmpDir)
         val requestFile = Files.createTempFile(props.tmpDir, "raggedlib-metadata-request-", ".json")
         val scriptFile = Files.createTempFile(props.tmpDir, "raggedlib-metadata-lookup-", ".py")
@@ -71,14 +125,16 @@ class MetadataSourceLookupService(
                     LOOKUP_TIMEOUT,
                 )
             } catch (e: ProcessTimeoutException) {
-                throw ApiException(HttpStatus.GATEWAY_TIMEOUT, "metadata lookup timed out after 30 seconds; try again")
+                val type = if (request.mode == "covers") "cover lookup" else "metadata lookup"
+                throw ApiException(HttpStatus.GATEWAY_TIMEOUT, "$type timed out after 30 seconds; try again")
             }
             if (result.exitCode != 0) {
-                throw ApiException(HttpStatus.BAD_GATEWAY, "Calibre metadata lookup failed: ${result.stderr.take(500)}")
+                val type = if (request.mode == "covers") "cover lookup" else "metadata lookup"
+                throw ApiException(HttpStatus.BAD_GATEWAY, "Calibre $type failed: ${result.stderr.take(500)}")
             }
-            val json = result.stdout.lineSequence().lastOrNull { it.trimStart().startsWith("[") }
-                ?: throw ApiException(HttpStatus.BAD_GATEWAY, "Calibre metadata lookup returned no candidate data")
-            return mapper.readValue<List<MetadataCandidate>>(json)
+            return result.stdout.lineSequence().lastOrNull {
+                it.trimStart().startsWith("[") || it.trimStart().startsWith("{")
+            } ?: throw ApiException(HttpStatus.BAD_GATEWAY, "Calibre lookup returned no candidate data")
         } finally {
             Files.deleteIfExists(requestFile)
             Files.deleteIfExists(scriptFile)
@@ -87,6 +143,7 @@ class MetadataSourceLookupService(
 
     private companion object {
         val LOOKUP_TIMEOUT: Duration = Duration.ofSeconds(30)
+        const val MAX_ENCODED_COVER_LENGTH = (CoverImageValidator.MAX_BYTES * 4L / 3L + 4L).toInt()
     }
 }
 
@@ -95,4 +152,7 @@ class MetadataSourceLookupService(
 class MetadataSourceLookupController(private val lookup: MetadataSourceLookupService) {
     @PostMapping("/{id}/metadata-candidates")
     fun candidates(@PathVariable id: Long): List<MetadataCandidate> = lookup.candidates(id)
+
+    @PostMapping("/{id}/cover-candidates")
+    fun coverCandidates(@PathVariable id: Long): MetadataCoverLookupResult = lookup.coverCandidates(id)
 }
