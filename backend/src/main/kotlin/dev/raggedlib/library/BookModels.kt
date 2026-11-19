@@ -30,6 +30,8 @@ data class Book(
     val duplicateOf: Long? = null,
     /** Pages of the indexed text that came from OCR (a scanned PDF, or scanned pages in one); 0 = none. */
     val ocrPages: Int = 0,
+    /** Calibre's last_modified timestamp; also versions cover URLs across its one-hour cache. */
+    val lastModified: Instant? = null,
 )
 
 /** Internal row with the relative file paths. */

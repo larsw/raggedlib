@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { api, ApiError, onUnauthorized } from "./client";
+import { api, ApiError, bookCoverUrl, onUnauthorized } from "./client";
 
 const realFetch = globalThis.fetch;
 let calls: { url: string; init: RequestInit }[] = [];
@@ -25,6 +25,32 @@ afterEach(() => {
 });
 
 describe("CSRF", () => {
+  test("cover writes use multipart without overriding the browser boundary", async () => {
+    respondWith(200, '{"book":{}}');
+    await api.uploadBookCover(12, new File(["cover"], "cover.webp", { type: "image/webp" }));
+    expect(calls[0]!.url).toBe("/api/books/12/cover");
+    expect(calls[0]!.init.method).toBe("PUT");
+    expect(calls[0]!.init.body).toBeInstanceOf(FormData);
+    expect(header(0, "content-type")).toBeNull();
+    expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
+  });
+
+  test("cover URLs are versioned using Calibre's last modified value", () => {
+    expect(bookCoverUrl(12, "2024-01-02T03:04:05Z")).toBe("/api/books/12/cover?v=2024-01-02T03%3A04%3A05Z");
+  });
+
+  test("removing and extracting a cover use the protected cover routes", async () => {
+    respondWith(200, '{"book":{}}');
+    await api.removeBookCover(12);
+    respondWith(200, '{"book":{}}');
+    await api.useBookCoverFromFormat(12, "PDF");
+    expect(calls.map((call) => [call.url, call.init.method])).toEqual([
+      ["/api/books/12/cover", "DELETE"],
+      ["/api/books/12/cover/from-format?format=PDF", "POST"],
+    ]);
+    expect([0, 1].map((i) => header(i, "X-XSRF-TOKEN"))).toEqual(["tok-123", "tok-123"]);
+  });
+
   test("activity filters are encoded in a read-only request", async () => {
     respondWith(200, '{"items":[],"total":0,"page":1,"size":25,"actors":[]}');
     await api.activity({ libraryId: 7, user: "Alice, via key 'tagger'", action: "EDIT_METADATA", page: 1, size: 25 });

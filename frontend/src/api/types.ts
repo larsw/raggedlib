@@ -40,6 +40,7 @@ export interface Book {
   indexedAt: string | null;
   duplicateOf: number | null; // status DUPLICATE: id of the book whose passages stand in for this one
   ocrPages: number; // pages of the indexed text that came from OCR (scanned PDF pages); 0 = none
+  lastModified: string | null; // Calibre's last_modified timestamp; also versions cover URLs
 }
 
 /** GET /api/books/{id}/details */

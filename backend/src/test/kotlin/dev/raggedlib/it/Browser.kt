@@ -10,6 +10,7 @@ import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
+import java.io.ByteArrayOutputStream
 import java.nio.charset.StandardCharsets
 
 /**
@@ -58,6 +59,23 @@ class Browser(private val base: String) {
     fun post(path: String, body: Any? = null, key: String? = null, csrf: Boolean = true) = send("POST", path, body, key, csrf)
     fun put(path: String, body: Any? = null, key: String? = null, csrf: Boolean = true) = send("PUT", path, body, key, csrf)
     fun delete(path: String, key: String? = null, csrf: Boolean = true) = send("DELETE", path, null, key, csrf)
+    fun putMultipart(path: String, field: String, filename: String, contentType: String, bytes: ByteArray): Response {
+        val boundary = "raggedlib-integration-boundary"
+        if (xsrfToken() == null) get("/api/me")
+        val body = ByteArrayOutputStream().apply {
+            write("--$boundary\r\n".toByteArray(StandardCharsets.UTF_8))
+            write("Content-Disposition: form-data; name=\"$field\"; filename=\"$filename\"\r\n".toByteArray(StandardCharsets.UTF_8))
+            write("Content-Type: $contentType\r\n\r\n".toByteArray(StandardCharsets.UTF_8))
+            write(bytes)
+            write("\r\n--$boundary--\r\n".toByteArray(StandardCharsets.UTF_8))
+        }.toByteArray()
+        val request = HttpRequest.newBuilder(URI(base + path))
+            .header("Accept", "application/json")
+            .header("Content-Type", "multipart/form-data; boundary=$boundary")
+            .header("X-XSRF-TOKEN", xsrfToken() ?: error("no CSRF token"))
+            .PUT(HttpRequest.BodyPublishers.ofByteArray(body))
+        return raw(request)
+    }
 
     /** A JSON-RPC call to the MCP endpoint with an API key (or none). */
     fun mcp(method: String, params: Map<String, Any?> = emptyMap(), key: String?): Response {

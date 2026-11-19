@@ -159,7 +159,8 @@ function queryString(params: Record<string, string | number | undefined | null>)
   return s ? `?${s}` : "";
 }
 
-export const bookCoverUrl = (id: number) => `${BASE}/books/${id}/cover`;
+export const bookCoverUrl = (id: number, version?: string | null) =>
+  `${BASE}/books/${id}/cover${version ? `?v=${encodeURIComponent(version)}` : ""}`;
 
 /** Link to the book file; for PDFs, `#page=N` makes the browser viewer jump to the page. */
 export function bookFileUrl(id: number, format: string, page?: number | null): string {
@@ -239,6 +240,15 @@ export const api = {
   bookDetails: (id: number, signal?: AbortSignal) => getJson<BookDetails>(`/books/${id}/details`, signal),
   updateBookMetadata: (id: number, fields: BookMetadataFields, original: BookMetadataOriginalFields) =>
     putJson<BookDetails>(`/books/${id}/metadata`, { fields, original }),
+  uploadBookCover: async (id: number, file: File) => {
+    const form = new FormData();
+    form.append("file", file);
+    return (await send(`/books/${id}/cover`, { method: "PUT", body: form })).json() as Promise<BookDetails>;
+  },
+  removeBookCover: async (id: number) =>
+    (await send(`/books/${id}/cover`, { method: "DELETE" })).json() as Promise<BookDetails>,
+  useBookCoverFromFormat: async (id: number, format: string) =>
+    (await send(`/books/${id}/cover/from-format?format=${encodeURIComponent(format)}`, { method: "POST" })).json() as Promise<BookDetails>,
   metadataSuggestions: (libraryId: number, signal?: AbortSignal) =>
     getJson<MetadataSuggestions>(`/libraries/${libraryId}/metadata-values`, signal),
 

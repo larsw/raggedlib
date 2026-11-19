@@ -17,10 +17,15 @@ import org.testcontainers.junit.jupiter.Testcontainers
 import org.testcontainers.postgresql.PostgreSQLContainer
 import org.testcontainers.utility.DockerImageName
 import tools.jackson.databind.JsonNode
+import java.awt.image.BufferedImage
+import java.io.ByteArrayOutputStream
 import java.net.ServerSocket
 import java.nio.file.Files
 import java.nio.file.Path
 import java.time.Instant
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
+import javax.imageio.ImageIO
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
 import kotlin.test.assertNotNull
@@ -578,6 +583,67 @@ class AuthIntegrationTest {
         assertEquals(200, renamed.status, renamed.body)
         assertEquals("Reindex this book", renamed.json.path("book").path("title").asString())
         assertTrue(renamed.json.path("book").path("status").asString() != "INDEXED")
+    }
+
+    @Test
+    fun `cover edits are validated, logged, immediate, and do not requeue books`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val alphaLibrary = as_("admin").get("/api/libraries").json.values()
+            .first { it.path("name").asString() == "Alpha" }
+        assumeTrue(alphaLibrary.path("writable").asBoolean(), alphaLibrary.path("readOnlyReason").asString())
+
+        val image = ByteArrayOutputStream().also {
+            assertTrue(ImageIO.write(BufferedImage(3, 4, BufferedImage.TYPE_INT_RGB), "png", it))
+        }.toByteArray()
+        val archive = Files.createTempFile("raggedlib-cover-source-", ".cbz")
+        try {
+            ZipOutputStream(Files.newOutputStream(archive)).use { zip ->
+                zip.putNextEntry(ZipEntry("0001.jpg"))
+                zip.write(
+                    ByteArrayOutputStream().also {
+                        assertTrue(ImageIO.write(BufferedImage(3, 4, BufferedImage.TYPE_INT_RGB), "jpeg", it))
+                    }.toByteArray(),
+                )
+                zip.closeEntry()
+            }
+            runCalibredb("add_format", "1", archive.toString(), "--library-path", libraryRoots[0].toString())
+            assertEquals(200, as_("librarian").post("/api/library/sync?libraryId=$alpha").status)
+            jdbc.update("update books set status = 'INDEXED' where id = :id", mapOf("id" to alphaBook))
+
+            val curator = as_("curator")
+            assertEquals(403, as_("reader").delete("/api/books/$alphaBook/cover").status)
+
+            val invalid = curator.putMultipart("/api/books/$alphaBook/cover", "file", "cover.png", "image/png", "not an image".toByteArray())
+            assertEquals(400, invalid.status, invalid.body)
+            assertEquals(0, jdbc.queryForObject(
+                "select count(*) from book_activity where book_id = :id and action = 'EDIT_COVER'",
+                mapOf("id" to alphaBook), Long::class.java,
+            ))
+
+            val uploaded = curator.putMultipart("/api/books/$alphaBook/cover", "file", "cover.png", "image/png", image)
+            assertEquals(200, uploaded.status, uploaded.body)
+            assertTrue(uploaded.json.path("book").path("hasCover").asBoolean())
+            assertEquals("INDEXED", uploaded.json.path("book").path("status").asString())
+            val cover = curator.get("/api/books/$alphaBook/cover?v=${uploaded.json.path("book").path("lastModified").asText()}")
+            assertEquals(200, cover.status, cover.body)
+            assertTrue(cover.header("Content-Type")!!.startsWith("image/jpeg"))
+
+            val fromFormat = curator.post("/api/books/$alphaBook/cover/from-format?format=CBZ")
+            assertEquals(200, fromFormat.status, fromFormat.body)
+            assertTrue(fromFormat.json.path("book").path("hasCover").asBoolean())
+            assertEquals("INDEXED", fromFormat.json.path("book").path("status").asString())
+
+            val removed = curator.delete("/api/books/$alphaBook/cover")
+            assertEquals(200, removed.status, removed.body)
+            assertFalse(removed.json.path("book").path("hasCover").asBoolean())
+            assertEquals("INDEXED", removed.json.path("book").path("status").asString())
+            assertEquals(3, jdbc.queryForObject(
+                "select count(*) from book_activity where book_id = :id and action = 'EDIT_COVER'",
+                mapOf("id" to alphaBook), Long::class.java,
+            ))
+        } finally {
+            Files.deleteIfExists(archive)
+        }
     }
 
     @Test

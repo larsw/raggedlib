@@ -48,6 +48,7 @@ class BookRepository(
                 indexedAt = rs.getTimestamp("indexed_at")?.toInstant(),
                 duplicateOf = rs.getObject("duplicate_of") as Long?,
                 ocrPages = rs.getInt("ocr_pages"),
+                lastModified = rs.getTimestamp("calibre_last_modified")?.toInstant(),
             ),
             formatPaths = formatPaths,
             coverPath = cover,
