@@ -134,12 +134,23 @@ interface SystemInfo {
 
 ```ts
 interface CalibreExtras {
-  description: string | null;
+  description: string | null;             // plain text; paragraphs separated by blank lines
+  descriptionHasFormatting: boolean;      // editing would remove markup beyond paragraphs and line breaks
+  titleSort: string | null;
+  authorSort: string | null;
   publisher: string | null;
   identifiers: Record<string, string>;
-  rating: number | null;
+  rating: number | null;                  // 0.5–5 stars; Calibre stores 0–10
   addedAt: string | null;
   fileSizes: Record<string, number>;
+}
+
+interface MetadataSuggestions {
+  authors: string[];
+  tags: string[];
+  series: string[];
+  publishers: string[];
+  languages: string[];                    // ISO 639 codes, scoped to one library
 }
 
 interface BookDetails {
@@ -162,8 +173,9 @@ interface BookDetails {
 | GET  | `/api/books/{id}` | `Book` |
 | GET  | `/api/books/{id}/cover` | `image/jpeg` (404 if none) |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
-| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: description as plain text, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, and `lastEdit` for the latest raggedlib metadata edit. |
-| PUT | `/api/books/{id}/metadata` | `library:edit` and curator in a writable library. Body `{ "fields": { "title"?, "authors"?, "tags"?, "series"?, "seriesIndex"?, "publisher"?, "pubdate"?, "languages"? } }` with only changed fields. Writes only those fields via `calibredb`, reads the book back, records an activity entry, and requeues only title changes or language changes on books with OCR pages. Returns updated `BookDetails`; `403` if the caller lacks permission or the library is read-only. |
+| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: plain-text description and formatting flag, title/author sort, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, and `lastEdit` for the latest raggedlib metadata edit. |
+| GET | `/api/libraries/{id}/metadata-values` | Curator of the library. `MetadataSuggestions` from that library only, for author/tag/series/publisher/language autocomplete. |
+| PUT | `/api/books/{id}/metadata` | `library:edit` and curator in a writable library. Body `{ "fields": { "title"?, "authors"?, "tags"?, "series"?, "seriesIndex"?, "publisher"?, "pubdate"?, "languages"?, "titleSort"?, "authorSort"?, "description"?, "identifiers"?, "rating"?, "addedAt"? } }` with only changed fields. Sort fields accept `null` to reset to Calibre's automatic sort; rating is 0–5 in half-star increments and is converted to Calibre's 0–10 scale; identifiers are a type/value object; `addedAt` is an ISO timestamp. Description text is written as simple HTML only when edited. Writes only those fields via `calibredb`, reads the book back, records an activity entry, and requeues only title changes or language changes on books with OCR pages. Returns updated `BookDetails`; `403` if the caller lacks permission or the library is read-only. |
 | POST | `/api/books/{id}/reindex` | Library admin of the book's library. Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
 | GET  | `/api/tags?libraryId=` | `{ name: string, count: number }[]` sorted by count desc; `libraryId` restricts to one library |
 | GET  | `/api/publishers?libraryId=` | `{ name: string, count: number }[]`: publishers by number of books, like `/api/tags` (books without one are left out) |

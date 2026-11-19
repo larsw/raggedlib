@@ -130,6 +130,40 @@ class BookRepository(
         ) { rs, _ -> TagCount(rs.getString(1), rs.getInt(2)) }
     }
 
+    fun metadataSuggestions(libraryId: Long): MetadataSuggestions = MetadataSuggestions(
+        authors = arrayValues("authors", libraryId),
+        tags = arrayValues("tags", libraryId),
+        series = scalarValues("series", libraryId),
+        publishers = scalarValues("publisher", libraryId),
+        languages = arrayValues("languages", libraryId),
+    )
+
+    private fun arrayValues(column: String, libraryId: Long): List<String> {
+        require(column in setOf("authors", "tags", "languages"))
+        return jdbc.query(
+            """
+            select u.value from books b cross join lateral unnest(b.$column) as u(value)
+            where b.library_id = :libraryId and u.value <> ''
+            group by u.value
+            order by lower(u.value), u.value
+            """.trimIndent(),
+            mapOf("libraryId" to libraryId),
+        ) { rs, _ -> rs.getString(1) }
+    }
+
+    private fun scalarValues(column: String, libraryId: Long): List<String> {
+        require(column in setOf("series", "publisher"))
+        return jdbc.query(
+            """
+            select $column from books
+            where library_id = :libraryId and $column is not null and $column <> ''
+            group by $column
+            order by lower($column), $column
+            """.trimIndent(),
+            mapOf("libraryId" to libraryId),
+        ) { rs, _ -> rs.getString(1) }
+    }
+
     fun findByIds(ids: Collection<Long>): List<Book> = if (ids.isEmpty()) emptyList() else
         jdbc.query("select $columns from books where id in (:ids)", mapOf("ids" to ids), rowMapper).map { it.book }
 

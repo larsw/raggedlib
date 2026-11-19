@@ -18,6 +18,7 @@ import type {
   GrantableRole,
   LayoutParams,
   Member,
+  MetadataSuggestions,
   Me,
   Review,
   ReviewRequest,
@@ -225,6 +226,8 @@ export const api = {
   bookDetails: (id: number, signal?: AbortSignal) => getJson<BookDetails>(`/books/${id}/details`, signal),
   updateBookMetadata: (id: number, fields: BookMetadataFields) =>
     putJson<BookDetails>(`/books/${id}/metadata`, { fields }),
+  metadataSuggestions: (libraryId: number, signal?: AbortSignal) =>
+    getJson<MetadataSuggestions>(`/libraries/${libraryId}/metadata-values`, signal),
 
   reindex: (id: number) => postJson<Book>(`/books/${id}/reindex`),
 

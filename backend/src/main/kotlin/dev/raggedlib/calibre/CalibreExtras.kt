@@ -7,6 +7,10 @@ import java.time.Instant
 data class CalibreExtras(
     /** Calibre's "comments", as plain text with paragraphs separated by blank lines. */
     val description: String?,
+    /** True when editing the plain-text description would remove markup beyond paragraphs and line breaks. */
+    val descriptionHasFormatting: Boolean,
+    val titleSort: String?,
+    val authorSort: String?,
     val publisher: String?,
     /** e.g. isbn, amazon, google, doi -> value. */
     val identifiers: Map<String, String>,
@@ -27,6 +31,8 @@ object CommentText {
     private val listItem = Regex("(?i)<\\s*li\\b[^>]*>")
     private val tag = Regex("<[^>]*>")
     private val scriptOrStyle = Regex("(?is)<\\s*(script|style)\\b.*?<\\s*/\\s*\\1\\s*>")
+    private val markup = Regex("(?i)<\\s*/?\\s*([a-z0-9]+)\\b([^>]*)>")
+    private val plainTextTags = setOf("p", "br")
 
     fun toPlainText(html: String): String {
         val withBreaks = scriptOrStyle.replace(html, "")
@@ -38,5 +44,17 @@ object CommentText {
             .joinToString("\n")
             .replace(Regex("\n{3,}"), "\n\n")
             .trim()
+    }
+
+    fun hasFormatting(html: String): Boolean = markup.findAll(html).any { match ->
+        match.groupValues[1].lowercase() !in plainTextTags || match.groupValues[2].trim().removeSuffix("/").isNotEmpty()
+    }
+
+    fun toSimpleHtml(text: String): String {
+        if (text.isEmpty()) return ""
+        val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+        return normalized.split(Regex("\n[ \\t]*\n+")).joinToString("</p><p>", "<p>", "</p>") {
+            HtmlUtils.htmlEscape(it).replace("\n", "<br>")
+        }
     }
 }

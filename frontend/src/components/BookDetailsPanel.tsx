@@ -68,6 +68,7 @@ export function BookDetailsPanel(props: Props) {
         <BookMetadataDialog
           isOpen={editing}
           book={d.book}
+          calibre={d.calibre}
           onClose={() => setEditing(false)}
           onSaved={(updated) => {
             details.setData(updated);

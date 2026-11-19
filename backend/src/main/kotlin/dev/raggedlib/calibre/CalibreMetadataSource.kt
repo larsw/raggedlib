@@ -34,6 +34,9 @@ class CalibreMetadataSource(
     fun find(libraryRoot: Path, calibreId: Long): CalibreRecord? =
         viaCalibredb(libraryRoot, "id:$calibreId").singleOrNull()
 
+    /** Reads Calibre-only editable fields from its database, without opening it for writing. */
+    fun extras(libraryRoot: Path, calibreId: Long): CalibreExtras? = MetadataDbReader(libraryRoot).extras(calibreId)
+
     private fun viaCalibredb(libraryRoot: Path, search: String? = null): List<CalibreRecord> {
         val command = buildList {
             addAll(

@@ -88,6 +88,12 @@ class BookController(
     @GetMapping("/publishers")
     fun publishers(@RequestParam(required = false) libraryId: Long?): List<TagCount> = books.publishers(scope(libraryId))
 
+    @GetMapping("/libraries/{libraryId}/metadata-values")
+    fun metadataValues(@PathVariable libraryId: Long): MetadataSuggestions {
+        access.requireLibrary(libraryId, LibraryRole.CURATOR)
+        return books.metadataSuggestions(libraryId)
+    }
+
     /** [libraryId] if the caller can see it (else 404), or every library it can see. */
     private fun scope(libraryId: Long?): Set<Long> =
         if (libraryId != null) setOf(access.requireLibrary(libraryId).id) else access.libraries()

@@ -45,6 +45,15 @@ data class Page<T>(val items: List<T>, val total: Long, val page: Int, val size:
 /** A tag or publisher and how many books have it. */
 data class TagCount(val name: String, val count: Int)
 
+/** Existing values available for metadata autocomplete, restricted to one library. */
+data class MetadataSuggestions(
+    val authors: List<String>,
+    val tags: List<String>,
+    val series: List<String>,
+    val publishers: List<String>,
+    val languages: List<String>,
+)
+
 data class SyncResult(val added: Int, val updated: Int, val removed: Int, val total: Int, val source: String)
 
 /** GET /api/libraries: one configured Calibre library. [path] is shown to admins only; [role] is the caller's. */
