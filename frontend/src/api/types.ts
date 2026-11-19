@@ -112,6 +112,18 @@ export interface MetadataSuggestions {
   languages: string[];
 }
 
+export interface MetadataCandidate {
+  source: string;
+  title: string;
+  authors: string[];
+  publisher: string | null;
+  publishedDate: string | null;
+  identifiers: Record<string, string>;
+  languages: string[];
+  tags: string[];
+  description: string | null;
+}
+
 export interface Page<T> {
   items: T[];
   total: number;
@@ -143,6 +155,7 @@ export interface ServerSettings {
   parallelBooks: number; // books extracted at the same time while indexing
   parallelBooksDefault: number;
   parallelBooksMax: number;
+  metadataLookupEnabled: boolean;
 }
 
 export interface IngestStatus {

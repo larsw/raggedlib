@@ -2497,6 +2497,43 @@ body.is-resizing-x * {
 .metadata-editor-fields .bp6-form-group {
   margin-bottom: 12px;
 }
+.metadata-source-lookup {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+.metadata-source-candidates {
+  display: grid;
+  gap: 8px;
+}
+.metadata-source-candidates .bp6-form-group,
+.metadata-source-candidates p {
+  margin-bottom: 0;
+}
+.metadata-source-comparison-wrap {
+  max-width: 100%;
+  overflow-x: auto;
+}
+.metadata-source-comparison {
+  border-collapse: collapse;
+  font-size: 12px;
+  min-width: 100%;
+  text-align: left;
+}
+.metadata-source-comparison th,
+.metadata-source-comparison td {
+  border-bottom: 1px solid var(--app-border);
+  overflow-wrap: anywhere;
+  padding: 6px 8px;
+  vertical-align: top;
+}
+.metadata-source-comparison th:first-child {
+  min-width: 110px;
+}
+.metadata-source-comparison td {
+  min-width: 120px;
+  white-space: pre-wrap;
+}
 .metadata-editor-row {
   display: grid;
   grid-template-columns: 1fr 1fr;

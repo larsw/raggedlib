@@ -1,4 +1,4 @@
-import { Button, Classes, FormGroup, HTMLSelect, NumericInput, Popover, Spinner, Tooltip } from "@blueprintjs/core";
+import { Button, Classes, FormGroup, HTMLSelect, NumericInput, Popover, Spinner, Switch, Tooltip } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { ServerSettings } from "../api/types";
@@ -84,7 +84,9 @@ const SAVE_DELAY_MS = 500;
 function IndexingSettings() {
   const [server, setServer] = useState<ServerSettings | null>(null);
   const [value, setValue] = useState<number | null>(null);
+  const [metadataLookupEnabled, setMetadataLookupEnabled] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
+  const [savingMetadata, setSavingMetadata] = useState(false);
   const [failed, setFailed] = useState(false);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
@@ -95,6 +97,7 @@ function IndexingSettings() {
       .then((s) => {
         setServer(s);
         setValue(s.parallelBooks);
+        setMetadataLookupEnabled(s.metadataLookupEnabled);
       })
       .catch(() => {
         if (!ctrl.signal.aborted) setFailed(true);
@@ -120,6 +123,21 @@ function IndexingSettings() {
         setSaving(false);
       }
     }, SAVE_DELAY_MS);
+  };
+
+  const saveMetadataLookup = async (enabled: boolean) => {
+    setMetadataLookupEnabled(enabled);
+    setSavingMetadata(true);
+    try {
+      const s = await api.updateSettings({ metadataLookupEnabled: enabled });
+      setServer(s);
+      setMetadataLookupEnabled(s.metadataLookupEnabled);
+    } catch (err) {
+      toastError("Couldn't save the setting", err);
+      if (server) setMetadataLookupEnabled(server.metadataLookupEnabled);
+    } finally {
+      setSavingMetadata(false);
+    }
   };
 
   return (
@@ -157,6 +175,16 @@ function IndexingSettings() {
           }}
         />
       </FormGroup>
+      <div className={`${Classes.TEXT_MUTED} settings-menu-section`}>Metadata lookup · server</div>
+      <Switch
+        checked={metadataLookupEnabled ?? false}
+        disabled={!server || savingMetadata}
+        label="Allow metadata lookups"
+        onChange={(event) => void saveMetadataLookup(event.currentTarget.checked)}
+      />
+      <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+        When enabled, lookups send book titles, authors and identifiers to configured Calibre metadata sources.
+      </p>
     </>
   );
 }
