@@ -21,6 +21,7 @@ import { BookDetailsPanel } from "../components/BookDetailsPanel";
 import { ErrorState } from "../components/ErrorState";
 import { isBusyStatus, StatusTag } from "../components/StatusTag";
 import { FacetFilterSelect } from "../components/FacetFilterSelect";
+import { bookRefFromHash } from "../hooks/useHashTab";
 import { useAsync } from "../hooks/useAsync";
 import { useBookNavigation, useReindex } from "../hooks/useBookActions";
 import { columnWidth, tableMinWidth, useColumnWidths, type ColumnSpec } from "../hooks/useColumnWidths";
@@ -66,7 +67,7 @@ function TagList({ tags }: { tags: string[] }) {
 }
 
 export function LibraryView({ active }: { active: boolean }) {
-  const { openReader, library, libraries, librariesLoading, me, roleIn } = useApp();
+  const { openReader, library, libraries, librariesLoading, me, roleIn, setLibraryId } = useApp();
   const { askAbout, searchIn } = useBookNavigation();
   // syncing (library admins): the chosen library if this user administers it; with every library shown, all the
   // ones it administers
@@ -96,6 +97,24 @@ export function LibraryView({ active }: { active: boolean }) {
   const { sync: syncLibrary, syncing } = useSyncLibrary();
   const sync = () => syncLibrary(library?.id);
   const columns = useColumnWidths(STORAGE_KEYS.libraryColumns, COLUMNS);
+
+  useEffect(() => {
+    const openBookFromHash = () => {
+      const book = bookRefFromHash(window.location.hash);
+      if (!book) return;
+      setLibraryId(book.libraryId);
+      setQ("");
+      setStatus("");
+      setTag("");
+      setPublisher("");
+      setPage(0);
+      setSelectedId(book.bookId);
+      window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#/library`);
+    };
+    window.addEventListener("hashchange", openBookFromHash);
+    openBookFromHash();
+    return () => window.removeEventListener("hashchange", openBookFromHash);
+  }, [setLibraryId]);
 
   // back to the first page whenever the filter changes
   useEffect(() => setPage(0), [query, status, tag, publisher, sort, descending, library?.id]);

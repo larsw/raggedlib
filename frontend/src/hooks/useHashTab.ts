@@ -20,6 +20,18 @@ export function listIdFromHash(hash: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
+/** A book details link from the Activity tab, or null when the hash doesn't name one. */
+export function bookRefFromHash(hash: string): { bookId: number; libraryId: number } | null {
+  if (tabFromHash(hash) !== "library") return null;
+  const queryAt = hash.indexOf("?");
+  if (queryAt < 0) return null;
+  const params = new URLSearchParams(hash.slice(queryAt + 1));
+  const bookId = Number(params.get("bookId"));
+  const libraryId = Number(params.get("libraryId"));
+  if (!Number.isSafeInteger(bookId) || bookId < 1 || !Number.isSafeInteger(libraryId) || libraryId < 1) return null;
+  return { bookId, libraryId };
+}
+
 /** Active tab stored in the URL hash (#/ask, #/search, ...), so reload and back/forward work. */
 export function useHashTab(): [TabId, (tab: TabId) => void] {
   const [tab, setTab] = useState<TabId>(() => tabFromHash(window.location.hash));

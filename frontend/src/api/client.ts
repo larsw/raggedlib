@@ -4,6 +4,7 @@ import type {
   AddBooksResult,
   ApiKey,
   ApiKeyRequest,
+  BookActivityPage,
   Book,
   BookDetails,
   BookMetadataFields,
@@ -177,6 +178,10 @@ export const api = {
   logout: () => postJson<void>("/auth/logout"),
 
   libraries: (signal?: AbortSignal) => getJson<Library[]>("/libraries", signal),
+  activity: (
+    q: { libraryId?: number; user?: string; action?: string; page?: number; size?: number } = {},
+    signal?: AbortSignal,
+  ) => getJson<BookActivityPage>(`/activity${queryString(q)}`, signal),
 
   /** One library, or (without an id) every library the caller curates. */
   syncLibrary: (libraryId?: number) => postJson<SyncResult>(`/library/sync${queryString({ libraryId })}`),

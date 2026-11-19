@@ -174,6 +174,7 @@ interface BookDetails {
 | GET  | `/api/system` | `SystemInfo` |
 | GET  | `/api/libraries` | `Library[]`: the configured Calibre libraries the caller can see, with book counts, the caller's role, writable status, and `editingPaused`. |
 | PUT | `/api/libraries/{id}/editing` | Library admin (or global admin), browser session only. Body `{ "paused": boolean }`; pausing or resuming is recorded in activity. Resume syncs that library before editing is enabled; a failed sync leaves it paused. |
+| GET | `/api/activity?libraryId=&user=&action=&page=0&size=50` | Library admin in one or more libraries, or global admin. Returns `BookActivityPage` from administered libraries only; `libraryId`, exact actor text in `user`, action code, and paging are optional filters. Actions: `UPLOAD`, `ADD_FORMAT`, `REMOVE_FORMAT`, `REPLACE_FORMAT`, `EDIT_METADATA`, `EDIT_COVER`, `DELETE_BOOK`, `PAUSE_EDITING`, `RESUME_EDITING`. |
 | POST | `/api/library/sync?libraryId=` | Library admin. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller administers, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
 | GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library the caller can see). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |
 | GET  | `/api/books/{id}` | `Book` |
@@ -198,6 +199,24 @@ interface BookDetails {
 | POST | `/api/vectors/book-vectors?libraryId=` | Curator. Computes book vectors for books (of `libraryId`, default every library the caller curates) that have passages but no book vector, or one older than their last indexing: averaged from the stored passage embeddings, nothing re-indexed (about 3 s for ~1,800 books). Indexing computes a book's vector itself; this is for books indexed before book vectors existed. Returns `{ computed, missing }`. |
 
 ```ts
+interface BookActivityPage {
+  items: {
+    id: number;
+    libraryId: number;
+    libraryName: string;
+    bookId: number | null;               // null if the book was deleted, or this is a library action
+    bookTitle: string | null;            // retained after deletion
+    actor: string;
+    action: string;
+    changes: Record<string, { old: unknown; new: unknown }>;
+    at: string;
+  }[];
+  total: number;
+  page: number;
+  size: number;
+  actors: string[];                      // distinct actors in the caller's administered libraries
+}
+
 interface SearchRequest {
   query: string;
   topK?: number;            // default 8, max 50

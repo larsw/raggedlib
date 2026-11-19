@@ -42,14 +42,12 @@ class LibraryEditingController(
                 }
             }
 
-            val caller = access.caller()
-            val actor = caller.userId?.let { access.user().label } ?: caller.label
             try {
                 tx.executeWithoutResult {
                     registry.setEditingPaused(id, request.paused)
                     activity.recordLibraryAction(
                         id,
-                        actor,
+                        access.activityActor(),
                         if (request.paused) "PAUSE_EDITING" else "RESUME_EDITING",
                     )
                 }

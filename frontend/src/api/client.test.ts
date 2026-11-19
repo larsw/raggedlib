@@ -25,6 +25,14 @@ afterEach(() => {
 });
 
 describe("CSRF", () => {
+  test("activity filters are encoded in a read-only request", async () => {
+    respondWith(200, '{"items":[],"total":0,"page":1,"size":25,"actors":[]}');
+    await api.activity({ libraryId: 7, user: "Alice, via key 'tagger'", action: "EDIT_METADATA", page: 1, size: 25 });
+    expect(calls[0]!.url).toBe("/api/activity?libraryId=7&user=Alice%2C+via+key+%27tagger%27&action=EDIT_METADATA&page=1&size=25");
+    expect(calls[0]!.init.method).toBeUndefined();
+    expect(header(0, "X-XSRF-TOKEN")).toBeNull();
+  });
+
   test("pausing library editing uses the session-protected endpoint", async () => {
     respondWith(200, '{"editingPaused":true}');
     await api.setLibraryEditingPaused(7, true);
