@@ -12,8 +12,8 @@ import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.client.RestClient
 import tools.jackson.databind.JsonNode
 
-/** [path] is shown to admins only. */
-data class LibraryStatusInfo(val name: String, val path: String?)
+/** [path] and [readOnlyReason] (why a library configured writable isn't) are shown to admins only. */
+data class LibraryStatusInfo(val name: String, val path: String?, val writable: Boolean = false, val readOnlyReason: String? = null)
 
 data class SystemInfo(
     val libraries: List<LibraryStatusInfo>,
@@ -65,7 +65,10 @@ class SystemController(
         val rerankerUp = reranker.enabled && reranker.reachable()
         return SystemInfo(
             libraries = access.libraries().let { visible -> libraries.all.filter { it.id in visible } }
-                .map { LibraryStatusInfo(it.name, if (access.isAdmin()) it.root.toString() else null) },
+                .map {
+                    val admin = access.isAdmin()
+                    LibraryStatusInfo(it.name, if (admin) it.root.toString() else null, it.writable, if (admin) it.readOnlyReason else null)
+                },
             ollamaUrl = ollamaUrl,
             ollamaReachable = models != null,
             chatModel = chatModel,

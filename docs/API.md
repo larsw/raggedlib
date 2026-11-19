@@ -108,10 +108,13 @@ interface Library {
   path: string | null;                  // admins only
   bookCount: number;
   role: LibraryRole;                    // the caller's
+  writable: boolean;                    // books can be uploaded and edited through raggedlib
+  readOnlyReason: string | null;        // admins only: why a library configured writable isn't
 }
 
 interface SystemInfo {
-  libraries: { name: string; path: string | null }[];  // the caller's; path for admins only
+  // the caller's libraries; path and readOnlyReason for admins only
+  libraries: { name: string; path: string | null; writable: boolean; readOnlyReason: string | null }[];
   ollamaUrl: string;
   ollamaReachable: boolean;
   chatModel: string;

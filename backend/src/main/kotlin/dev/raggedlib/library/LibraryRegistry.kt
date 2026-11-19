@@ -1,5 +1,7 @@
 package dev.raggedlib.library
 
+import dev.raggedlib.calibre.CalibreSchema
+import dev.raggedlib.calibre.LibraryWriteCheck
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.config.notFound
 import org.slf4j.LoggerFactory
@@ -8,8 +10,17 @@ import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Component
 import java.nio.file.Path
 
-/** One configured Calibre library, resolved against its `libraries` row. */
-data class LibraryInfo(val id: Long, val name: String, val root: Path)
+/**
+ * One configured Calibre library, resolved against its `libraries` row. [writable]: configured writable, and the
+ * checks passed (LibraryWriteCheck); [readOnlyReason]: why a library configured writable isn't.
+ */
+data class LibraryInfo(
+    val id: Long,
+    val name: String,
+    val root: Path,
+    val writable: Boolean = false,
+    val readOnlyReason: String? = null,
+)
 
 /**
  * Reconciles the configured libraries ([RaggedlibProperties.effectiveLibraries]) against the `libraries` table,
@@ -21,7 +32,11 @@ data class LibraryInfo(val id: Long, val name: String, val root: Path)
  * (a sync, a search, a file read) the application is fully up. Same pattern as [dev.raggedlib.settings.AppSettings].
  */
 @Component
-class LibraryRegistry(private val props: RaggedlibProperties, private val jdbc: NamedParameterJdbcTemplate) {
+class LibraryRegistry(
+    private val props: RaggedlibProperties,
+    private val jdbc: NamedParameterJdbcTemplate,
+    private val calibreSchema: CalibreSchema,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @Volatile private var cached: List<LibraryInfo>? = null
@@ -48,10 +63,12 @@ class LibraryRegistry(private val props: RaggedlibProperties, private val jdbc: 
                     mapOf("id" to id, "name" to cfg.name),
                 )
             }
-            LibraryInfo(id, cfg.name, root)
+            val reason = if (cfg.writable) LibraryWriteCheck.readOnlyReason(root, calibreSchema.supportedVersion) else null
+            if (cfg.writable && reason != null) log.warn("Library '{}' is configured writable but stays read-only: {}", cfg.name, reason)
+            LibraryInfo(id, cfg.name, root, writable = cfg.writable && reason == null, readOnlyReason = reason)
         }
         backfillLegacyBooks(infos)
-        log.info("Libraries: {}", infos.joinToString { "${it.name} (#${it.id}, ${it.root})" })
+        log.info("Libraries: {}", infos.joinToString { "${it.name} (#${it.id}, ${it.root}${if (it.writable) ", writable" else ""})" })
         return infos
     }
 

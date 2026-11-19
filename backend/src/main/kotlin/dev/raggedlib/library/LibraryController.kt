@@ -19,7 +19,10 @@ class LibraryController(private val registry: LibraryRegistry, private val books
         val counts = books.countsByLibrary()
         return infos.mapNotNull { lib ->
             val role = roles[lib.id]?.takeIf { it.atLeast(LibraryRole.VIEWER) } ?: return@mapNotNull null
-            Library(lib.id, lib.name, if (admin) lib.root.toString() else null, counts[lib.id] ?: 0, role)
+            Library(
+                lib.id, lib.name, if (admin) lib.root.toString() else null, counts[lib.id] ?: 0, role,
+                writable = lib.writable, readOnlyReason = if (admin) lib.readOnlyReason else null,
+            )
         }
     }
 }
