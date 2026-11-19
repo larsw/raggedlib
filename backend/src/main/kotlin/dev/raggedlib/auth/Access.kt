@@ -27,6 +27,13 @@ data class Caller(
     val label: String,
 )
 
+internal fun formatActivityActor(caller: Caller, userLabel: String?): String = when {
+    caller.viaApiKey && userLabel != null -> "$userLabel, via ${caller.label}"
+    caller.viaApiKey -> "system ${caller.label}"
+    userLabel != null -> userLabel
+    else -> caller.label
+}
+
 /** Members of [group] have [role] in [library] (a name, an id, or `*`). */
 data class GroupRule(val group: String, val role: LibraryRole, val library: String) {
     fun covers(lib: LibraryInfo) = library == "*" || library.equals(lib.name, ignoreCase = true) || library == lib.id.toString()
@@ -124,6 +131,12 @@ class Access(
     }
 
     fun userId(): Long = user().id
+
+    /** A durable activity label for browser sessions, personal keys and system-wide keys. */
+    fun activityActor(): String {
+        val c = caller()
+        return formatActivityActor(c, c.userId?.let { user().label })
+    }
 
     fun requireScope(scope: ApiScope) {
         if (scope !in caller().scopes) {

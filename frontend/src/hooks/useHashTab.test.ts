@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { listIdFromHash, tabFromHash, tabsFor } from "./useHashTab";
+import { bookRefFromHash, listIdFromHash, tabFromHash, tabsFor } from "./useHashTab";
 
 describe("hash routes", () => {
   test("tabs, with or without a slash and a sub-path", () => {
@@ -17,6 +17,12 @@ describe("hash routes", () => {
     expect(listIdFromHash("#/lists")).toBeNull();
     expect(listIdFromHash("#/lists/abc")).toBeNull();
     expect(listIdFromHash("#/library/12")).toBeNull();
+  });
+
+  test("a book details link after #/library", () => {
+    expect(bookRefFromHash("#/library?bookId=12&libraryId=3")).toEqual({ bookId: 12, libraryId: 3 });
+    expect(bookRefFromHash("#/library?bookId=0&libraryId=3")).toBeNull();
+    expect(bookRefFromHash("#/search?bookId=12&libraryId=3")).toBeNull();
   });
 
   test("Indexing is for curators only", () => {

@@ -162,6 +162,37 @@ export interface LibraryEditingView {
   editingPaused: boolean;
 }
 
+export type BookActivityAction =
+  | "UPLOAD"
+  | "ADD_FORMAT"
+  | "REMOVE_FORMAT"
+  | "REPLACE_FORMAT"
+  | "EDIT_METADATA"
+  | "EDIT_COVER"
+  | "DELETE_BOOK"
+  | "PAUSE_EDITING"
+  | "RESUME_EDITING";
+
+export interface BookActivityEntry {
+  id: number;
+  libraryId: number;
+  libraryName: string;
+  bookId: number | null;
+  bookTitle: string | null;
+  actor: string;
+  action: BookActivityAction;
+  changes: Record<string, { old: unknown; new: unknown }>;
+  at: string;
+}
+
+export interface BookActivityPage {
+  items: BookActivityEntry[];
+  total: number;
+  page: number;
+  size: number;
+  actors: string[];
+}
+
 export interface SystemInfo {
   // the caller's libraries; path and readOnlyReason for global admins only
   libraries: { name: string; path: string | null; writable: boolean; readOnlyReason: string | null }[];

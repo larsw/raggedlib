@@ -298,6 +298,69 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `activity is filtered paged and limited to administered libraries`() {
+        val actor = "activity-${System.nanoTime()}"
+        val changes = """{"tags":{"old":["before"],"new":["after"]}}"""
+        fun record(libraryId: Long, bookId: Long?, calibreId: Long, title: String, action: String, changesJson: String = "{}") {
+            jdbc.update(
+                """
+                insert into book_activity (book_id, library_id, calibre_id, book_title, actor, action, changes)
+                values (:bookId, :libraryId, :calibreId, :title, :actor, :action, cast(:changes as jsonb))
+                """.trimIndent(),
+                mapOf(
+                    "bookId" to bookId,
+                    "libraryId" to libraryId,
+                    "calibreId" to calibreId,
+                    "title" to title,
+                    "actor" to actor,
+                    "action" to action,
+                    "changes" to changesJson,
+                ),
+            )
+        }
+        repeat(3) { record(alpha, alphaBook, 1, "Alpha Book", "EDIT_METADATA", changes) }
+        record(alpha, 9_999_999_999L, 77, "Deleted fixture book", "DELETE_BOOK")
+        record(beta, betaBook, 1, "Beta Book", "PAUSE_EDITING")
+
+        val admin = as_("admin")
+        val all = admin.get("/api/activity?user=$actor")
+        assertEquals(200, all.status, all.body)
+        assertEquals(5L, all.json.path("total").asLong())
+        assertTrue(all.json.path("actors").values().any { it.asString() == actor })
+
+        val firstPage = admin.get("/api/activity?user=$actor&action=EDIT_METADATA&page=0&size=2")
+        assertEquals(200, firstPage.status, firstPage.body)
+        assertEquals(3L, firstPage.json.path("total").asLong())
+        assertEquals(2, firstPage.json.path("items").size())
+        assertTrue(firstPage.json.path("items")[0].path("id").asLong() > firstPage.json.path("items")[1].path("id").asLong())
+        assertEquals(alphaBook, firstPage.json.path("items")[0].path("bookId").asLong())
+        assertEquals("Alpha Book", firstPage.json.path("items")[0].path("bookTitle").asString())
+        assertEquals(listOf("before"), firstPage.json.path("items")[0].path("changes").path("tags").path("old").values().map { it.asString() })
+        assertEquals(listOf("after"), firstPage.json.path("items")[0].path("changes").path("tags").path("new").values().map { it.asString() })
+
+        val deleted = admin.get("/api/activity?user=$actor&action=DELETE_BOOK")
+        assertTrue(deleted.json.path("items")[0].path("bookId").isNull)
+        assertEquals("Deleted fixture book", deleted.json.path("items")[0].path("bookTitle").asString())
+
+        val librarian = as_("librarian")
+        val readerId = meOf("reader").path("id").asLong()
+        val grant = librarian.put("/api/libraries/$alpha/members/$readerId", mapOf("role" to "admin"))
+        assertEquals(200, grant.status, grant.body)
+        try {
+            val scoped = as_("reader").get("/api/activity?user=$actor")
+            assertEquals(200, scoped.status, scoped.body)
+            assertEquals(4L, scoped.json.path("total").asLong())
+            assertTrue(scoped.json.path("items").values().all { it.path("libraryId").asLong() == alpha })
+            assertEquals(403, as_("reader").get("/api/activity?libraryId=$beta").status)
+        } finally {
+            assertEquals(200, librarian.delete("/api/libraries/$alpha/members/$readerId").status)
+        }
+
+        assertEquals(403, as_("curator").get("/api/activity").status)
+        assertEquals(403, as_("reader").get("/api/activity").status)
+    }
+
+    @Test
     fun `metadata autocomplete values are restricted to the requested library`() {
         jdbc.update(
             """

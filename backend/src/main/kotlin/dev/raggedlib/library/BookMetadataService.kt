@@ -83,8 +83,14 @@ class BookMetadataService(
                     val changes = changed.keys.associateWith { name ->
                         mapOf("old" to oldValues[name], "new" to newValues[name])
                     }
-                    val actor = access.caller().userId?.let { access.user().label } ?: access.caller().label
-                    activity.recordEdit(bookId, current.book.libraryId, current.book.calibreId, updated.title, actor, changes)
+                    activity.recordEdit(
+                        bookId,
+                        current.book.libraryId,
+                        current.book.calibreId,
+                        updated.title,
+                        access.activityActor(),
+                        changes,
+                    )
                 }
             }
             if (reindex) ingest.enqueue(bookId)
