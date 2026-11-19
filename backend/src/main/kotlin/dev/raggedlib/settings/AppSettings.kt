@@ -18,9 +18,13 @@ data class SettingsView(
     val parallelBooks: Int,
     val parallelBooksDefault: Int,
     val parallelBooksMax: Int,
+    val metadataLookupEnabled: Boolean,
 )
 
-data class SettingsUpdate(val parallelBooks: Int? = null)
+data class SettingsUpdate(
+    val parallelBooks: Int? = null,
+    val metadataLookupEnabled: Boolean? = null,
+)
 
 /**
  * Runtime settings, stored in `app_settings` so they survive restarts; a setting never changed falls back to the
@@ -37,10 +41,15 @@ class AppSettings(private val jdbc: NamedParameterJdbcTemplate, private val prop
     val parallelBooksDefault: Int get() = props.ingest.extractConcurrency.coerceIn(1, parallelBooksMax)
 
     @Volatile private var cachedParallelBooks: Int? = null
+    @Volatile private var cachedMetadataLookupEnabled: Boolean? = null
 
     val parallelBooks: Int
         get() = cachedParallelBooks ?: (read(PARALLEL_BOOKS)?.toIntOrNull()?.coerceIn(1, parallelBooksMax) ?: parallelBooksDefault)
             .also { cachedParallelBooks = it }
+
+    val metadataLookupEnabled: Boolean
+        get() = cachedMetadataLookupEnabled ?: (read(METADATA_LOOKUP_ENABLED)?.toBooleanStrictOrNull() ?: true)
+            .also { cachedMetadataLookupEnabled = it }
 
     fun setParallelBooks(n: Int) {
         if (n !in 1..parallelBooksMax) badRequest("parallelBooks must be between 1 and $parallelBooksMax")
@@ -49,7 +58,13 @@ class AppSettings(private val jdbc: NamedParameterJdbcTemplate, private val prop
         log.info("Books indexed in parallel set to {}", n)
     }
 
-    fun view() = SettingsView(parallelBooks, parallelBooksDefault, parallelBooksMax)
+    fun setMetadataLookupEnabled(enabled: Boolean) {
+        write(METADATA_LOOKUP_ENABLED, enabled.toString())
+        cachedMetadataLookupEnabled = enabled
+        log.info("Metadata downloads {}", if (enabled) "enabled" else "disabled")
+    }
+
+    fun view() = SettingsView(parallelBooks, parallelBooksDefault, parallelBooksMax, metadataLookupEnabled)
 
     private fun read(key: String): String? = jdbc.queryForList(
         "select value from app_settings where key = :key", mapOf("key" to key), String::class.java,
@@ -67,6 +82,7 @@ class AppSettings(private val jdbc: NamedParameterJdbcTemplate, private val prop
 
     private companion object {
         const val PARALLEL_BOOKS = "ingest.parallelBooks"
+        const val METADATA_LOOKUP_ENABLED = "metadata.lookupEnabled"
     }
 }
 
@@ -82,6 +98,7 @@ class SettingsController(private val settings: AppSettings, private val ingest: 
             settings.setParallelBooks(it)
             ingest.parallelBooksChanged()
         }
+        body.metadataLookupEnabled?.let(settings::setMetadataLookupEnabled)
         return settings.view()
     }
 }

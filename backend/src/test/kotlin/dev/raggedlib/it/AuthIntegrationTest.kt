@@ -715,6 +715,35 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `metadata source lookup defaults on is admin configurable and checks caller access`() {
+        val settings = as_("admin")
+        val initialSettings = settings.get("/api/settings")
+        assertEquals(200, initialSettings.status, initialSettings.body)
+        assertTrue(initialSettings.json.path("metadataLookupEnabled").asBoolean())
+
+        val readOnlyKey = as_("curator").post(
+            "/api/me/api-keys",
+            mapOf("name" to "metadata lookup reader", "scopes" to listOf("library:read")),
+        ).json.path("rawKey").asString()
+        val candidatesPath = "/api/books/$alphaBook/metadata-candidates"
+        assertEquals(403, as_("reader").post(candidatesPath).status)
+        assertEquals(403, Browser(base).post(candidatesPath, key = readOnlyKey).status)
+        assertEquals(403, as_("curator").put("/api/settings", mapOf("metadataLookupEnabled" to false)).status)
+
+        try {
+            val disabled = settings.put("/api/settings", mapOf("metadataLookupEnabled" to false))
+            assertEquals(200, disabled.status, disabled.body)
+            assertFalse(disabled.json.path("metadataLookupEnabled").asBoolean())
+            val refused = as_("curator").post(candidatesPath)
+            assertEquals(403, refused.status)
+            assertTrue(refused.body.contains("disabled"), refused.body)
+        } finally {
+            val enabled = settings.put("/api/settings", mapOf("metadataLookupEnabled" to true))
+            assertEquals(200, enabled.status, enabled.body)
+        }
+    }
+
+    @Test
     fun `library admins can pause editing and resume it after a successful sync`() {
         assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
         val alphaLibrary = as_("admin").get("/api/libraries").json.values()

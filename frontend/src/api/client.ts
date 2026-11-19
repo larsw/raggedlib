@@ -23,6 +23,7 @@ import type {
   GrantableRole,
   LayoutParams,
   Member,
+  MetadataCandidate,
   MetadataSuggestions,
   Me,
   Review,
@@ -272,6 +273,8 @@ export const api = {
     (await send(`/books/${id}/formats/${encodeURIComponent(format)}`, { method: "DELETE" })).json() as Promise<BookDetails>,
   metadataSuggestions: (libraryId: number, signal?: AbortSignal) =>
     getJson<MetadataSuggestions>(`/libraries/${libraryId}/metadata-values`, signal),
+  metadataCandidates: (bookId: number, signal?: AbortSignal) =>
+    postJson<MetadataCandidate[]>(`/books/${bookId}/metadata-candidates`, {}, signal),
 
   reindex: (id: number) => postJson<Book>(`/books/${id}/reindex`),
 
@@ -290,7 +293,7 @@ export const api = {
 
   settings: (signal?: AbortSignal) => getJson<ServerSettings>("/settings", signal),
   /** Global admins only. */
-  updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks">>) => putJson<ServerSettings>("/settings", body),
+  updateSettings: (body: Partial<Pick<ServerSettings, "parallelBooks" | "metadataLookupEnabled">>) => putJson<ServerSettings>("/settings", body),
   vectors: (
     q: { libraryId: number; level: VectorLevel; method: VectorMethod; size: number; dims: 2 | 3; seed?: number } & LayoutParams,
     signal?: AbortSignal,

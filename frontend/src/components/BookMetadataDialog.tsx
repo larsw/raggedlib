@@ -1,7 +1,7 @@
-import { Button, ButtonGroup, Callout, Classes, Dialog, DialogBody, DialogFooter, FormGroup, InputGroup, Intent, TextArea } from "@blueprintjs/core";
+import { Button, ButtonGroup, Callout, Checkbox, Classes, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, Intent, TextArea } from "@blueprintjs/core";
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, errorMessage } from "../api/client";
-import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataSuggestions } from "../api/types";
+import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataCandidate, MetadataSuggestions } from "../api/types";
 import { formatBytes } from "../lib/format";
 import { BookCover } from "./BookCover";
 import { MetadataValueSelect } from "./MetadataValueSelect";
@@ -35,6 +35,23 @@ interface Draft {
   rating: string;
   addedAt: string;
 }
+
+type MetadataLookupField = "title" | "authors" | "publisher" | "pubdate" | "identifiers" | "languages" | "tags" | "description";
+
+const METADATA_LOOKUP_FIELDS: MetadataLookupField[] = [
+  "title", "authors", "publisher", "pubdate", "identifiers", "languages", "tags", "description",
+];
+
+const METADATA_LOOKUP_LABELS: Record<MetadataLookupField, string> = {
+  title: "Title",
+  authors: "Authors",
+  publisher: "Publisher",
+  pubdate: "Published",
+  identifiers: "Identifiers",
+  languages: "Languages",
+  tags: "Tags",
+  description: "Description",
+};
 
 function localDateTime(value: string | null | undefined): string {
   if (!value) return "";
@@ -161,6 +178,56 @@ function metadataValueText(value: unknown): string {
   return String(value);
 }
 
+function candidateValues(candidate: MetadataCandidate): Partial<Record<MetadataLookupField, unknown>> {
+  return {
+    title: candidate.title,
+    authors: candidate.authors,
+    publisher: candidate.publisher,
+    pubdate: candidate.publishedDate,
+    identifiers: candidate.identifiers,
+    languages: candidate.languages,
+    tags: candidate.tags,
+    description: candidate.description,
+  };
+}
+
+function draftValues(draft: Draft): Record<MetadataLookupField, unknown> {
+  return {
+    title: draft.title,
+    authors: draft.authors,
+    publisher: draft.publisher,
+    pubdate: draft.pubdate,
+    identifiers: identifiers(draft.identifiers),
+    languages: draft.languages,
+    tags: draft.tags,
+    description: draft.description,
+  };
+}
+
+function hasValue(value: unknown): boolean {
+  if (value === null || value === undefined) return false;
+  if (typeof value === "string") return value.trim().length > 0;
+  if (Array.isArray(value)) return value.length > 0;
+  if (typeof value === "object") return Object.keys(value).length > 0;
+  return true;
+}
+
+function sameMetadataValue(field: MetadataLookupField, left: unknown, right: unknown): boolean {
+  if (field === "identifiers" && typeof left === "object" && left !== null && typeof right === "object" && right !== null) {
+    const sorted = (value: object) => Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
+    return JSON.stringify(sorted(left)) === JSON.stringify(sorted(right));
+  }
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
+function fieldsToSelect(candidate: MetadataCandidate, draft: Draft): Set<MetadataLookupField> {
+  const incoming = candidateValues(candidate);
+  const current = draftValues(draft);
+  return new Set(
+    METADATA_LOOKUP_FIELDS.filter((field) => hasValue(incoming[field]) && !sameMetadataValue(field, incoming[field], current[field])),
+  );
+}
+
 function originalFields(fields: BookMetadataFields, baseline: Record<string, unknown>): BookMetadataOriginalFields {
   const original: BookMetadataOriginalFields = {};
   for (const field of Object.keys(fields)) {
@@ -212,6 +279,14 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
   const [conflicts, setConflicts] = useState<Partial<Record<keyof BookMetadataFields, unknown>>>({});
   const [suggestions, setSuggestions] = useState<MetadataSuggestions>();
   const [suggestionError, setSuggestionError] = useState<string>();
+  const [metadataLookupEnabled, setMetadataLookupEnabled] = useState(false);
+  const [metadataSettingsError, setMetadataSettingsError] = useState<string>();
+  const [metadataCandidates, setMetadataCandidates] = useState<MetadataCandidate[]>([]);
+  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
+  const [selectedMetadataFields, setSelectedMetadataFields] = useState<Set<MetadataLookupField>>(new Set());
+  const [metadataLookupLoading, setMetadataLookupLoading] = useState(false);
+  const [metadataLookupError, setMetadataLookupError] = useState<string>();
+  const [metadataLookupNoResults, setMetadataLookupNoResults] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [navigating, setNavigating] = useState(false);
@@ -222,6 +297,9 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
   const [confirmClose, setConfirmClose] = useState(false);
   const coverInput = useRef<HTMLInputElement>(null);
   const formatInput = useRef<HTMLInputElement>(null);
+  const metadataLookupAbort = useRef<AbortController | null>(null);
+  const draftRef = useRef(draft);
+  draftRef.current = draft;
   const fileBusy = coverBusy || formatBusy;
 
   useEffect(() => {
@@ -237,14 +315,67 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setConfirmClose(false);
     setSuggestions(undefined);
     setSuggestionError(undefined);
+    setMetadataLookupEnabled(false);
+    setMetadataSettingsError(undefined);
+    setMetadataCandidates([]);
+    setSelectedCandidateIndex(0);
+    setSelectedMetadataFields(new Set());
+    setMetadataLookupLoading(false);
+    setMetadataLookupError(undefined);
+    setMetadataLookupNoResults(false);
     const ctrl = new AbortController();
     api.metadataSuggestions(book.libraryId, ctrl.signal)
       .then(setSuggestions)
       .catch((err) => {
         if (!ctrl.signal.aborted) setSuggestionError(errorMessage(err));
       });
-    return () => ctrl.abort();
+    api.settings(ctrl.signal)
+      .then((settings) => setMetadataLookupEnabled(settings.metadataLookupEnabled))
+      .catch((err) => {
+        if (!ctrl.signal.aborted) setMetadataSettingsError(errorMessage(err));
+      });
+    return () => {
+      ctrl.abort();
+      metadataLookupAbort.current?.abort();
+    };
   }, [book.id, isOpen]);
+
+  const lookupMetadata = async () => {
+    metadataLookupAbort.current?.abort();
+    const ctrl = new AbortController();
+    metadataLookupAbort.current = ctrl;
+    setMetadataLookupLoading(true);
+    setMetadataLookupError(undefined);
+    setMetadataLookupNoResults(false);
+    setMetadataCandidates([]);
+    setSelectedMetadataFields(new Set());
+    try {
+      const candidates = await api.metadataCandidates(book.id, ctrl.signal);
+      if (ctrl.signal.aborted) return;
+      setMetadataCandidates(candidates);
+      if (candidates.length === 0) {
+        setMetadataLookupNoResults(true);
+        setMetadataLookupError("No metadata candidates were found. Try adding an ISBN or checking the title and authors.");
+      } else if (candidates[0]) {
+        setSelectedCandidateIndex(0);
+        setSelectedMetadataFields(fieldsToSelect(candidates[0], draftRef.current));
+      }
+    } catch (err) {
+      if (!ctrl.signal.aborted) {
+        setMetadataLookupError(err instanceof ApiError && err.status === 504
+          ? "The metadata lookup timed out. Try again."
+          : errorMessage(err));
+      }
+    } finally {
+      if (!ctrl.signal.aborted) setMetadataLookupLoading(false);
+    }
+  };
+
+  const selectCandidate = (index: number) => {
+    setSelectedCandidateIndex(index);
+    const candidate = metadataCandidates[index];
+    if (candidate) setSelectedMetadataFields(fieldsToSelect(candidate, draftRef.current));
+  };
 
   const fields = changedFields(initial, draft);
   const validSeriesIndex = fields.seriesIndex == null || (Number.isFinite(fields.seriesIndex) && fields.seriesIndex >= 0);
@@ -256,7 +387,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     identifierLines.every((line) => /^[A-Za-z0-9_.-]+:\s*[^,]+$/.test(line));
 
   const save = async (close: boolean): Promise<boolean> => {
-    if (fileBusy) return false;
+    if (fileBusy || metadataLookupLoading) return false;
     if (Object.keys(conflicts).length > 0) {
       setError("Resolve each metadata conflict before saving.");
       return false;
@@ -371,7 +502,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
   };
 
   const requestClose = () => {
-    if (saving || navigating || fileBusy) return;
+    if (saving || navigating || fileBusy || metadataLookupLoading) return;
     if (confirmClose) {
       setConfirmClose(false);
     } else if (Object.keys(fields).length > 0) {
@@ -412,9 +543,9 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
             <DialogFooter
               actions={
                 <>
-                  <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving || fileBusy} />
-                  <Button type="button" text="Discard" onClick={onClose} disabled={saving || fileBusy} />
-                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving || fileBusy || Object.keys(conflicts).length > 0} />
+                  <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving || fileBusy || metadataLookupLoading} />
+                  <Button type="button" text="Discard" onClick={onClose} disabled={saving || fileBusy || metadataLookupLoading} />
+                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving || fileBusy || metadataLookupLoading || Object.keys(conflicts).length > 0} />
                 </>
               }
             />
@@ -514,6 +645,110 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
               </div>
             </div>
             <div className="metadata-editor-fields">
+              {metadataSettingsError ? (
+                <Callout intent={Intent.WARNING} icon="warning-sign" compact>
+                  Metadata lookup is unavailable because the server setting could not be loaded: {metadataSettingsError}
+                </Callout>
+              ) : metadataLookupEnabled && (
+                <section className="metadata-source-lookup" aria-label="Metadata source lookup">
+                  <Callout intent={Intent.PRIMARY} icon="info-sign" compact>
+                    Your title, authors and identifiers, including ISBN, are sent to Google Books, Amazon, Open Library
+                    and other configured Calibre sources. Review each field before applying it; nothing is saved until
+                    you choose Save.
+                  </Callout>
+                  <Button
+                    type="button"
+                    small
+                    icon="cloud-download"
+                    text="Look up metadata"
+                    loading={metadataLookupLoading}
+                    disabled={saving || navigating || fileBusy || metadataLookupLoading}
+                    onClick={() => void lookupMetadata()}
+                  />
+                  {metadataLookupLoading && <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Searching metadata sources…</span>}
+                  {metadataLookupError && (
+                    <Callout intent={metadataLookupNoResults ? Intent.WARNING : Intent.DANGER} icon={metadataLookupNoResults ? "warning-sign" : "error"} compact>
+                      {metadataLookupError}
+                    </Callout>
+                  )}
+                  {metadataCandidates.length > 0 && (
+                    <div className="metadata-source-candidates">
+                      <FormGroup label="Candidate edition" labelFor="metadata-candidate">
+                        <HTMLSelect
+                          id="metadata-candidate"
+                          fill
+                          value={String(selectedCandidateIndex)}
+                          options={metadataCandidates.map((candidate, index) => ({
+                            value: String(index),
+                            label: `${candidate.title || "Untitled"} · ${candidate.source}`,
+                          }))}
+                          onChange={(event) => selectCandidate(Number(event.currentTarget.value))}
+                        />
+                      </FormGroup>
+                      {(() => {
+                        const candidate = metadataCandidates[selectedCandidateIndex];
+                        if (!candidate) return null;
+                        const incoming = candidateValues(candidate);
+                        const current = draftValues(draft);
+                        const availableFields = METADATA_LOOKUP_FIELDS.filter((field) => hasValue(incoming[field]));
+                        return (
+                          <>
+                            <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                              Source: {candidate.source}. Select the fields to copy into this draft.
+                            </p>
+                            <div className="metadata-source-comparison-wrap">
+                              <table className="metadata-source-comparison">
+                                <thead>
+                                  <tr><th scope="col">Field</th><th scope="col">Current draft</th><th scope="col">Source</th></tr>
+                                </thead>
+                                <tbody>
+                                  {availableFields.map((field) => (
+                                    <tr key={field}>
+                                      <th scope="row">
+                                        <Checkbox
+                                          checked={selectedMetadataFields.has(field)}
+                                          label={METADATA_LOOKUP_LABELS[field]}
+                                          onChange={() => setSelectedMetadataFields((selected) => {
+                                            const next = new Set(selected);
+                                            if (next.has(field)) next.delete(field);
+                                            else next.add(field);
+                                            return next;
+                                          })}
+                                        />
+                                      </th>
+                                      <td>{metadataValueText(current[field])}</td>
+                                      <td>{metadataValueText(incoming[field])}</td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                              {availableFields.length === 0 && (
+                                <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                                  This candidate has no supported fields to apply.
+                                </p>
+                              )}
+                            </div>
+                            <Button
+                              type="button"
+                              small
+                              intent={Intent.PRIMARY}
+                              text={`Apply ${selectedMetadataFields.size} selected field${selectedMetadataFields.size === 1 ? "" : "s"}`}
+                              disabled={selectedMetadataFields.size === 0 || saving || navigating || fileBusy}
+                              onClick={() => {
+                                setDraft((currentDraft) => [...selectedMetadataFields].reduce(
+                                  (nextDraft, field) => draftWithValue(nextDraft, field, incoming[field]),
+                                  currentDraft,
+                                ));
+                                setSelectedMetadataFields(new Set());
+                              }}
+                            />
+                          </>
+                        );
+                      })()}
+                    </div>
+                  )}
+                </section>
+              )}
               <FormGroup label="Title" labelFor="metadata-title">
                 <InputGroup id="metadata-title" autoFocus value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.currentTarget.value })} />
               </FormGroup>
@@ -628,7 +863,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-left"
                 aria-label="Previous book"
                 title="Save changes and open the previous book"
-                disabled={!navigation.previous || saving || navigating || fileBusy || Object.keys(conflicts).length > 0}
+                disabled={!navigation.previous || saving || navigating || fileBusy || metadataLookupLoading || Object.keys(conflicts).length > 0}
                 onClick={() => void step(-1)}
               />
               <Button
@@ -636,7 +871,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-right"
                 aria-label="Next book"
                 title="Save changes and open the next book"
-                disabled={!navigation.next || saving || navigating || fileBusy || Object.keys(conflicts).length > 0}
+                disabled={!navigation.next || saving || navigating || fileBusy || metadataLookupLoading || Object.keys(conflicts).length > 0}
                 onClick={() => void step(1)}
               />
             </ButtonGroup>
@@ -645,14 +880,14 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
           <DialogFooter
             actions={
               <>
-              <Button type="button" text="Cancel" onClick={requestClose} disabled={saving || navigating || fileBusy} />
+              <Button type="button" text="Cancel" onClick={requestClose} disabled={saving || navigating || fileBusy || metadataLookupLoading} />
               <Button
                 type="submit"
                 intent={Intent.PRIMARY}
                 icon="floppy-disk"
                 text="Save"
                 loading={saving}
-                disabled={saving || navigating || fileBusy || Object.keys(conflicts).length > 0 || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
+                disabled={saving || navigating || fileBusy || metadataLookupLoading || Object.keys(conflicts).length > 0 || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
               />
             </>
             }
