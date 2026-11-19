@@ -2,8 +2,8 @@
 name: raggedlib
 description: >-
   Search and cite the user's own ebook library (Calibre, indexed by raggedlib) through its MCP tools:
-  search_library, ask_library, list_books, list_tags, library_status, plus their favorite lists and book
-  reviews. Use this skill whenever the user asks
+  search_library, ask_library, list_books, list_tags, library_status, book metadata editing such as tagging books
+  or filling missing ISBNs, favorite lists and book reviews. Use this skill whenever the user asks
   what their books, ebook library, Calibre library or "my library" say about something, wants passages, quotes
   or page references from books or documents they own, wants an answer grounded in (or checked against) their
   books, asks which of their books cover a topic, or asks what is indexed in raggedlib — even if they don't name
@@ -12,7 +12,7 @@ description: >-
 
 # raggedlib: the user's ebook library over MCP
 
-raggedlib indexes Calibre libraries on the user's own server and serves **read-only** search tools over MCP.
+raggedlib indexes Calibre libraries on the user's own server and serves search and metadata editing tools over MCP.
 The library is mostly technical books, but can hold anything Calibre does: papers, documentation, legal
 documents, books in other languages, scans read by OCR. Use the tools to ground answers in what the user actually
 owns, with citations they can look up.
@@ -31,11 +31,14 @@ available at all, see "When the tools aren't connected" below.
 | `library_status` | How many books are indexed, whether indexing is running | instant |
 | `list_favorite_lists`, `get_favorite_list` | The user's favorite lists of books, and lists others share | instant |
 | `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` | Keeping the user's lists (`create_favorite_list` with `bookIds`, or `add_books_to_favorite_list`: a search's books in one call) | instant |
+| `get_book_metadata` | Read every editable field and an `original` snapshot for safe updates | instant |
+| `update_book_metadata` | Change selected metadata fields, with per-field conflict detection | instant |
 | `get_book_reviews`, `list_my_reviews`, `write_book_review` | Book reviews (rating 1–5 and/or text) | instant |
 
 raggedlib is multi-user: the tools see only the libraries the API key's owner may see, and which tools exist
-depends on the key's scopes. The favorites and reviews tools act as the user; a system-wide key doesn't have them.
-Only change lists or write a review when the user asks for it, and write reviews in their words.
+depends on the key's scopes. Metadata tools require `library:edit` and operate only in writable, unpaused libraries.
+The favorites and reviews tools act as the user; a system-wide key doesn't have them. Only change metadata, lists or
+write a review when the user asks for it, and write reviews in their words.
 
 ### search_library — start here
 
@@ -99,6 +102,18 @@ fails although the server is fine. Its sources are excerpts, so to quote or chec
 - `library_status()` returns book counts by status, `totalPassages` and `indexingRunning`. Call it when results
   are unexpectedly empty, or the user asks what is indexed. If indexing is running, recently added books may not
   be searchable yet.
+
+### get_book_metadata and update_book_metadata
+
+Use these only when the user asks to change book metadata. `get_book_metadata(bookId)` returns every editable field
+under `original`, including empty values. Pass the snapshot values for the fields being changed as `original` to
+`update_book_metadata(bookId, fields, original)`; `fields` and `original` must contain the same keys. For example,
+to add a tag, send `fields={"tags":["history"]}` and the `tags` value from the snapshot as `original`.
+
+The update is all-or-nothing for the requested fields. A result with `status="conflict"` means Calibre changed one
+or more fields since the snapshot; no fields were written. Inspect the returned `conflicts` and `snapshot`, then
+decide whether to retry with the refreshed original values. Don't blindly retry a conflict. The activity log records
+the API key's name, and for a personal key also its owner's name.
 
 ## A good workflow
 

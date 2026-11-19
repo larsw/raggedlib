@@ -24,6 +24,12 @@ data class MetadataUpdateRequest(
     val original: Map<String, JsonNode> = emptyMap(),
 )
 
+data class BookMetadataSnapshot(
+    val bookId: Long,
+    val title: String,
+    val original: Map<String, Any?>,
+)
+
 @Service
 class BookMetadataService(
     private val access: Access,
@@ -36,6 +42,21 @@ class BookMetadataService(
     private val tx: TransactionTemplate,
     private val details: BookDetailsService,
 ) {
+    fun snapshot(bookId: Long): BookMetadataSnapshot {
+        access.requireScope(ApiScope.LIBRARY_EDIT)
+        val authorized = access.requireEditableBook(bookId)
+        val library = access.requireEditableLibrary(authorized.book.libraryId)
+
+        return writeLock.withLibrary(library.root) {
+            access.requireEditableLibrary(authorized.book.libraryId)
+            val current = books.find(bookId) ?: dev.raggedlib.config.notFound("book $bookId not found")
+            val record = calibre.find(library.root, current.book.calibreId)
+                ?: dev.raggedlib.config.notFound("book ${current.book.calibreId} no longer exists in Calibre")
+            val values = values(record) + values(calibre.extras(library.root, current.book.calibreId))
+            BookMetadataSnapshot(bookId, record.title, values)
+        }
+    }
+
     fun update(bookId: Long, request: MetadataUpdateRequest): BookDetails {
         access.requireScope(ApiScope.LIBRARY_EDIT)
         val authorized = access.requireEditableBook(bookId)

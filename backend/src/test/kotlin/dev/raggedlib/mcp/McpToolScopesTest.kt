@@ -29,9 +29,16 @@ class McpToolScopesTest {
         val personal = Caller(7, setOf(ApiScope.LIBRARY_READ, ApiScope.FAVORITES_READ), null, viaApiKey = true, label = "k")
         assertTrue(McpSecurity.visible(personal, "search_library"))
         assertTrue(McpSecurity.visible(personal, "list_favorite_lists"))
+        assertFalse(McpSecurity.visible(personal, "get_book_metadata"))
+        assertFalse(McpSecurity.visible(personal, "update_book_metadata"))
         assertFalse(McpSecurity.visible(personal, "create_favorite_list"))
         assertFalse(McpSecurity.visible(personal, "write_book_review"))
         assertFalse(McpSecurity.visible(personal, "no_such_tool"))
+
+        val editor = personal.copy(scopes = setOf(ApiScope.LIBRARY_EDIT))
+        assertTrue(McpSecurity.visible(editor, "get_book_metadata"))
+        assertTrue(McpSecurity.visible(editor, "update_book_metadata"))
+        assertFalse(McpSecurity.visible(editor, "search_library"))
 
         // even if a system key somehow had a per-user scope, it acts as no user
         val system = Caller(null, ApiScope.entries.toSet(), null, viaApiKey = true, label = "s")

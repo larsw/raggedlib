@@ -176,7 +176,8 @@ takes API keys only. The backend logs a warning at startup; keep its ports on lo
 
 The backend serves an [MCP](https://modelcontextprotocol.io) endpoint (streamable HTTP, stateless) at
 `http://localhost:3000/mcp`, through the web UI's server, or directly at `http://localhost:8090/mcp`. Six read-only
-tools search the libraries; with a personal key, more tools reach the key owner's favorite lists and reviews.
+tools search the libraries; keys with `library:edit` also get two tools for reading and updating book metadata.
+With a personal key, more tools reach the key owner's favorite lists and reviews.
 
 | Tool | What it does |
 |---|---|
@@ -186,6 +187,8 @@ tools search the libraries; with a personal key, more tools reach the key owner'
 | `list_tags` | Calibre tags by number of books |
 | `list_libraries` | The configured libraries, with how many books each has, to get ids for `libraryIds` |
 | `library_status` | How many books are indexed and searchable |
+| `get_book_metadata` | Get every editable metadata field for a book and an `original` snapshot for conflict checks (`library:edit`) |
+| `update_book_metadata` | Change selected metadata fields using `fields` and matching `original` values; returns field-level conflicts without writing when Calibre changed one (`library:edit`) |
 | `list_favorite_lists`, `get_favorite_list` | The user's favorite lists and the ones others share, and a list's books (`favorites:read`) |
 | `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` | Keep the user's lists, adding one book or several at once, or starting a new list with books (`favorites:write`) |
 | `get_book_reviews`, `list_my_reviews` | A book's reviews with the average rating; the user's own reviews (`reviews:read`) |
