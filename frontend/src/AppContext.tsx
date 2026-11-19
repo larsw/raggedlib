@@ -31,7 +31,7 @@ interface AppContextValue {
   /** The libraries the caller can see, with its role in each. */
   libraries: Library[];
   librariesLoading: boolean;
-  refreshLibraries: () => void;
+  refreshLibraries: () => Promise<void>;
   /** The library chosen in the navbar's chooser; null = every library (the union view). */
   library: Library | null;
   libraryId: number | null;

@@ -36,6 +36,16 @@ class BookActivityRepository(
         )
     }
 
+    fun recordLibraryAction(libraryId: Long, actor: String, action: String) {
+        jdbc.update(
+            """
+            insert into book_activity (library_id, actor, action)
+            values (:libraryId, :actor, :action)
+            """.trimIndent(),
+            mapOf("libraryId" to libraryId, "actor" to actor, "action" to action),
+        )
+    }
+
     fun lastEdit(bookId: Long): BookEdit? = jdbc.query(
         """
         select actor, created_at from book_activity

@@ -155,6 +155,11 @@ export interface Library {
   role: LibraryRole; // the caller's role in it (at least VIEWER)
   writable: boolean; // books can be uploaded and edited through raggedlib
   readOnlyReason: string | null; // why a library configured writable isn't; global admins only
+  editingPaused: boolean; // library admins paused edits while desktop Calibre is open
+}
+
+export interface LibraryEditingView {
+  editingPaused: boolean;
 }
 
 export interface SystemInfo {

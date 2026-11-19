@@ -35,6 +35,7 @@ import type {
   IngestStartRequest,
   IngestStatus,
   Library,
+  LibraryEditingView,
   Page,
   SearchRequest,
   SearchResponse,
@@ -195,6 +196,8 @@ export const api = {
 
   // library admins (and global admins)
   libraryMembers: (libraryId: number, signal?: AbortSignal) => getJson<Member[]>(`/libraries/${libraryId}/members`, signal),
+  setLibraryEditingPaused: (libraryId: number, paused: boolean) =>
+    putJson<LibraryEditingView>(`/libraries/${libraryId}/editing`, { paused }),
   grantMember: (libraryId: number, userId: number, role: GrantableRole) =>
     putJson<Member>(`/libraries/${libraryId}/members/${userId}`, { role }),
   revokeMember: (libraryId: number, userId: number) => deleteJson<Member>(`/libraries/${libraryId}/members/${userId}`),

@@ -120,6 +120,7 @@ class SecurityConfig {
                 a.requestMatchers("/api/me/api-keys", "/api/me/api-keys/**").hasAuthority(Authorities.SESSION)
                 a.requestMatchers("/api/admin/**").access(all(hasAuthority(Authorities.SESSION), hasAuthority(Authorities.ADMIN)))
                 a.requestMatchers("/api/libraries/*/members", "/api/libraries/*/members/**").hasAuthority(Authorities.SESSION)
+                a.requestMatchers(HttpMethod.PUT, "/api/libraries/*/editing").hasAuthority(Authorities.SESSION)
                 // favorite lists and reviews: per-user features, so never a system-wide key (it has no such scopes)
                 a.requestMatchers(HttpMethod.GET, "/api/lists", "/api/lists/**").hasAuthority(ApiScope.FAVORITES_READ.authority)
                 a.requestMatchers("/api/lists", "/api/lists/**").hasAuthority(ApiScope.FAVORITES_WRITE.authority)

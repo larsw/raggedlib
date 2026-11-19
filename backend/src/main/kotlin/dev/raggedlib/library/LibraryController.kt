@@ -22,6 +22,7 @@ class LibraryController(private val registry: LibraryRegistry, private val books
             Library(
                 lib.id, lib.name, if (admin) lib.root.toString() else null, counts[lib.id] ?: 0, role,
                 writable = lib.writable, readOnlyReason = if (admin) lib.readOnlyReason else null,
+                editingPaused = lib.editingPaused,
             )
         }
     }

@@ -2,8 +2,10 @@ package dev.raggedlib.library
 
 import dev.raggedlib.calibre.CalibreSchema
 import dev.raggedlib.calibre.LibraryWriteCheck
+import dev.raggedlib.config.ApiException
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.config.notFound
+import org.springframework.http.HttpStatus
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -20,7 +22,10 @@ data class LibraryInfo(
     val root: Path,
     val writable: Boolean = false,
     val readOnlyReason: String? = null,
+    val editingPaused: Boolean = false,
 )
+
+const val EDITING_PAUSED_MESSAGE = "Editing is paused (the library is open in desktop Calibre)"
 
 /**
  * Reconciles the configured libraries ([RaggedlibProperties.effectiveLibraries]) against the `libraries` table,
@@ -45,6 +50,32 @@ class LibraryRegistry(
 
     fun byId(id: Long): LibraryInfo = all.firstOrNull { it.id == id } ?: notFound("library $id not found")
 
+    fun requireEditingAllowed(id: Long): LibraryInfo {
+        val library = byId(id)
+        if (!library.writable) {
+            val reason = library.readOnlyReason?.replace(library.root.toString(), library.name)
+            throw ApiException(HttpStatus.FORBIDDEN, reason ?: "library '${library.name}' is read-only")
+        }
+        if (library.editingPaused) throw ApiException(HttpStatus.FORBIDDEN, EDITING_PAUSED_MESSAGE)
+        return library
+    }
+
+    @Synchronized
+    fun setEditingPaused(id: Long, paused: Boolean): LibraryInfo {
+        val library = byId(id)
+        if (library.editingPaused == paused) return library
+        if (jdbc.update("update libraries set editing_paused = :paused where id = :id", mapOf("id" to id, "paused" to paused)) != 1) {
+            notFound("library $id not found")
+        }
+        cached = cached?.map { if (it.id == id) it.copy(editingPaused = paused) else it }
+        return byId(id)
+    }
+
+    @Synchronized
+    fun invalidate() {
+        cached = null
+    }
+
     @Synchronized
     private fun reconcile(): List<LibraryInfo> {
         cached?.let { return it }
@@ -57,6 +88,11 @@ class LibraryRegistry(
                 "insert into libraries (name, path) values (:name, :path) returning id",
                 mapOf("name" to cfg.name, "path" to root.toString()), Long::class.java,
             )!!
+            val editingPaused = jdbc.queryForObject(
+                "select editing_paused from libraries where id = :id",
+                mapOf("id" to id),
+                Boolean::class.java,
+            ) ?: false
             if (existingId != null) {
                 jdbc.update(
                     "update libraries set name = :name where id = :id and name <> :name",
@@ -65,7 +101,14 @@ class LibraryRegistry(
             }
             val reason = if (cfg.writable) LibraryWriteCheck.readOnlyReason(root, calibreSchema.supportedVersion) else null
             if (cfg.writable && reason != null) log.warn("Library '{}' is configured writable but stays read-only: {}", cfg.name, reason)
-            LibraryInfo(id, cfg.name, root, writable = cfg.writable && reason == null, readOnlyReason = reason)
+            LibraryInfo(
+                id,
+                cfg.name,
+                root,
+                writable = cfg.writable && reason == null,
+                readOnlyReason = reason,
+                editingPaused = editingPaused,
+            )
         }
         backfillLegacyBooks(infos)
         log.info("Libraries: {}", infos.joinToString { "${it.name} (#${it.id}, ${it.root}${if (it.writable) ", writable" else ""})" })

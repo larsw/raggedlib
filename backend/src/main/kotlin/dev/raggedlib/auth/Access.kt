@@ -180,6 +180,12 @@ class Access(
         return lib
     }
 
+    /** A curator may edit only when the library is writable and editing hasn't been paused. */
+    fun requireEditableLibrary(libraryId: Long): LibraryInfo {
+        requireLibrary(libraryId, LibraryRole.CURATOR)
+        return registry.requireEditingAllowed(libraryId)
+    }
+
     /** The book, if the caller can see it (else 404) and has [role] in its library (else 403). */
     fun requireBook(bookId: Long, role: LibraryRole = LibraryRole.VIEWER): BookRow {
         val row = books.find(bookId) ?: notFound("book $bookId not found")
@@ -188,6 +194,13 @@ class Access(
         if (!has.atLeast(role)) {
             throw ApiException(HttpStatus.FORBIDDEN, "this needs the ${role.name.lowercase()} role in the book's library")
         }
+        return row
+    }
+
+    /** A book the caller can edit, with the library's write gate applied. */
+    fun requireEditableBook(bookId: Long): BookRow {
+        val row = requireBook(bookId, LibraryRole.CURATOR)
+        registry.requireEditingAllowed(row.book.libraryId)
         return row
     }
 
