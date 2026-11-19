@@ -19,6 +19,8 @@ data class BookDetails(
     val sections: List<SectionInfo>,
     /** Most recent metadata edit made through raggedlib. */
     val lastEdit: BookEdit?,
+    /** Original upload through raggedlib, when known. */
+    val addedBy: BookEdit?,
 )
 
 data class BookRef(val id: Long, val title: String)
@@ -45,7 +47,7 @@ class BookDetailsService(
             null
         }
         val keeper = book.duplicateOf?.let { books.find(it)?.book }?.let { BookRef(it.id, it.title) }
-        return BookDetails(book, extras, keeper, sections(id), activity.lastEdit(id))
+        return BookDetails(book, extras, keeper, sections(id), activity.lastEdit(id), activity.addedBy(id))
     }
 
     /** Sections in reading order: by first page where there are pages, else by first passage. */

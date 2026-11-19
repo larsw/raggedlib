@@ -18,6 +18,7 @@ import { BOOK_STATUSES, type Book, type BookDetails, type BookSort, type BookSta
 import { useApp } from "../AppContext";
 import { BookCover } from "../components/BookCover";
 import { BookDetailsPanel } from "../components/BookDetailsPanel";
+import { BookUploadDialog } from "../components/BookUploadDialog";
 import { ErrorState } from "../components/ErrorState";
 import { isBusyStatus, StatusTag } from "../components/StatusTag";
 import { FacetFilterSelect } from "../components/FacetFilterSelect";
@@ -34,6 +35,7 @@ import { roleAtLeast } from "../lib/auth";
 import { formatAuthors, formatDateTime, formatNumber, formatYear } from "../lib/format";
 import { readerFormat } from "../lib/reader";
 import { SORTS, sortParam } from "../lib/bookSort";
+import { BOOK_UPLOAD_ACCEPT } from "../lib/bookUpload";
 
 const PAGE_SIZE = 50;
 /** Resizable columns, between the cover and the actions (which aren't). */
@@ -90,6 +92,12 @@ export function LibraryView({ active }: { active: boolean }) {
   const [page, setPage] = useState(0);
   /** the book shown in the details panel */
   const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [uploadFiles, setUploadFiles] = useState<File[]>([]);
+  const [uploadOpen, setUploadOpen] = useState(false);
+  const [uploadLibraryId, setUploadLibraryId] = useState<number | null>(null);
+  const [draggingFiles, setDraggingFiles] = useState(false);
+  const dragDepth = useRef(0);
+  const uploadInput = useRef<HTMLInputElement>(null);
   /** bumped on every list reload, so the open panel refreshes too */
   const [refreshKey, setRefreshKey] = useState(0);
   const bodyRef = useRef<HTMLDivElement>(null);
@@ -97,6 +105,45 @@ export function LibraryView({ active }: { active: boolean }) {
   const { sync: syncLibrary, syncing } = useSyncLibrary();
   const sync = () => syncLibrary(library?.id);
   const columns = useColumnWidths(STORAGE_KEYS.libraryColumns, COLUMNS);
+  const uploadLibraries = useMemo(
+    () => libraries.filter((item) => item.writable && !item.editingPaused && roleAtLeast(roleIn(item.id), "CURATOR")),
+    [libraries, roleIn],
+  );
+  const beginUpload = (files: File[]) => {
+    if (files.length === 0 || uploadLibraries.length === 0) return;
+    setUploadFiles(files);
+    setUploadLibraryId(library && uploadLibraries.some((item) => item.id === library.id) ? library.id : null);
+    setUploadOpen(true);
+  };
+  const closeUpload = () => {
+    setUploadOpen(false);
+    setUploadFiles([]);
+    setUploadLibraryId(null);
+  };
+  const hasDraggedFiles = (event: React.DragEvent) => Array.from(event.dataTransfer.types).includes("Files");
+  const onFileDragEnter = (event: React.DragEvent<HTMLDivElement>) => {
+    if (uploadLibraries.length === 0 || !hasDraggedFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current++;
+    setDraggingFiles(true);
+  };
+  const onFileDragOver = (event: React.DragEvent<HTMLDivElement>) => {
+    if (uploadLibraries.length === 0 || !hasDraggedFiles(event)) return;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "copy";
+  };
+  const onFileDragLeave = (event: React.DragEvent<HTMLDivElement>) => {
+    if (uploadLibraries.length === 0 || !hasDraggedFiles(event)) return;
+    dragDepth.current = Math.max(0, dragDepth.current - 1);
+    if (dragDepth.current === 0) setDraggingFiles(false);
+  };
+  const onFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    if (uploadLibraries.length === 0 || !hasDraggedFiles(event)) return;
+    event.preventDefault();
+    dragDepth.current = 0;
+    setDraggingFiles(false);
+    beginUpload(Array.from(event.dataTransfer.files));
+  };
 
   useEffect(() => {
     const openBookFromHash = () => {
@@ -200,6 +247,12 @@ export function LibraryView({ active }: { active: boolean }) {
     step: stepMetadataBook,
   };
   const [editMetadataRequest, setEditMetadataRequest] = useState(0);
+  const openBookForEdit = (book: Book, libraryId: number) => {
+    setLibraryId(libraryId);
+    setSelectedId(book.id);
+    setEditMetadataRequest((request) => request + 1);
+    closeUpload();
+  };
   const filtered = !!(query || status || tag || publisher);
   // provenance only matters when books from more than one library can appear side by side
   const showLibraryColumn = !library && libraries.length > 1;
@@ -255,10 +308,26 @@ export function LibraryView({ active }: { active: boolean }) {
 
   return (
     <div
-      className={`library-view${panel.dragging || columns.dragging ? " is-resizing" : ""}`}
+      className={`library-view${panel.dragging || columns.dragging ? " is-resizing" : ""}${draggingFiles ? " is-file-drop" : ""}`}
       onKeyDown={onLibraryKeyDown}
+      onDragEnter={onFileDragEnter}
+      onDragOver={onFileDragOver}
+      onDragLeave={onFileDragLeave}
+      onDrop={onFileDrop}
     >
       <div className="view-toolbar library-toolbar">
+        <input
+          ref={uploadInput}
+          type="file"
+          multiple
+          accept={BOOK_UPLOAD_ACCEPT}
+          hidden
+          aria-label="Choose book files to add"
+          onChange={(event) => {
+            beginUpload(Array.from(event.currentTarget.files ?? []));
+            event.currentTarget.value = "";
+          }}
+        />
         <InputGroup
           leftIcon="search"
           placeholder="Filter by title or author…"
@@ -298,6 +367,9 @@ export function LibraryView({ active }: { active: boolean }) {
         </ControlGroup>
         {books.loading && books.data && <Spinner size={16} />}
         <span className="spacer" />
+        {uploadLibraries.length > 0 && (
+          <Button icon="add" text="Add books" onClick={() => uploadInput.current?.click()} />
+        )}
         {canSync && (
           <Tooltip
             content={library ? `Read ${library.name}'s Calibre metadata again` : "Read the Calibre metadata of every library you administer again"}
@@ -494,6 +566,19 @@ export function LibraryView({ active }: { active: boolean }) {
         </div>
       )}
       </div>
+      {draggingFiles && <div className="book-upload-drop-overlay" aria-hidden="true">Drop files to add books</div>}
+      <BookUploadDialog
+        isOpen={uploadOpen}
+        files={uploadFiles}
+        initialLibraryId={uploadLibraryId}
+        libraries={libraries}
+        onClose={closeUpload}
+        onUploaded={(libraryId) => {
+          if (library?.id === libraryId) void books.reload();
+          else setLibraryId(libraryId);
+        }}
+        onOpenBook={openBookForEdit}
+      />
     </div>
   );
 }
