@@ -2389,6 +2389,9 @@ body.is-resizing-x * {
 .metadata-editor-hint {
   margin: 4px 0 12px;
 }
+.metadata-editor-navigation {
+  margin-top: 12px;
+}
 @media (max-width: 580px) {
   .metadata-editor-layout {
     grid-template-columns: minmax(0, 1fr);
