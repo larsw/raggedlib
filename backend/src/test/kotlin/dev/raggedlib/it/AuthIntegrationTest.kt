@@ -261,6 +261,36 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `metadata autocomplete values are restricted to the requested library`() {
+        jdbc.update(
+            """
+            update books set authors = array['Alpha Author'], tags = array['Alpha Tag'], series = 'Alpha Series',
+                publisher = 'Alpha Press', languages = array['eng'] where id = :id
+            """.trimIndent(),
+            mapOf("id" to alphaBook),
+        )
+        jdbc.update(
+            """
+            update books set authors = array['Beta Author'], tags = array['Beta Tag'], series = 'Beta Series',
+                publisher = 'Beta Press', languages = array['fra'] where id = :id
+            """.trimIndent(),
+            mapOf("id" to betaBook),
+        )
+
+        val alphaValues = as_("curator").get("/api/libraries/$alpha/metadata-values")
+        assertEquals(200, alphaValues.status, alphaValues.body)
+        assertEquals(listOf("Alpha Author"), alphaValues.json.path("authors").values().map { it.asString() })
+        assertEquals(listOf("Alpha Tag"), alphaValues.json.path("tags").values().map { it.asString() })
+        assertEquals(listOf("Alpha Series"), alphaValues.json.path("series").values().map { it.asString() })
+        assertEquals(listOf("Alpha Press"), alphaValues.json.path("publishers").values().map { it.asString() })
+        assertEquals(listOf("eng"), alphaValues.json.path("languages").values().map { it.asString() })
+
+        val betaValues = as_("curator").get("/api/libraries/$beta/metadata-values").json
+        assertEquals(listOf("Beta Author"), betaValues.path("authors").values().map { it.asString() })
+        assertEquals(403, as_("reader").get("/api/libraries/$alpha/metadata-values").status)
+    }
+
+    @Test
     fun `a metadata edit writes only changed fields, logs it, and sync does not requeue it`() {
         assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
         val alphaLibrary = as_("admin").get("/api/libraries").json.values()
@@ -270,6 +300,7 @@ class AuthIntegrationTest {
         runCalibredb(
             "set_metadata", "1", "--library-path", libraryRoots[0].toString(),
             "--field", "title:Changed outside raggedlib",
+            "--field", "comments:<p><strong>Original</strong> description</p>",
         )
         val edited = as_("curator").put(
             "/api/books/$alphaBook/metadata",
@@ -315,6 +346,41 @@ class AuthIntegrationTest {
         assertTrue(
             as_("curator").get("/api/books/$alphaBook/details").json.path("lastEdit").path("actor").asString().contains("metadata bot"),
         )
+
+        val extras = as_("curator").put(
+            "/api/books/$alphaBook/metadata",
+            mapOf(
+                "fields" to mapOf(
+                    "titleSort" to "Custom title sort",
+                    "authorSort" to "Custom author sort",
+                    "identifiers" to mapOf("isbn" to "9781234567890", "doi" to "10.1000/example"),
+                    "rating" to 4.5,
+                    "addedAt" to "2020-01-02T03:04:00Z",
+                ),
+            ),
+        )
+        assertEquals(200, extras.status, extras.body)
+        assertEquals("Custom title sort", extras.json.path("calibre").path("titleSort").asString())
+        assertEquals("Custom author sort", extras.json.path("calibre").path("authorSort").asString())
+        assertEquals("9781234567890", extras.json.path("calibre").path("identifiers").path("isbn").asString())
+        assertEquals("10.1000/example", extras.json.path("calibre").path("identifiers").path("doi").asString())
+        assertEquals(4.5, extras.json.path("calibre").path("rating").asDouble())
+        assertEquals("2020-01-02T03:04:00Z", extras.json.path("calibre").path("addedAt").asString())
+        assertTrue(extras.json.path("calibre").path("descriptionHasFormatting").asBoolean())
+        assertEquals("INDEXED", extras.json.path("book").path("status").asString())
+        assertEquals(
+            "4.5",
+            jdbc.queryForObject("select changes -> 'rating' ->> 'new' from book_activity where book_id = :id", mapOf("id" to alphaBook), String::class.java),
+        )
+
+        val description = as_("curator").put(
+            "/api/books/$alphaBook/metadata",
+            mapOf("fields" to mapOf("description" to "First paragraph\n\nSecond paragraph")),
+        )
+        assertEquals(200, description.status, description.body)
+        assertEquals("First paragraph\n\nSecond paragraph", description.json.path("calibre").path("description").asString())
+        assertFalse(description.json.path("calibre").path("descriptionHasFormatting").asBoolean())
+        assertEquals("INDEXED", description.json.path("book").path("status").asString())
 
         val renamed = as_("curator").put(
             "/api/books/$alphaBook/metadata",

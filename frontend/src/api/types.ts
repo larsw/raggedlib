@@ -60,15 +60,32 @@ export interface BookMetadataFields {
   publisher?: string | null;
   pubdate?: string | null;
   languages?: string[];
+  titleSort?: string | null;
+  authorSort?: string | null;
+  description?: string;
+  identifiers?: Record<string, string>;
+  rating?: number | null;
+  addedAt?: string | null;
 }
 
 export interface CalibreExtras {
   description: string | null; // plain text, paragraphs separated by blank lines
+  descriptionHasFormatting: boolean; // true when editing plain text would discard richer HTML
+  titleSort: string | null;
+  authorSort: string | null;
   publisher: string | null;
   identifiers: Record<string, string>; // isbn, amazon, doi, …
   rating: number | null; // 0.5–5 stars
   addedAt: string | null;
   fileSizes: Record<string, number>; // format -> bytes
+}
+
+export interface MetadataSuggestions {
+  authors: string[];
+  tags: string[];
+  series: string[];
+  publishers: string[];
+  languages: string[];
 }
 
 export interface Page<T> {

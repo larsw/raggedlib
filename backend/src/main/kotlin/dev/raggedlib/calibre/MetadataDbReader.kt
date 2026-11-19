@@ -28,11 +28,15 @@ class MetadataDbReader(private val libraryRoot: Path) {
                 ps.setLong(1, bookId)
                 ps.executeQuery().use { rs -> buildList { while (rs.next()) add(read(rs)) } }
             }
-            val added = query("select timestamp from books where id = ?") { it.getString(1) }
-            if (added.isEmpty()) return@use null
+            val book = query("select timestamp, title_sort, author_sort from books where id = ?") {
+                Triple(it.getString(1), it.getString(2), it.getString(3))
+            }.firstOrNull() ?: return@use null
+            val descriptionHtml = query("select text from comments where book = ?") { it.getString(1) }.firstOrNull()
             CalibreExtras(
-                description = query("select text from comments where book = ?") { it.getString(1) }.firstOrNull()
-                    ?.let(CommentText::toPlainText)?.ifBlank { null },
+                description = descriptionHtml?.let(CommentText::toPlainText)?.ifBlank { null },
+                descriptionHasFormatting = descriptionHtml?.let(CommentText::hasFormatting) ?: false,
+                titleSort = book.second,
+                authorSort = book.third,
                 publisher = query("select p.name from books_publishers_link l join publishers p on p.id = l.publisher where l.book = ?") {
                     it.getString(1)
                 }.firstOrNull(),
@@ -42,7 +46,7 @@ class MetadataDbReader(private val libraryRoot: Path) {
                 rating = query("select r.rating from books_ratings_link l join ratings r on r.id = l.rating where l.book = ?") {
                     it.getInt(1)
                 }.firstOrNull()?.takeIf { it > 0 }?.let { it / 2.0 },
-                addedAt = CalibreDates.parse(added.first()),
+                addedAt = CalibreDates.parse(book.first),
                 fileSizes = query("select format, uncompressed_size from data where book = ?") { it.getString(1).uppercase() to it.getLong(2) }
                     .toMap(),
             )

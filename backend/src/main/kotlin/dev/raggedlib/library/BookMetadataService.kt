@@ -3,9 +3,11 @@ package dev.raggedlib.library
 import dev.raggedlib.auth.Access
 import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.auth.LibraryRole
+import dev.raggedlib.calibre.CalibreExtras
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.calibre.CalibreMetadataWriter
 import dev.raggedlib.calibre.CalibreLibraryWriteLock
+import dev.raggedlib.calibre.CommentText
 import dev.raggedlib.calibre.Formats
 import dev.raggedlib.config.ApiException
 import dev.raggedlib.config.badRequest
@@ -46,7 +48,7 @@ class BookMetadataService(
 
         writeLock.withLibrary(library.root) {
             val current = books.find(bookId) ?: dev.raggedlib.config.notFound("book $bookId not found")
-            val oldValues = values(current.book)
+            val oldValues = values(current.book) + values(calibre.extras(library.root, current.book.calibreId))
             val changed = requested.filter { (name, value) -> oldValues[name] != value }
             if (changed.isNotEmpty()) {
                 val cliFields = changed.map { (name, value) ->
@@ -55,7 +57,7 @@ class BookMetadataService(
                 writer.setFields(library, current.book.calibreId, cliFields)
                 val updated = calibre.find(library.root, current.book.calibreId)
                     ?: error("calibredb didn't return book ${current.book.calibreId} after updating it")
-                val newValues = values(updated)
+                val newValues = values(updated) + values(calibre.extras(library.root, current.book.calibreId))
                 val changes = changed.keys.associateWith { name ->
                     mapOf("old" to oldValues[name], "new" to newValues[name])
                 }
@@ -91,6 +93,26 @@ class BookMetadataService(
                     if (!node.isNumber) badRequest("seriesIndex must be a number or null")
                     node.doubleValue().takeIf { it.isFinite() && it >= 0.0 }
                         ?: badRequest("seriesIndex must be a non-negative number")
+                }
+                "titleSort", "authorSort" -> if (node.isNull) null else text(node, name).trim()
+                "description" -> text(node, name)
+                "rating" -> if (node.isNull) null else {
+                    if (!node.isNumber) badRequest("rating must be a number or null")
+                    node.doubleValue().takeIf { it.isFinite() && it in 0.0..5.0 && it * 2 % 1.0 == 0.0 }
+                        ?: badRequest("rating must be between 0 and 5 in half-star increments")
+                }
+                "addedAt" -> {
+                    if (node.isNull) badRequest("addedAt must be a date and time")
+                    runCatching { Instant.parse(text(node, name)) }
+                        .getOrElse { badRequest("addedAt must be an ISO timestamp") }
+                }
+                "identifiers" -> {
+                    if (!node.isObject) badRequest("identifiers must be an object of type/value pairs")
+                    node.properties().associate { (type, item) ->
+                        if (!type.matches(Regex("[A-Za-z0-9_.-]+"))) badRequest("invalid identifier type '$type'")
+                        type to text(item, "identifiers.$type").trim()
+                            .also { if (',' in it) badRequest("identifier values must not contain commas") }
+                    }.filterValues { it.isNotEmpty() }
                 }
                 "authors", "tags", "languages" -> {
                     if (!node.isArray) badRequest("$name must be an array of strings")
@@ -131,10 +153,26 @@ class BookMetadataService(
         "languages" to record.languages,
     )
 
+    private fun values(extras: CalibreExtras?): Map<String, Any?> = mapOf(
+        "titleSort" to extras?.titleSort,
+        "authorSort" to extras?.authorSort,
+        "description" to extras?.description,
+        "identifiers" to extras?.identifiers.orEmpty(),
+        "rating" to extras?.rating,
+        "addedAt" to extras?.addedAt,
+    )
+
     private fun toCalibreValue(name: String, value: Any?): String = when (name) {
         "authors" -> (value as List<*>).joinToString(" & ")
         "tags", "languages" -> (value as List<*>).joinToString(",")
         "seriesIndex" -> (value as? Double)?.toString().orEmpty()
+        "description" -> CommentText.toSimpleHtml(value as? String ?: "")
+        "identifiers" -> (value as? Map<*, *>)
+            ?.entries
+            ?.sortedBy { it.key.toString() }
+            ?.joinToString(",") { (type, identifier) -> "$type:$identifier" }
+            .orEmpty()
+        "rating" -> value?.toString().orEmpty()
         else -> value?.toString().orEmpty()
     }
 
@@ -148,6 +186,12 @@ class BookMetadataService(
             "publisher" to "publisher",
             "pubdate" to "pubdate",
             "languages" to "languages",
+            "titleSort" to "title_sort",
+            "authorSort" to "author_sort",
+            "description" to "comments",
+            "identifiers" to "identifiers",
+            "rating" to "rating",
+            "addedAt" to "timestamp",
         )
     }
 }
