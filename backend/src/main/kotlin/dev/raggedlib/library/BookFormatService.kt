@@ -38,7 +38,6 @@ class BookFormatService(
     }
 
     fun add(bookId: Long, file: MultipartFile, replace: Boolean): BookDetails {
-        val library = editableLibrary(bookId)
         val format = Formats.fromFilename(file.originalFilename.orEmpty())
             ?: badRequest("upload a Calibre ebook format")
         if (file.isEmpty) badRequest("format file is empty")
@@ -48,23 +47,54 @@ class BookFormatService(
         val tempFile = temporaryFile(format)
         try {
             file.transferTo(tempFile)
-            return writeLock.withLibrary(library.root) {
-                val current = editableBook(bookId, library.id)
-                val exists = format in current.formatPaths
-                if (exists && !replace) {
-                    throw ApiException(HttpStatus.CONFLICT, "book already has $format; confirm replacement")
-                }
-                writer.addFormat(library, current.book.calibreId, tempFile, replace = exists && replace)
-                val updated = readBack(library.root, current.book.calibreId)
-                val currentSource = current.book.sourceFormat ?: Formats.choose(current.formatPaths.keys)
-                val nextSource = Formats.choose(updated.formats.keys)
-                val reindex = nextSource != currentSource || (exists && format == currentSource)
-                save(current, updated, nextSource, reindex, if (exists) "REPLACE_FORMAT" else "ADD_FORMAT")
-                if (reindex) ingest.enqueue(bookId)
-                details.details(bookId)
-            }
+            return addStaged(bookId, listOf(tempFile), replace)
         } finally {
             tempFile.deleteIfExists()
+        }
+    }
+
+    fun addStaged(bookId: Long, files: List<Path>, replace: Boolean): BookDetails {
+        if (files.isEmpty()) badRequest("choose at least one format")
+        val formats = files.map { file ->
+            val format = Formats.fromFilename(file.fileName.toString()) ?: badRequest("upload a Calibre ebook format")
+            if (!Files.isRegularFile(file) || Files.size(file) == 0L) badRequest("format file is empty")
+            if (Files.size(file) > props.upload.maxFormatSize.toBytes()) {
+                badRequest("format file must be no larger than ${props.upload.maxFormatSize}")
+            }
+            format
+        }
+        if (formats.size != formats.toSet().size) badRequest("upload contains more than one file for the same format")
+        val library = editableLibrary(bookId)
+        return writeLock.withLibrary(library.root) {
+            val current = editableBook(bookId, library.id)
+            val replacedFormats = formats.filter { it in current.formatPaths }
+            if (replacedFormats.isNotEmpty() && !replace) {
+                throw ApiException(
+                    HttpStatus.CONFLICT,
+                    "book already has ${replacedFormats.joinToString()}; confirm replacement",
+                )
+            }
+            files.zip(formats).forEach { (file, format) ->
+                writer.addFormat(
+                    library,
+                    current.book.calibreId,
+                    file,
+                    replace = replace && format in current.formatPaths,
+                )
+            }
+            val updated = readBack(library.root, current.book.calibreId)
+            val currentSource = current.book.sourceFormat ?: Formats.choose(current.formatPaths.keys)
+            val nextSource = Formats.choose(updated.formats.keys)
+            val reindex = nextSource != currentSource || currentSource in replacedFormats
+            save(
+                current,
+                updated,
+                nextSource,
+                reindex,
+                if (replacedFormats.isNotEmpty()) "REPLACE_FORMAT" else "ADD_FORMAT",
+            )
+            if (reindex) ingest.enqueue(bookId)
+            details.details(bookId)
         }
     }
 

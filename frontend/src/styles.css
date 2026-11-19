@@ -1286,6 +1286,28 @@ body.is-resizing-x * {
   margin-top: 4px;
   font-size: var(--app-font-small);
 }
+.book-upload-skip-remaining {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+.book-upload-duplicate-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.book-upload-duplicate {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.book-upload-duplicate-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .book-upload-progress {
   display: flex;
   align-items: center;

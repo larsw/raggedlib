@@ -1,6 +1,7 @@
 package dev.raggedlib.library
 
 import dev.raggedlib.calibre.CalibreMetadataSource
+import dev.raggedlib.calibre.CalibreBookIdentity
 import dev.raggedlib.calibre.Formats
 import dev.raggedlib.ingest.IngestService
 import dev.raggedlib.config.notFound
@@ -8,6 +9,7 @@ import org.slf4j.LoggerFactory
 import org.springframework.context.ApplicationEventPublisher
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import java.util.Locale
 
 @Service
 class LibraryService(
@@ -56,6 +58,19 @@ class LibraryService(
             }
         }
     }
+
+    fun syncAndFindMatchingBooks(libraryId: Long, identity: CalibreBookIdentity): List<Book> = synchronized(syncLock) {
+        val lib = registry.byId(libraryId)
+        syncOne(lib)
+        val title = normalizeIdentity(identity.title)
+        val authors = identity.authors.map(::normalizeIdentity).sorted()
+        books.findAllByLibrary(libraryId).map { it.book }.filter { book ->
+            normalizeIdentity(book.title) == title && book.authors.map(::normalizeIdentity).sorted() == authors
+        }
+    }
+
+    private fun normalizeIdentity(value: String) =
+        value.trim().replace(Regex("\\s+"), " ").lowercase(Locale.ROOT)
 
     private fun syncOne(lib: LibraryInfo): SyncResult {
         val snapshot = calibre.load(lib.root)

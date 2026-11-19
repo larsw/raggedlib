@@ -73,12 +73,13 @@ class CalibreMetadataWriter(
         }
 
     /** Adds one staged directory as a single logical book; null means Calibre refused a duplicate. */
-    fun addBook(library: LibraryInfo, directory: Path): Long? = writeLock.withLibrary(library.root) {
+    fun addBook(library: LibraryInfo, directory: Path, allowDuplicates: Boolean = false): Long? = writeLock.withLibrary(library.root) {
         val result = processRunner.run(
-            listOf(
-                props.tools.calibredb, "add", "--library-path", library.root.toString(),
-                "--one-book-per-directory", "--recurse", directory.toString(),
-            ),
+            buildList {
+                addAll(listOf(props.tools.calibredb, "add", "--library-path", library.root.toString()))
+                if (allowDuplicates) add("--duplicates")
+                addAll(listOf("--one-book-per-directory", "--recurse", directory.toString()))
+            },
             props.tools.calibredbTimeout,
         )
         check(result.exitCode == 0) {

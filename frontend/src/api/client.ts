@@ -7,6 +7,8 @@ import type {
   BookActivityPage,
   Book,
   BookDetails,
+  BookUploadChoice,
+  BookUploadDecisionResult,
   BookUploadResult,
   BookMetadataFields,
   BookMetadataOriginalFields,
@@ -260,6 +262,11 @@ export const api = {
     files.forEach((file) => form.append("files", file, file.name));
     return (await send(`/libraries/${libraryId}/books`, { method: "POST", body: form })).json() as Promise<BookUploadResult>;
   },
+  decideBookUpload: (libraryId: number, pendingId: string, choice: BookUploadChoice, bookId?: number) =>
+    postJson<BookUploadDecisionResult>(`/libraries/${libraryId}/books/${encodeURIComponent(pendingId)}/decision`, {
+      choice,
+      ...(bookId === undefined ? {} : { bookId }),
+    }),
   removeBookFormat: async (id: number, format: string) =>
     (await send(`/books/${id}/formats/${encodeURIComponent(format)}`, { method: "DELETE" })).json() as Promise<BookDetails>,
   metadataSuggestions: (libraryId: number, signal?: AbortSignal) =>
