@@ -4,11 +4,15 @@ import dev.raggedlib.auth.Access
 import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.chat.ChatRequest
 import dev.raggedlib.chat.ChatService
+import dev.raggedlib.config.ApiException
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.ingest.IngestService
+import dev.raggedlib.library.BookMetadataService
+import dev.raggedlib.library.BookMetadataSnapshot
 import dev.raggedlib.library.BookRepository
 import dev.raggedlib.library.BookStatus
 import dev.raggedlib.library.LibraryRegistry
+import dev.raggedlib.library.MetadataUpdateRequest
 import dev.raggedlib.search.ScoreKind
 import dev.raggedlib.search.SearchRequest
 import dev.raggedlib.search.SearchService
@@ -18,13 +22,16 @@ import org.slf4j.LoggerFactory
 import org.springframework.ai.mcp.annotation.McpTool
 import org.springframework.ai.mcp.annotation.McpTool.McpAnnotations
 import org.springframework.ai.mcp.annotation.McpToolParam
+import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Component
 import org.springframework.web.reactive.function.client.WebClientResponseException
+import tools.jackson.databind.JsonNode
+import tools.jackson.databind.ObjectMapper
 
 /**
  * MCP tools over the library: passage search, grounded answers, and book/tag listings so an agent can narrow a
- * search to specific books. All read-only; nothing here starts indexing or changes the library. Each needs the
- * `library:read` scope and sees only the libraries the API key (and its owner) can.
+ * search to specific books. Search and listing tools need `library:read`; book metadata tools need `library:edit`.
+ * Each sees only the libraries the API key (and its owner) can access.
  */
 @Component
 class LibraryTools(
@@ -35,6 +42,8 @@ class LibraryTools(
     private val props: RaggedlibProperties,
     private val libraries: LibraryRegistry,
     private val access: Access,
+    private val metadata: BookMetadataService,
+    private val mapper: ObjectMapper,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -98,6 +107,19 @@ class LibraryTools(
         val totalPassages: Long,
         val indexingRunning: Boolean,
         val note: String,
+    )
+
+    data class MetadataConflict(
+        val original: Any?,
+        val current: Any?,
+        val requested: Any?,
+    )
+
+    data class MetadataUpdateResult(
+        val status: String,
+        val message: String,
+        val snapshot: BookMetadataSnapshot?,
+        val conflicts: Map<String, MetadataConflict>,
     )
 
     @McpTool(
@@ -233,6 +255,64 @@ the same text as another (duplicateOf), which is searched in its place.""",
             BookInfo(b.id, b.libraryId, names[b.libraryId] ?: "?", b.title, b.authors, b.tags, b.publisher, b.languages,
                 b.pubdate?.atZone(java.time.ZoneOffset.UTC)?.year, b.status, b.chunkCount, b.duplicateOf)
         })
+    }
+
+    @McpTool(
+        name = "get_book_metadata",
+        title = "Get editable book metadata",
+        description = """Get every editable Calibre metadata field for a book. Pass the returned `original` object to
+update_book_metadata so it can detect fields changed since this snapshot was read.""",
+        annotations = McpAnnotations(title = "Get editable book metadata", readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = false),
+    )
+    fun getBookMetadata(
+        @McpToolParam(description = "Book id from list_books.")
+        bookId: Long,
+    ): BookMetadataSnapshot = metadata.snapshot(bookId)
+
+    @McpTool(
+        name = "update_book_metadata",
+        title = "Update book metadata",
+        description = """Update only the supplied editable metadata fields. `original` must contain the values for
+those same fields from get_book_metadata. If Calibre changed one since then, the result has status `conflict`, with
+the original, current and requested values for each conflicting field; no fields are written in that case.""",
+        annotations = McpAnnotations(title = "Update book metadata", readOnlyHint = false, destructiveHint = false, idempotentHint = false, openWorldHint = false),
+    )
+    fun updateBookMetadata(
+        @McpToolParam(description = "Book id from list_books.")
+        bookId: Long,
+        @McpToolParam(description = "Object of fields to change, for example {\"tags\":[\"history\"]}.")
+        fields: Map<String, Any?>,
+        @McpToolParam(description = "The original values for exactly the fields being changed, copied from get_book_metadata.")
+        original: Map<String, Any?>,
+    ): MetadataUpdateResult {
+        access.requireScope(ApiScope.LIBRARY_EDIT)
+        val request = MetadataUpdateRequest(
+            fields = fields.mapValues { (_, value) -> mapper.valueToTree<JsonNode>(value) },
+            original = original.mapValues { (_, value) -> mapper.valueToTree<JsonNode>(value) },
+        )
+        return try {
+            metadata.update(bookId, request)
+            MetadataUpdateResult(
+                status = "updated",
+                message = "Metadata updated for book $bookId.",
+                snapshot = metadata.snapshot(bookId),
+                conflicts = emptyMap(),
+            )
+        } catch (e: ApiException) {
+            if (e.status != HttpStatus.CONFLICT) throw e
+            val currentValues = (e.details as? Map<*, *>)?.get("conflicts") as? Map<*, *> ?: emptyMap<Any?, Any?>()
+            val conflicts = currentValues.mapNotNull { (field, current) ->
+                (field as? String)?.let {
+                    it to MetadataConflict(original[it], current, fields[it])
+                }
+            }.toMap()
+            MetadataUpdateResult(
+                status = "conflict",
+                message = e.message ?: "Metadata changed in Calibre; no fields were written.",
+                snapshot = metadata.snapshot(bookId),
+                conflicts = conflicts,
+            )
+        }
     }
 
     @McpTool(

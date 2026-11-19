@@ -56,6 +56,8 @@ class McpSecurity {
             "list_libraries" to ApiScope.LIBRARY_READ,
             "list_tags" to ApiScope.LIBRARY_READ,
             "library_status" to ApiScope.LIBRARY_READ,
+            "get_book_metadata" to ApiScope.LIBRARY_EDIT,
+            "update_book_metadata" to ApiScope.LIBRARY_EDIT,
             "list_favorite_lists" to ApiScope.FAVORITES_READ,
             "get_favorite_list" to ApiScope.FAVORITES_READ,
             "create_favorite_list" to ApiScope.FAVORITES_WRITE,

@@ -715,6 +715,122 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `MCP metadata tools enforce edit access detect conflicts and log the key`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val curator = as_("curator")
+        val editKey = curator.post(
+            "/api/me/api-keys",
+            mapOf("name" to "mcp metadata", "scopes" to listOf("library:edit"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+        val readerKey = curator.post(
+            "/api/me/api-keys",
+            mapOf("name" to "metadata reader", "scopes" to listOf("library:read"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+        val tools = curator.tools(editKey)
+        assertTrue(listOf("get_book_metadata", "update_book_metadata").all { it in tools }, "$tools")
+        assertFalse(listOf("get_book_metadata", "update_book_metadata").any { it in curator.tools(readerKey) })
+        assertTrue(curator.callTool("get_book_metadata", mapOf("bookId" to alphaBook), readerKey).path("isError").asBoolean())
+
+        fun content(result: JsonNode): JsonNode =
+            result.path("structuredContent").takeIf { it.isObject }
+                ?: Browser.MAPPER.readTree(result.path("content").path(0).path("text").asString())
+
+        val initial = content(curator.callTool("get_book_metadata", mapOf("bookId" to alphaBook), editKey))
+        assertFalse(initial.path("isError").asBoolean(), initial.toString())
+        val originalTags = initial.path("original").path("tags").values().map { it.asString() }
+        val originalTitleSortNode = initial.path("original").path("titleSort")
+        val originalTitleSort = if (originalTitleSortNode.isNull) null else originalTitleSortNode.asString()
+        val changedTags = listOf("Calibre changed ${System.nanoTime()}")
+
+        try {
+            val externalEdit = curator.put(
+                "/api/books/$alphaBook/metadata",
+                mapOf("fields" to mapOf("tags" to changedTags), "original" to mapOf("tags" to originalTags)),
+            )
+            assertEquals(200, externalEdit.status, externalEdit.body)
+
+            val conflict = content(
+                curator.callTool(
+                    "update_book_metadata",
+                    mapOf("bookId" to alphaBook, "fields" to mapOf("tags" to listOf("Agent change")),
+                        "original" to mapOf("tags" to originalTags)),
+                    editKey,
+                ),
+            )
+            assertEquals("conflict", conflict.path("status").asString(), conflict.toString())
+            assertEquals(originalTags, conflict.path("conflicts").path("tags").path("original").values().map { it.asString() })
+            assertEquals(changedTags, conflict.path("conflicts").path("tags").path("current").values().map { it.asString() })
+            assertEquals(changedTags, as_("curator").get("/api/books/$alphaBook").json.path("tags").values().map { it.asString() })
+
+            val fresh = conflict.path("snapshot").path("original").path("tags").values().map { it.asString() }
+            val updated = content(
+                curator.callTool(
+                    "update_book_metadata",
+                    mapOf("bookId" to alphaBook, "fields" to mapOf("tags" to listOf("Agent change")),
+                        "original" to mapOf("tags" to fresh)),
+                    editKey,
+                ),
+            )
+            assertEquals("updated", updated.path("status").asString(), updated.toString())
+            val personalActor = as_("curator").get("/api/books/$alphaBook/details").json.path("lastEdit").path("actor").asString()
+            assertTrue(personalActor.contains("via key 'mcp metadata'"), personalActor)
+
+            val systemKeyResponse = as_("admin").post(
+                "/api/admin/api-keys",
+                mapOf("name" to "mcp system metadata", "scopes" to listOf("library:edit"), "libraryIds" to listOf(alpha)),
+            )
+            val systemKey = systemKeyResponse.json.path("rawKey").asString()
+            val systemSnapshot = content(as_("admin").callTool("get_book_metadata", mapOf("bookId" to alphaBook), systemKey))
+            val systemTitleSort = systemSnapshot.path("original").path("titleSort")
+            val systemTitleSortValue = if (systemTitleSort.isNull) null else systemTitleSort.asString()
+            val systemUpdate = content(
+                as_("admin").callTool(
+                    "update_book_metadata",
+                    mapOf("bookId" to alphaBook, "fields" to mapOf("titleSort" to "MCP system sort"),
+                        "original" to mapOf("titleSort" to systemTitleSortValue)),
+                    systemKey,
+                ),
+            )
+            assertEquals("updated", systemUpdate.path("status").asString(), systemUpdate.toString())
+            val systemActor = as_("curator").get("/api/books/$alphaBook/details").json.path("lastEdit").path("actor").asString()
+            assertEquals("system key 'mcp system metadata'", systemActor)
+
+            val readOnlyKey = as_("admin").post(
+                "/api/admin/api-keys",
+                mapOf("name" to "read-only library metadata", "scopes" to listOf("library:edit"), "libraryIds" to listOf(beta)),
+            ).json.path("rawKey").asString()
+            val readOnly = as_("admin").callTool("get_book_metadata", mapOf("bookId" to betaBook), readOnlyKey)
+            assertTrue(readOnly.path("isError").asBoolean(), readOnly.toString())
+            assertTrue(readOnly.toString().contains("no metadata.db"), readOnly.toString())
+
+            val librarian = as_("librarian")
+            assertEquals(200, librarian.put("/api/libraries/$alpha/editing", mapOf("paused" to true)).status)
+            try {
+                val paused = curator.callTool("get_book_metadata", mapOf("bookId" to alphaBook), editKey)
+                assertTrue(paused.path("isError").asBoolean(), paused.toString())
+                assertTrue(paused.toString().contains("Editing is paused"), paused.toString())
+            } finally {
+                assertEquals(200, librarian.put("/api/libraries/$alpha/editing", mapOf("paused" to false)).status)
+            }
+        } finally {
+            val latest = content(curator.callTool("get_book_metadata", mapOf("bookId" to alphaBook), editKey))
+            val latestTags = latest.path("original").path("tags").values().map { it.asString() }
+            val latestTitleSort = latest.path("original").path("titleSort")
+            val latestTitleSortValue = if (latestTitleSort.isNull) null else latestTitleSort.asString()
+            assertEquals(
+                200,
+                curator.put(
+                    "/api/books/$alphaBook/metadata",
+                    mapOf(
+                        "fields" to mapOf("tags" to originalTags, "titleSort" to originalTitleSort),
+                        "original" to mapOf("tags" to latestTags, "titleSort" to latestTitleSortValue),
+                    ),
+                ).status,
+            )
+        }
+    }
+
+    @Test
     fun `metadata source lookup defaults on is admin configurable and checks caller access`() {
         val settings = as_("admin")
         val initialSettings = settings.get("/api/settings")
