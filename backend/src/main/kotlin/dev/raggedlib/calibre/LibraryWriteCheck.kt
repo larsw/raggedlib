@@ -19,10 +19,8 @@ object LibraryWriteCheck {
     /** Why [root] can't be written, or null if it can. [supportedSchema] null = unknown (no calibre-debug). */
     fun readOnlyReason(root: Path, supportedSchema: Int?): String? {
         if (!Files.isDirectory(root)) return "library directory $root not found"
-        val probe = root.resolve(".raggedlib-write-test")
         try {
-            Files.deleteIfExists(probe)
-            Files.createFile(probe)
+            val probe = Files.createTempFile(root, ".raggedlib-write-test-", ".tmp")
             Files.delete(probe)
         } catch (e: Exception) {
             return "can't create files in $root (mounted read-only, or owned by another user?): ${e.javaClass.simpleName}"

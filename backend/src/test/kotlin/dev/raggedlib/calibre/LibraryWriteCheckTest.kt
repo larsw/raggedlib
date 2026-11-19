@@ -35,6 +35,16 @@ class LibraryWriteCheckTest {
     }
 
     @Test
+    fun `write probe does not remove a file with the old probe name`() {
+        library(28)
+        val existingProbe = root.resolve(".raggedlib-write-test")
+        Files.writeString(existingProbe, "keep")
+
+        assertNull(LibraryWriteCheck.readOnlyReason(root, supportedSchema = 28))
+        assertEquals("keep", Files.readString(existingProbe))
+    }
+
+    @Test
     fun `a schema newer than the installed Calibre knows keeps it read-only`() {
         library(29)
         val reason = assertNotNull(LibraryWriteCheck.readOnlyReason(root, supportedSchema = 28))
