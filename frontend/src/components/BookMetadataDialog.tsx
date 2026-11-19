@@ -2,6 +2,7 @@ import { Button, ButtonGroup, Callout, Classes, Dialog, DialogBody, DialogFooter
 import { useEffect, useRef, useState } from "react";
 import { api, ApiError, errorMessage } from "../api/client";
 import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataSuggestions } from "../api/types";
+import { formatBytes } from "../lib/format";
 import { BookCover } from "./BookCover";
 import { MetadataValueSelect } from "./MetadataValueSelect";
 
@@ -216,8 +217,12 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
   const [navigating, setNavigating] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
   const [coverError, setCoverError] = useState<string>();
+  const [formatBusy, setFormatBusy] = useState(false);
+  const [formatError, setFormatError] = useState<string>();
   const [confirmClose, setConfirmClose] = useState(false);
   const coverInput = useRef<HTMLInputElement>(null);
+  const formatInput = useRef<HTMLInputElement>(null);
+  const fileBusy = coverBusy || formatBusy;
 
   useEffect(() => {
     if (!isOpen) return;
@@ -251,7 +256,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     identifierLines.every((line) => /^[A-Za-z0-9_.-]+:\s*[^,]+$/.test(line));
 
   const save = async (close: boolean): Promise<boolean> => {
-    if (coverBusy) return false;
+    if (fileBusy) return false;
     if (Object.keys(conflicts).length > 0) {
       setError("Resolve each metadata conflict before saving.");
       return false;
@@ -335,8 +340,38 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     }
   };
 
+  const changeFormat = async (
+    action: () => Promise<BookDetails>,
+    replaceAfterConflict?: () => Promise<BookDetails>,
+  ) => {
+    setFormatBusy(true);
+    setFormatError(undefined);
+    try {
+      try {
+        onSaved(await action(), false);
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 409 && replaceAfterConflict && window.confirm(err.message))) throw err;
+        onSaved(await replaceAfterConflict(), false);
+      }
+    } catch (err) {
+      setFormatError(errorMessage(err));
+    } finally {
+      setFormatBusy(false);
+    }
+  };
+
+  const uploadFormat = (file: File) => {
+    const format = file.name.split(".").pop()?.toUpperCase() ?? "";
+    const exists = book.formats.some((value) => value.toUpperCase() === format);
+    if (exists && !window.confirm(`Replace its ${format}?`)) return;
+    void changeFormat(
+      () => api.uploadBookFormat(book.id, file, exists),
+      exists ? undefined : () => api.uploadBookFormat(book.id, file, true),
+    );
+  };
+
   const requestClose = () => {
-    if (saving || navigating || coverBusy) return;
+    if (saving || navigating || fileBusy) return;
     if (confirmClose) {
       setConfirmClose(false);
     } else if (Object.keys(fields).length > 0) {
@@ -377,9 +412,9 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
             <DialogFooter
               actions={
                 <>
-                  <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving || coverBusy} />
-                  <Button type="button" text="Discard" onClick={onClose} disabled={saving || coverBusy} />
-                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving || coverBusy || Object.keys(conflicts).length > 0} />
+                  <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving || fileBusy} />
+                  <Button type="button" text="Discard" onClick={onClose} disabled={saving || fileBusy} />
+                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving || fileBusy || Object.keys(conflicts).length > 0} />
                 </>
               }
             />
@@ -389,7 +424,9 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
           <DialogBody>
           <div className="metadata-editor-layout">
             <div className="metadata-editor-cover">
-              <BookCover bookId={book.id} hasCover={book.hasCover} width={176} title={book.title} coverVersion={book.lastModified} natural />
+              <div className="metadata-editor-cover-preview">
+                <BookCover bookId={book.id} hasCover={book.hasCover} width={176} title={book.title} coverVersion={book.lastModified} natural />
+              </div>
               <div className="metadata-editor-cover-actions">
                 <input
                   ref={coverInput}
@@ -403,13 +440,13 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                   }}
                 />
                 <ButtonGroup vertical fill>
-                  <Button type="button" small text="Browse…" onClick={() => coverInput.current?.click()} disabled={saving || navigating || coverBusy} />
+                  <Button type="button" small text="Browse…" onClick={() => coverInput.current?.click()} disabled={saving || navigating || fileBusy} />
                   <Button
                     type="button"
                     small
                     text="Remove"
                     onClick={() => void changeCover(() => api.removeBookCover(book.id))}
-                    disabled={saving || navigating || coverBusy || !book.hasCover}
+                    disabled={saving || navigating || fileBusy || !book.hasCover}
                   />
                 </ButtonGroup>
                 <label className="metadata-editor-cover-format-label" htmlFor="metadata-cover-format">Use cover from file</label>
@@ -417,7 +454,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                   id="metadata-cover-format"
                   className="metadata-editor-cover-format"
                   value=""
-                  disabled={saving || navigating || coverBusy || book.formats.length === 0}
+                  disabled={saving || navigating || fileBusy || book.formats.length === 0}
                   onChange={(event) => {
                     const format = event.currentTarget.value;
                     if (format) void changeCover(() => api.useBookCoverFromFormat(book.id, format));
@@ -431,6 +468,49 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
                   Cover changes are saved immediately, separately from metadata.
                 </p>
+              </div>
+              <div className="metadata-editor-formats">
+                <strong>Formats</strong>
+                <input
+                  ref={formatInput}
+                  type="file"
+                  accept=".azw,.azw1,.azw3,.azw4,.cb7,.cbc,.cbr,.cbz,.chm,.docx,.djvu,.epub,.fb2,.fbz,.html,.htmlz,.imp,.kepub,.lit,.lrf,.lrx,.mobi,.odt,.oebzip,.pdb,.pdf,.pml,.pmlz,.pobi,.prc,.rtf,.snb,.tpz,.txt,.txtz,.updb,.zip"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) uploadFormat(file);
+                  }}
+                />
+                {book.formats.length === 0 ? (
+                  <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>No formats</p>
+                ) : (
+                  <ul>
+                    {book.formats.map((format) => (
+                      <li key={format}>
+                        <span>{format} <span className={Classes.TEXT_MUTED}>{formatBytes(calibre?.fileSizes[format])}</span></span>
+                        <Button
+                          type="button"
+                          small
+                          variant="minimal"
+                          text="Remove"
+                          aria-label={`Remove ${format}`}
+                          disabled={saving || navigating || fileBusy}
+                          onClick={() => void changeFormat(() => api.removeBookFormat(book.id, format))}
+                        />
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                <Button
+                  type="button"
+                  small
+                  text="Add format"
+                  onClick={() => formatInput.current?.click()}
+                  disabled={saving || navigating || fileBusy}
+                />
+                {formatBusy && <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Updating formats…</p>}
+                {formatError && <Callout intent={Intent.DANGER} icon="error" compact>{formatError}</Callout>}
               </div>
             </div>
             <div className="metadata-editor-fields">
@@ -548,7 +628,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-left"
                 aria-label="Previous book"
                 title="Save changes and open the previous book"
-                disabled={!navigation.previous || saving || navigating || coverBusy || Object.keys(conflicts).length > 0}
+                disabled={!navigation.previous || saving || navigating || fileBusy || Object.keys(conflicts).length > 0}
                 onClick={() => void step(-1)}
               />
               <Button
@@ -556,7 +636,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-right"
                 aria-label="Next book"
                 title="Save changes and open the next book"
-                disabled={!navigation.next || saving || navigating || coverBusy || Object.keys(conflicts).length > 0}
+                disabled={!navigation.next || saving || navigating || fileBusy || Object.keys(conflicts).length > 0}
                 onClick={() => void step(1)}
               />
             </ButtonGroup>
@@ -565,14 +645,14 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
           <DialogFooter
             actions={
               <>
-              <Button type="button" text="Cancel" onClick={requestClose} disabled={saving || navigating || coverBusy} />
+              <Button type="button" text="Cancel" onClick={requestClose} disabled={saving || navigating || fileBusy} />
               <Button
                 type="submit"
                 intent={Intent.PRIMARY}
                 icon="floppy-disk"
                 text="Save"
                 loading={saving}
-                disabled={saving || navigating || coverBusy || Object.keys(conflicts).length > 0 || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
+                disabled={saving || navigating || fileBusy || Object.keys(conflicts).length > 0 || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
               />
             </>
             }

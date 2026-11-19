@@ -171,6 +171,11 @@ class IngestService(
         }
     }
 
+    /** A book whose final format was removed has no passages to keep; clear them before returning to the editor. */
+    fun noFormats(bookId: Long) {
+        empty(bookId, BookStatus.SKIPPED, "Book has no formats")
+    }
+
     fun stop(): IngestStatus {
         if (run != null) stopRequested = true
         return status()
@@ -393,6 +398,11 @@ class IngestService(
     private fun embedAndStore(ex: Extracted) {
         val row = ex.row
         val id = row.book.id
+        val current = books.find(id) ?: return
+        if (current.formatPaths.isEmpty()) {
+            noFormats(id)
+            return
+        }
         active[id] = ActiveBook(id, row.book.libraryId, row.book.title, "EMBEDDING", ex.chunks.size)
         books.setStatus(id, BookStatus.EMBEDDING, null, ex.format)
         if (storeAsDuplicate(ex)) return
@@ -438,11 +448,19 @@ class IngestService(
         }
         val dependents = books.duplicatesOf(id)
         val storeStart = System.nanoTime()
+        var storedSuccessfully = false
         tx.executeWithoutResult {
+            val current = books.findForUpdate(id)
+            if (current == null || current.formatPaths.isEmpty()) return@executeWithoutResult
             chunks.deleteForBookExcept(id, keep)
             chunks.insert(id, row.book.title, row.book.authors, toWrite, all)
             books.markIndexed(id, ex.chunks.size, ex.format, ex.ocrPages)
             bookVectors.refresh(id) // after markIndexed: computed_at must not predate indexed_at
+            storedSuccessfully = true
+        }
+        if (!storedSuccessfully) {
+            if (books.find(id)?.formatPaths?.isEmpty() == true) noFormats(id)
+            return
         }
         log.debug("Stored book {} in {} ms", id, (System.nanoTime() - storeStart) / 1_000_000)
         sessionChunks.addAndGet(ex.chunks.size.toLong())
@@ -490,16 +508,29 @@ class IngestService(
         val minShare = props.ingest.duplicateMinShare
         if (minShare <= 0.0) return false
         val id = ex.row.book.id
+        val current = books.find(id) ?: return true
+        if (current.formatPaths.isEmpty()) {
+            noFormats(id)
+            return true
+        }
         val hashes = ex.chunks.mapTo(HashSet()) { Duplicates.md5(it.text) }
         val keeper = Duplicates.keeper(id, ex.chunks.size, hashes.size, chunks.booksContaining(hashes, id), minShare, MIN_SHARED)
             ?: return false
         val keeperTitle = books.find(keeper.bookId)?.book?.title ?: "#${keeper.bookId}"
         val share = keeper.shared * 100 / hashes.size
         val marked = tx.execute {
+            val latest = books.findForUpdate(id) ?: return@execute false
+            if (latest.formatPaths.isEmpty()) return@execute false
             books.markDuplicate(id, keeper.bookId, "same text as “$keeperTitle” (#${keeper.bookId}): $share% of its passages", ex.format)
                 .also { if (it) chunks.deleteForBook(id) }
         } == true
-        if (!marked) return false // the copy was removed meanwhile: index this one
+        if (!marked) {
+            if (books.find(id)?.formatPaths?.isEmpty() == true) {
+                noFormats(id)
+                return true
+            }
+            return false // the copy was removed meanwhile: index this one
+        }
         log.info("Book {} '{}' duplicates book {} '{}' ({}% of {} passages); not indexed", id, ex.row.book.title.take(60),
             keeper.bookId, keeperTitle.take(60), share, hashes.size)
         sessionProcessed.incrementAndGet()

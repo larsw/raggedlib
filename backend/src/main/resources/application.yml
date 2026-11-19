@@ -27,8 +27,8 @@ spring:
       enabled: true
   servlet:
     multipart:
-      max-file-size: 10MB
-      max-request-size: 11MB
+      max-file-size: ${RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE:500MB}
+      max-request-size: ${RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE:501MB}
   mvc:
     async:
       request-timeout: 30m
@@ -98,6 +98,8 @@ raggedlib:
   libraries: []
   tmp-dir: ${java.io.tmpdir}
   metadata-source: auto          # auto (calibredb, fallback metadata.db) | calibredb | sqlite
+  upload:
+    max-format-size: ${RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE:500MB}
   cors-origins: http://localhost:3000
   tools:
     calibredb: calibredb

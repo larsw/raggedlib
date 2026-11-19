@@ -35,6 +35,22 @@ describe("CSRF", () => {
     expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
   });
 
+  test("format uploads and removals use the format routes", async () => {
+    respondWith(200, '{"book":{}}');
+    await api.uploadBookFormat(12, new File(["ebook"], "book.epub"));
+    respondWith(200, '{"book":{}}');
+    await api.uploadBookFormat(12, new File(["ebook"], "book.epub"), true);
+    await api.removeBookFormat(12, "PDF");
+    expect(calls.map((call) => [call.url, call.init.method])).toEqual([
+      ["/api/books/12/formats?replace=false", "PUT"],
+      ["/api/books/12/formats?replace=true", "PUT"],
+      ["/api/books/12/formats/PDF", "DELETE"],
+    ]);
+    expect(calls.slice(0, 2).every((call) => call.init.body instanceof FormData)).toBe(true);
+    expect(header(0, "content-type")).toBeNull();
+    expect([0, 1, 2].map((i) => header(i, "X-XSRF-TOKEN"))).toEqual(["tok-123", "tok-123", "tok-123"]);
+  });
+
   test("cover URLs are versioned using Calibre's last modified value", () => {
     expect(bookCoverUrl(12, "2024-01-02T03:04:05Z")).toBe("/api/books/12/cover?v=2024-01-02T03%3A04%3A05Z");
   });

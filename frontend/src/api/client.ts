@@ -249,6 +249,13 @@ export const api = {
     (await send(`/books/${id}/cover`, { method: "DELETE" })).json() as Promise<BookDetails>,
   useBookCoverFromFormat: async (id: number, format: string) =>
     (await send(`/books/${id}/cover/from-format?format=${encodeURIComponent(format)}`, { method: "POST" })).json() as Promise<BookDetails>,
+  uploadBookFormat: async (id: number, file: File, replace = false) => {
+    const form = new FormData();
+    form.append("file", file);
+    return (await send(`/books/${id}/formats?replace=${replace}`, { method: "PUT", body: form })).json() as Promise<BookDetails>;
+  },
+  removeBookFormat: async (id: number, format: string) =>
+    (await send(`/books/${id}/formats/${encodeURIComponent(format)}`, { method: "DELETE" })).json() as Promise<BookDetails>,
   metadataSuggestions: (libraryId: number, signal?: AbortSignal) =>
     getJson<MetadataSuggestions>(`/libraries/${libraryId}/metadata-values`, signal),
 
