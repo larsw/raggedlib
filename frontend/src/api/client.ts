@@ -24,6 +24,7 @@ import type {
   LayoutParams,
   Member,
   MetadataCandidate,
+  MetadataCoverLookupResult,
   MetadataSuggestions,
   Me,
   Review,
@@ -275,6 +276,8 @@ export const api = {
     getJson<MetadataSuggestions>(`/libraries/${libraryId}/metadata-values`, signal),
   metadataCandidates: (bookId: number, signal?: AbortSignal) =>
     postJson<MetadataCandidate[]>(`/books/${bookId}/metadata-candidates`, {}, signal),
+  metadataCoverCandidates: (bookId: number, signal?: AbortSignal) =>
+    postJson<MetadataCoverLookupResult>(`/books/${bookId}/cover-candidates`, {}, signal),
 
   reindex: (id: number) => postJson<Book>(`/books/${id}/reindex`),
 

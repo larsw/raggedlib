@@ -122,6 +122,15 @@ describe("CSRF", () => {
     expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
   });
 
+  test("cover lookup sends a protected POST for the selected book", async () => {
+    respondWith(200, '{"candidates":[],"timedOut":false,"failedSources":[]}');
+    await api.metadataCoverCandidates(12);
+    expect(calls[0]!.url).toBe("/api/books/12/cover-candidates");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(JSON.parse(String(calls[0]!.init.body))).toEqual({});
+    expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
+  });
+
   test("writes carry the token from the cookie, reads don't", async () => {
     respondWith(201, '{"id":1}');
     await api.createList({ name: "x" });

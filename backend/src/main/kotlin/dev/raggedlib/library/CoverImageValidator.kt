@@ -5,6 +5,8 @@ import dev.raggedlib.config.ApiException
 import java.io.ByteArrayInputStream
 import javax.imageio.ImageIO
 
+data class CoverImageInfo(val width: Int, val height: Int, val mediaType: String)
+
 object CoverImageValidator {
     const val MAX_BYTES = 10 * 1024 * 1024
     private const val MAX_DIMENSION = 10_000
@@ -12,6 +14,10 @@ object CoverImageValidator {
     private val FORMATS = setOf("jpeg", "jpg", "png", "webp")
 
     fun validate(data: ByteArray) {
+        inspect(data)
+    }
+
+    fun inspect(data: ByteArray): CoverImageInfo {
         if (data.isEmpty()) badRequest("cover image is empty")
         if (data.size > MAX_BYTES) badRequest("cover image must be no larger than 10 MB")
 
@@ -33,6 +39,13 @@ object CoverImageValidator {
                     badRequest("cover image dimensions must be at most 10,000 pixels per side and 16 megapixels")
                 }
                 if (reader.read(0) == null) badRequest("cover image is invalid")
+                val mediaType = when (reader.formatName.lowercase()) {
+                    "jpeg", "jpg" -> "image/jpeg"
+                    "png" -> "image/png"
+                    "webp" -> "image/webp"
+                    else -> badRequest("cover must be a JPEG, PNG, or WebP image")
+                }
+                return CoverImageInfo(width, height, mediaType)
             } catch (e: Exception) {
                 if (e is ApiException) throw e
                 badRequest("cover must be a valid JPEG, PNG, or WebP image")

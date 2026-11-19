@@ -4,7 +4,9 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import java.nio.file.Files
 import java.nio.file.Path
+import java.util.Base64
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertTrue
 import tools.jackson.databind.ObjectMapper
 
@@ -48,10 +50,36 @@ class CalibreMetadataLookupScriptTest {
             assertTrue(candidates[1].path("publishedDate").isNull)
             assertTrue(candidates[1].path("description").isNull)
             assertEquals(0, candidates[1].path("identifiers").size())
+
+            Files.writeString(
+                request,
+                """{"title":"The Example","authors":["A. Writer"],"identifiers":{"isbn":"9780000000001"},"mode":"covers"}""",
+            )
+            val coverProcess = ProcessBuilder(
+                "calibre-debug", "-e", runner.toString(), "--", script.toString(), request.toString(),
+            ).redirectErrorStream(true).start()
+            val coverOutput = coverProcess.inputStream.bufferedReader().use { it.readText() }
+            assertEquals(0, coverProcess.waitFor(), coverOutput)
+            val coverJson = coverOutput.lineSequence().last { it.trimStart().startsWith("{") }
+            val coverResult = ObjectMapper().readTree(coverJson)
+            val covers = coverResult.path("candidates")
+            val coverSources = covers.values().map { it.path("source").asString() }.toSet()
+
+            assertFalse(coverResult.path("timedOut").asBoolean())
+            assertEquals(0, coverResult.path("failedSources").size())
+            assertEquals(2, covers.size(), coverResult.toString())
+            assertEquals(setOf("Stub Cover Source A", "Stub Cover Source B"), coverSources)
+            assertTrue(
+                covers.values().all { Base64.getDecoder().decode(it.path("image").asString()).startsWithPngSignature() },
+                coverResult.toString(),
+            )
         } finally {
             Files.deleteIfExists(request)
         }
     }
 
     private fun resource(path: String): Path = Path.of(javaClass.getResource(path)!!.toURI())
+
+    private fun ByteArray.startsWithPngSignature() =
+        size >= 8 && copyOfRange(0, 8).contentEquals(byteArrayOf(137.toByte(), 80, 78, 71, 13, 10, 26, 10))
 }
