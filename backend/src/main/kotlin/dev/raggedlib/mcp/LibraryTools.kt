@@ -13,6 +13,8 @@ import dev.raggedlib.library.BookRepository
 import dev.raggedlib.library.BookStatus
 import dev.raggedlib.library.LibraryRegistry
 import dev.raggedlib.library.MetadataUpdateRequest
+import dev.raggedlib.library.MetadataCandidate
+import dev.raggedlib.library.MetadataSourceLookupService
 import dev.raggedlib.search.ScoreKind
 import dev.raggedlib.search.SearchRequest
 import dev.raggedlib.search.SearchService
@@ -44,6 +46,7 @@ class LibraryTools(
     private val access: Access,
     private val metadata: BookMetadataService,
     private val mapper: ObjectMapper,
+    private val metadataLookup: MetadataSourceLookupService,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
@@ -120,6 +123,12 @@ class LibraryTools(
         val message: String,
         val snapshot: BookMetadataSnapshot?,
         val conflicts: Map<String, MetadataConflict>,
+    )
+
+    data class MetadataFetchResult(
+        val status: String,
+        val message: String,
+        val candidates: List<MetadataCandidate>,
     )
 
     @McpTool(
@@ -311,6 +320,53 @@ the original, current and requested values for each conflicting field; no fields
                 message = e.message ?: "Metadata changed in Calibre; no fields were written.",
                 snapshot = metadata.snapshot(bookId),
                 conflicts = conflicts,
+            )
+        }
+    }
+
+    @McpTool(
+        name = "fetch_book_metadata",
+        title = "Fetch metadata candidates",
+        description = """Look up metadata candidates from the configured Calibre sources, either by book id or by
+title, authors and ISBN. The book title, authors and identifiers are sent to those external metadata sources.
+No results and timeouts are returned with a clear status and message.""",
+        annotations = McpAnnotations(title = "Fetch metadata candidates", readOnlyHint = true, destructiveHint = false, idempotentHint = true, openWorldHint = true),
+    )
+    fun fetchBookMetadata(
+        @McpToolParam(description = "Existing book id from list_books. Provide this or a title-based query.", required = false)
+        bookId: Long?,
+        @McpToolParam(description = "Book title. Required for a title-based query unless an ISBN is supplied.", required = false)
+        title: String?,
+        @McpToolParam(description = "Author names to improve a title-based query.", required = false)
+        authors: List<String>?,
+        @McpToolParam(description = "ISBN to use for a title-based query.", required = false)
+        isbn: String?,
+    ): MetadataFetchResult {
+        access.requireScope(ApiScope.LIBRARY_EDIT)
+        if (bookId != null && (title != null || !authors.isNullOrEmpty() || isbn != null)) {
+            throw IllegalArgumentException("provide either bookId or title/authors/ISBN, not both")
+        }
+        return try {
+            val candidates = if (bookId != null) {
+                metadataLookup.candidates(bookId)
+            } else {
+                metadataLookup.candidates(title, authors, isbn)
+            }
+            if (candidates.isEmpty()) {
+                MetadataFetchResult(
+                    status = "no_results",
+                    message = "No metadata candidates were returned. Try another title, author or ISBN.",
+                    candidates = emptyList(),
+                )
+            } else {
+                MetadataFetchResult("found", "Found ${candidates.size} metadata candidate(s).", candidates)
+            }
+        } catch (e: ApiException) {
+            if (e.status != HttpStatus.GATEWAY_TIMEOUT) throw e
+            MetadataFetchResult(
+                status = "timeout",
+                message = e.message ?: "Metadata lookup timed out; try again.",
+                candidates = emptyList(),
             )
         }
     }

@@ -864,6 +864,39 @@ class AuthIntegrationTest {
     }
 
     @Test
+    fun `MCP metadata lookup tool is scoped and hidden while downloads are disabled`() {
+        val admin = as_("admin")
+        val initialSettings = admin.get("/api/settings")
+        assertTrue(initialSettings.json.path("metadataLookupEnabled").asBoolean())
+        val editKey = as_("curator").post(
+            "/api/me/api-keys",
+            mapOf("name" to "metadata fetcher", "scopes" to listOf("library:edit"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+        val readKey = as_("curator").post(
+            "/api/me/api-keys",
+            mapOf("name" to "metadata fetch reader", "scopes" to listOf("library:read"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+
+        assertTrue("fetch_book_metadata" in as_("curator").tools(editKey))
+        assertFalse("fetch_book_metadata" in as_("curator").tools(readKey))
+        try {
+            val disabled = admin.put("/api/settings", mapOf("metadataLookupEnabled" to false))
+            assertEquals(200, disabled.status, disabled.body)
+            assertFalse("fetch_book_metadata" in as_("curator").tools(editKey))
+            val refused = as_("curator").callTool(
+                "fetch_book_metadata",
+                mapOf("title" to "The Example", "isbn" to "9780000000001"),
+                editKey,
+            )
+            assertTrue(refused.path("isError").asBoolean(), refused.toString())
+            assertTrue(refused.toString().contains("metadata downloads are disabled"), refused.toString())
+        } finally {
+            val enabled = admin.put("/api/settings", mapOf("metadataLookupEnabled" to true))
+            assertEquals(200, enabled.status, enabled.body)
+        }
+    }
+
+    @Test
     fun `library admins can pause editing and resume it after a successful sync`() {
         assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
         val alphaLibrary = as_("admin").get("/api/libraries").json.values()

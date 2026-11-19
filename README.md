@@ -176,7 +176,7 @@ takes API keys only. The backend logs a warning at startup; keep its ports on lo
 
 The backend serves an [MCP](https://modelcontextprotocol.io) endpoint (streamable HTTP, stateless) at
 `http://localhost:3000/mcp`, through the web UI's server, or directly at `http://localhost:8090/mcp`. Six read-only
-tools search the libraries; keys with `library:edit` also get two tools for reading and updating book metadata.
+tools search the libraries; keys with `library:edit` also get tools for reading, updating and fetching book metadata.
 With a personal key, more tools reach the key owner's favorite lists and reviews.
 
 | Tool | What it does |
@@ -189,10 +189,16 @@ With a personal key, more tools reach the key owner's favorite lists and reviews
 | `library_status` | How many books are indexed and searchable |
 | `get_book_metadata` | Get every editable metadata field for a book and an `original` snapshot for conflict checks (`library:edit`) |
 | `update_book_metadata` | Change selected metadata fields using `fields` and matching `original` values; returns field-level conflicts without writing when Calibre changed one (`library:edit`) |
+| `fetch_book_metadata` | Fetch candidates by book id or title/authors/ISBN from configured Calibre sources (`library:edit`, only while metadata downloads are enabled) |
 | `list_favorite_lists`, `get_favorite_list` | The user's favorite lists and the ones others share, and a list's books (`favorites:read`) |
 | `create_favorite_list`, `add_to_favorite_list`, `add_books_to_favorite_list`, `remove_from_favorite_list` | Keep the user's lists, adding one book or several at once, or starting a new list with books (`favorites:write`) |
 | `get_book_reviews`, `list_my_reviews` | A book's reviews with the average rating; the user's own reviews (`reviews:read`) |
 | `write_book_review` | The user's review of a book: a rating 1–5 and/or a text (`reviews:write`) |
+
+`fetch_book_metadata` sends the book title, authors and identifiers (including ISBN) to the configured Calibre
+metadata providers. With a book id, these values come from the stored book; with a title-based query, they come from
+the tool arguments. This sends book search details outside the server; the global metadata-download setting
+controls whether lookup is available. Results are suggestions only and are not applied automatically.
 
 Every MCP request needs an API key, sent as `Authorization: Bearer <key>` or `X-API-Key: <key>`:
 

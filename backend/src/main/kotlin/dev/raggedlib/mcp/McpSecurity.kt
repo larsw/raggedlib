@@ -3,6 +3,7 @@ package dev.raggedlib.mcp
 import dev.raggedlib.auth.Access
 import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.auth.Caller
+import dev.raggedlib.settings.AppSettings
 import io.modelcontextprotocol.common.McpTransportContext
 import io.modelcontextprotocol.json.jackson3.JacksonMcpJsonMapper
 import io.modelcontextprotocol.server.McpSyncListFilter
@@ -41,8 +42,10 @@ class McpSecurity {
         .build()
 
     @Bean
-    fun mcpToolFilter() = McpStatelessSyncServerCustomizer { spec ->
-        spec.addToolFilter(McpSyncListFilter<McpSchema.Tool> { context, tool -> visible(context.get(CALLER) as? Caller, tool.name()) })
+    fun mcpToolFilter(settings: AppSettings) = McpStatelessSyncServerCustomizer { spec ->
+        spec.addToolFilter(McpSyncListFilter<McpSchema.Tool> { context, tool ->
+            visible(context.get(CALLER) as? Caller, tool.name(), settings.metadataLookupEnabled)
+        })
     }
 
     companion object {
@@ -58,6 +61,7 @@ class McpSecurity {
             "library_status" to ApiScope.LIBRARY_READ,
             "get_book_metadata" to ApiScope.LIBRARY_EDIT,
             "update_book_metadata" to ApiScope.LIBRARY_EDIT,
+            "fetch_book_metadata" to ApiScope.LIBRARY_EDIT,
             "list_favorite_lists" to ApiScope.FAVORITES_READ,
             "get_favorite_list" to ApiScope.FAVORITES_READ,
             "create_favorite_list" to ApiScope.FAVORITES_WRITE,
@@ -70,9 +74,10 @@ class McpSecurity {
         )
 
         /** Whether [caller] may see (and call) tool [name]; unknown tools are hidden. */
-        fun visible(caller: Caller?, name: String): Boolean {
+        fun visible(caller: Caller?, name: String, metadataLookupEnabled: Boolean = true): Boolean {
             val scope = TOOL_SCOPES[name] ?: return false
             if (caller == null || scope !in caller.scopes) return false
+            if (name == "fetch_book_metadata" && !metadataLookupEnabled) return false
             return !scope.perUser || caller.userId != null
         }
     }
