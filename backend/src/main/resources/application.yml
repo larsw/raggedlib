@@ -28,7 +28,7 @@ spring:
   servlet:
     multipart:
       max-file-size: ${RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE:500MB}
-      max-request-size: ${RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE:501MB}
+      max-request-size: ${RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE:2GB}
   mvc:
     async:
       request-timeout: 30m

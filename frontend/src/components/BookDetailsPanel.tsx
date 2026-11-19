@@ -159,6 +159,11 @@ function DetailsContent({
           <span className={Classes.TEXT_MUTED}>(through raggedlib)</span>
         </p>
       )}
+      {details.addedBy && (
+        <p className="book-last-edit">
+          Added by <strong>{details.addedBy.actor}</strong> · {formatDate(details.addedBy.at)}
+        </p>
+      )}
 
       <ButtonGroup className="book-panel-actions" fill>
         {readable ? (

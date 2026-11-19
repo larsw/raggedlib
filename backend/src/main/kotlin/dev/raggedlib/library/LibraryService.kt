@@ -44,6 +44,19 @@ class LibraryService(
         SyncResult(added, updated, removed, total, sources.joinToString("+").ifEmpty { "none" })
     }
 
+    /** Syncs one library and returns the Calibre records identified by [calibreIds], propagating sync failures. */
+    fun syncAndFindBooks(libraryId: Long, calibreIds: Set<Long>): Map<Long, Book> {
+        if (calibreIds.isEmpty()) return emptyMap()
+        return synchronized(syncLock) {
+            val lib = registry.byId(libraryId)
+            syncOne(lib)
+            val byCalibreId = books.findAllByLibrary(libraryId).associate { it.book.calibreId to it.book }
+            calibreIds.associateWith { calibreId ->
+                byCalibreId[calibreId] ?: error("Calibre added book $calibreId, but sync did not find it in library '${lib.name}'")
+            }
+        }
+    }
+
     private fun syncOne(lib: LibraryInfo): SyncResult {
         val snapshot = calibre.load(lib.root)
         val existing = books.findAllByLibrary(lib.id).associateBy { it.book.calibreId }

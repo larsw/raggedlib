@@ -7,6 +7,7 @@ import type {
   BookActivityPage,
   Book,
   BookDetails,
+  BookUploadResult,
   BookMetadataFields,
   BookMetadataOriginalFields,
   BookQuery,
@@ -253,6 +254,11 @@ export const api = {
     const form = new FormData();
     form.append("file", file);
     return (await send(`/books/${id}/formats?replace=${replace}`, { method: "PUT", body: form })).json() as Promise<BookDetails>;
+  },
+  uploadBooks: async (libraryId: number, files: File[]) => {
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file, file.name));
+    return (await send(`/libraries/${libraryId}/books`, { method: "POST", body: form })).json() as Promise<BookUploadResult>;
   },
   removeBookFormat: async (id: number, format: string) =>
     (await send(`/books/${id}/formats/${encodeURIComponent(format)}`, { method: "DELETE" })).json() as Promise<BookDetails>,

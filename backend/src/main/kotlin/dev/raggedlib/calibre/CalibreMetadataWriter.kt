@@ -6,6 +6,22 @@ import dev.raggedlib.library.LibraryInfo
 import org.springframework.stereotype.Component
 import java.nio.file.Path
 
+private const val CALIBRE_DUPLICATE_NOTICE = "The following books were not added as they already exist in the database"
+
+internal fun parseAddedCalibreBookId(stdout: String, stderr: String): Long? {
+    val added = Regex("""(?m)^Added book ids:\s*(\d+(?:\s*,\s*\d+)*)\s*$""")
+        .find(stdout)
+        ?.groupValues
+        ?.get(1)
+    if (added != null) {
+        val ids = added.split(',').map { it.trim().toLongOrNull() ?: error("calibredb returned an invalid book id: $it") }
+        check(ids.size == 1) { "calibredb added ${ids.size} books for one upload group" }
+        return ids.single()
+    }
+    if (CALIBRE_DUPLICATE_NOTICE in stderr) return null
+    error("calibredb add returned neither an added book id nor a duplicate result: ${stderr.take(500)}${stdout.take(500)}")
+}
+
 @Component
 class CalibreMetadataWriter(
     private val props: RaggedlibProperties,
@@ -55,6 +71,21 @@ class CalibreMetadataWriter(
                     "(${result.exitCode}): ${result.stderr.take(500)}"
             }
         }
+
+    /** Adds one staged directory as a single logical book; null means Calibre refused a duplicate. */
+    fun addBook(library: LibraryInfo, directory: Path): Long? = writeLock.withLibrary(library.root) {
+        val result = processRunner.run(
+            listOf(
+                props.tools.calibredb, "add", "--library-path", library.root.toString(),
+                "--one-book-per-directory", "--recurse", directory.toString(),
+            ),
+            props.tools.calibredbTimeout,
+        )
+        check(result.exitCode == 0) {
+            "calibredb add failed for library '${library.name}' (${result.exitCode}): ${result.stderr.take(500)}"
+        }
+        parseAddedCalibreBookId(result.stdout, result.stderr)
+    }
 
     fun removeFormat(library: LibraryInfo, calibreId: Long, format: String) =
         writeLock.withLibrary(library.root) {

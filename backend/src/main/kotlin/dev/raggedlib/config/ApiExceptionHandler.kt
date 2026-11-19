@@ -5,6 +5,7 @@ import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
 import org.springframework.web.bind.MissingServletRequestParameterException
+import org.springframework.web.multipart.MaxUploadSizeExceededException
 import org.springframework.web.bind.annotation.ExceptionHandler
 import org.springframework.web.bind.annotation.RestControllerAdvice
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException
@@ -43,6 +44,10 @@ class ApiExceptionHandler {
     @ExceptionHandler(ResponseStatusException::class)
     fun rse(e: ResponseStatusException) =
         ResponseEntity.status(e.statusCode).body(ErrorBody(e.reason ?: e.statusCode.toString()))
+
+    @ExceptionHandler(MaxUploadSizeExceededException::class)
+    fun uploadTooLarge() =
+        ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ErrorBody("upload exceeds the configured file or request size limit"))
 
     @ExceptionHandler(NoResourceFoundException::class)
     fun noResource(e: NoResourceFoundException) =

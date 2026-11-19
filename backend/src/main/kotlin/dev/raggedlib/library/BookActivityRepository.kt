@@ -137,4 +137,13 @@ class BookActivityRepository(
         """.trimIndent(),
         mapOf("bookId" to bookId),
     ) { rs, _ -> BookEdit(rs.getString("actor"), rs.getTimestamp("created_at").toInstant()) }.firstOrNull()
+
+    fun addedBy(bookId: Long): BookEdit? = jdbc.query(
+        """
+        select actor, created_at from book_activity
+        where book_id = :bookId and action = 'UPLOAD'
+        order by created_at asc, id asc limit 1
+        """.trimIndent(),
+        mapOf("bookId" to bookId),
+    ) { rs, _ -> BookEdit(rs.getString("actor"), rs.getTimestamp("created_at").toInstant()) }.firstOrNull()
 }

@@ -50,6 +50,17 @@ export interface BookDetails {
   duplicateOf: { id: number; title: string } | null;
   sections: { title: string; firstPage: number | null; passages: number }[]; // indexed outline, reading order
   lastEdit: { actor: string; at: string } | null; // latest metadata change made through raggedlib
+  addedBy: { actor: string; at: string } | null; // original upload through raggedlib, when known
+}
+
+export interface BookUploadItem {
+  files: string[];
+  book: Book | null;
+  alreadyInLibrary: boolean;
+}
+
+export interface BookUploadResult {
+  items: BookUploadItem[];
 }
 
 export interface BookMetadataFields {

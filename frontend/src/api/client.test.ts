@@ -51,6 +51,18 @@ describe("CSRF", () => {
     expect([0, 1, 2].map((i) => header(i, "X-XSRF-TOKEN"))).toEqual(["tok-123", "tok-123", "tok-123"]);
   });
 
+  test("book uploads send all files as multipart to the selected library", async () => {
+    respondWith(200, '{"items":[]}');
+    const files = [new File(["ebook"], "book.epub"), new File(["pdf"], "book.pdf")];
+    await api.uploadBooks(7, files);
+    expect(calls[0]!.url).toBe("/api/libraries/7/books");
+    expect(calls[0]!.init.method).toBe("POST");
+    expect(calls[0]!.init.body).toBeInstanceOf(FormData);
+    expect((calls[0]!.init.body as FormData).getAll("files")).toHaveLength(2);
+    expect(header(0, "content-type")).toBeNull();
+    expect(header(0, "X-XSRF-TOKEN")).toBe("tok-123");
+  });
+
   test("cover URLs are versioned using Calibre's last modified value", () => {
     expect(bookCoverUrl(12, "2024-01-02T03:04:05Z")).toBe("/api/books/12/cover?v=2024-01-02T03%3A04%3A05Z");
   });

@@ -136,7 +136,7 @@ interface SystemInfo {
 }
 ```
 
-`BookDetails` also includes the most recent metadata edit made through raggedlib:
+`BookDetails` also includes the most recent metadata edit made through raggedlib and the original upload attribution when it was uploaded through raggedlib:
 
 ```ts
 interface CalibreExtras {
@@ -165,6 +165,15 @@ interface BookDetails {
   duplicateOf: { id: number; title: string } | null;
   sections: { title: string; firstPage: number | null; passages: number }[];
   lastEdit: { actor: string; at: string } | null; // latest metadata or cover edit made through raggedlib
+  addedBy: { actor: string; at: string } | null;  // original raggedlib upload; null for older or external books
+}
+
+interface BookUploadResult {
+  items: {
+    files: string[];
+    book: Book | null;             // null when Calibre refused a duplicate
+    alreadyInLibrary: boolean;
+  }[];
 }
 ```
 
@@ -175,6 +184,7 @@ interface BookDetails {
 | GET  | `/api/system` | `SystemInfo` |
 | GET  | `/api/libraries` | `Library[]`: the configured Calibre libraries the caller can see, with book counts, the caller's role, writable status, and `editingPaused`. |
 | PUT | `/api/libraries/{id}/editing` | Library admin (or global admin), browser session only. Body `{ "paused": boolean }`; pausing or resuming is recorded in activity. Resume syncs that library before editing is enabled; a failed sync leaves it paused. |
+| POST | `/api/libraries/{id}/books` | `library:edit` and curator in a writable, unpaused library. Multipart `files` (repeat the field for multiple files) accepts Calibre ebook formats, grouped as one book when basenames match case-insensitively. Files are limited to `raggedlib.upload.max-format-size` (default 500 MB each); the request limit defaults to 2 GB and is configurable with `RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE`. Calibre fills available metadata and cover information; the library is synced and added books are queued for indexing. Duplicates are returned with `alreadyInLibrary: true`. Each new book gets an `UPLOAD` activity record. |
 | GET | `/api/activity?libraryId=&user=&action=&page=0&size=50` | Library admin in one or more libraries, or global admin. Returns `BookActivityPage` from administered libraries only; `libraryId`, exact actor text in `user`, action code, and paging are optional filters. Actions: `UPLOAD`, `ADD_FORMAT`, `REMOVE_FORMAT`, `REPLACE_FORMAT`, `EDIT_METADATA`, `EDIT_COVER`, `DELETE_BOOK`, `PAUSE_EDITING`, `RESUME_EDITING`. |
 | POST | `/api/library/sync?libraryId=` | Library admin. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller administers, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
 | GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library the caller can see). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |
@@ -183,10 +193,10 @@ interface BookDetails {
 | PUT | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Multipart `file` upload (JPEG, PNG or WebP, max 10 MB). Changes apply immediately. |
 | DELETE | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Removes the cover immediately. |
 | POST | `/api/books/{id}/cover/from-format?format=` | `library:edit` and curator in a writable library. Extracts and applies the embedded cover from an available book format immediately. |
-| PUT | `/api/books/{id}/formats?replace=` | `library:edit` and curator in a writable library. Multipart `file` upload of a Calibre ebook format (extension required), up to `raggedlib.upload.max-format-size` (default 500 MB). Existing formats return `409` unless `replace=true`; format changes apply immediately and re-index only when the selected source changes or is replaced. Set `RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE` to change the limit; also raise `RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE` above it. |
+| PUT | `/api/books/{id}/formats?replace=` | `library:edit` and curator in a writable library. Multipart `file` upload of a Calibre ebook format (extension required), up to `raggedlib.upload.max-format-size` (default 500 MB). Existing formats return `409` unless `replace=true`; format changes apply immediately and re-index only when the selected source changes or is replaced. Set `RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE` to change the per-file limit. |
 | DELETE | `/api/books/{id}/formats/{format}` | `library:edit` and curator in a writable library. Removes that format; removing the last format clears the book's passages immediately. |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
-| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: plain-text description and formatting flag, title/author sort, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, and `lastEdit` for the latest raggedlib metadata or cover edit. |
+| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: plain-text description and formatting flag, title/author sort, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, `lastEdit` for the latest raggedlib metadata or cover edit, and `addedBy` for the first raggedlib upload. |
 | GET | `/api/libraries/{id}/metadata-values` | Curator of the library. `MetadataSuggestions` from that library only, for author/tag/series/publisher/language autocomplete. |
 | PUT | `/api/books/{id}/metadata` | `library:edit` and curator in a writable library. Body `{ "fields": { ...changed fields }, "original": { ...starting values for exactly those fields } }`. Supported fields are `title`, `authors`, `tags`, `series`, `seriesIndex`, `publisher`, `pubdate`, `languages`, `titleSort`, `authorSort`, `description`, `identifiers`, `rating`, and `addedAt`. Sort fields accept `null` to reset to Calibre's automatic sort; rating is 0–5 in half-star increments and is converted to Calibre's 0–10 scale; identifiers are a type/value object; `addedAt` is an ISO timestamp. Description text is written as simple HTML only when edited. Under the library write lock, raggedlib compares each changed field's `original` value with the current Calibre value. If any differs, it refuses the entire save with `409` and `{ "error": "...", "details": { "conflicts": { "field": currentValue } } }`; otherwise it writes only changed fields, preserving external edits to untouched fields. Successful saves read the book back, record an activity entry, and requeue only title changes or language changes on books with OCR pages. Returns updated `BookDetails`; `403` if the caller lacks permission or the library is read-only. |
 | POST | `/api/books/{id}/reindex` | Library admin of the book's library. Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |

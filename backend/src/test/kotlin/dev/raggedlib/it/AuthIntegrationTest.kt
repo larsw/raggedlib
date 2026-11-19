@@ -161,6 +161,110 @@ class AuthIntegrationTest {
 
     private fun meOf(name: String) = as_(name).get("/api/me").also { assertEquals(200, it.status, it.body) }.json
 
+    @Test
+    fun `book upload requires curator role and library edit scope`() {
+        val path = "/api/libraries/$alpha/books"
+        val part = Browser.MultipartPart("files", "book.epub", "application/epub+zip", byteArrayOf(1))
+
+        assertEquals(403, as_("reader").postMultipart(path, listOf(part)).status)
+
+        val key = as_("curator").post(
+            "/api/me/api-keys",
+            mapOf("name" to "read-only uploader", "scopes" to listOf("library:read"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+        assertEquals(403, as_("curator").postMultipart(path, listOf(part), key).status)
+
+        val editKey = as_("curator").post(
+            "/api/me/api-keys",
+            mapOf("name" to "edit-only uploader", "scopes" to listOf("library:edit"), "libraryIds" to listOf(alpha)),
+        ).json.path("rawKey").asString()
+        assertEquals(404, as_("curator").postMultipart("/api/libraries/9223372036854775807/books", listOf(part), editKey).status)
+    }
+
+    @Test
+    fun `book uploads group formats report duplicates attribute the uploader and accept edit keys`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val alphaLibrary = as_("admin").get("/api/libraries").json.values()
+            .first { it.path("name").asString() == "Alpha" }
+        assumeTrue(alphaLibrary.path("writable").asBoolean(), alphaLibrary.path("readOnlyReason").asString())
+
+        val title = "Upload group ${System.nanoTime()}"
+        val groupedFiles = listOf(
+            Browser.MultipartPart("files", "$title.epub", "application/epub+zip", epubBytes(title, "Upload Author")),
+            Browser.MultipartPart("files", "$title.txt", "text/plain", "Plain text format.".toByteArray()),
+        )
+        val curator = as_("curator")
+        val uploaded = curator.postMultipart("/api/libraries/$alpha/books", groupedFiles)
+        assertEquals(200, uploaded.status, uploaded.body)
+        val item = uploaded.json.path("items")[0]
+        assertEquals(2, item.path("book").path("formats").size())
+        val bookId = item.path("book").path("id").asLong()
+        val details = curator.get("/api/books/$bookId/details")
+        assertEquals(200, details.status, details.body)
+        assertEquals(meOf("curator").path("displayName").asString(), details.json.path("addedBy").path("actor").asString())
+        assertTrue(details.json.path("addedBy").path("at").isTextual)
+        assertEquals(1L, jdbc.queryForObject(
+            "select count(*) from book_activity where book_id = :id and action = 'UPLOAD'",
+            mapOf("id" to bookId), Long::class.java,
+        ))
+
+        val duplicate = curator.postMultipart("/api/libraries/$alpha/books", groupedFiles)
+        assertEquals(200, duplicate.status, duplicate.body)
+        assertTrue(duplicate.json.path("items")[0].path("alreadyInLibrary").asBoolean())
+        assertTrue(duplicate.json.path("items")[0].path("book").isNull)
+
+        val key = curator.post(
+            "/api/me/api-keys",
+            mapOf(
+                "name" to "book uploader",
+                "scopes" to listOf("library:edit"),
+                "libraryIds" to listOf(alpha),
+            ),
+        ).json.path("rawKey").asString()
+        val keyTitle = "API key upload ${System.nanoTime()}"
+        val keyUpload = Browser.MultipartPart(
+            "files",
+            "$keyTitle.epub",
+            "application/epub+zip",
+            epubBytes(keyTitle, "Key Author"),
+        )
+        val keyResult = curator.postMultipart("/api/libraries/$alpha/books", listOf(keyUpload), key)
+        assertEquals(200, keyResult.status, keyResult.body)
+        assertFalse(keyResult.json.path("items")[0].path("alreadyInLibrary").asBoolean())
+    }
+
+    private fun epubBytes(title: String, author: String): ByteArray = ByteArrayOutputStream().also { output ->
+        ZipOutputStream(output).use { zip ->
+            val mime = "application/epub+zip".toByteArray()
+            val crc = java.util.zip.CRC32().apply { update(mime) }
+            zip.putNextEntry(ZipEntry("mimetype").apply {
+                method = ZipEntry.STORED
+                size = mime.size.toLong()
+                compressedSize = mime.size.toLong()
+                this.crc = crc.value
+            })
+            zip.write(mime)
+            zip.closeEntry()
+            fun entry(name: String, content: String) {
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(content.toByteArray())
+                zip.closeEntry()
+            }
+            entry(
+                "META-INF/container.xml",
+                """<?xml version="1.0"?><container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container"><rootfiles><rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/></rootfiles></container>""",
+            )
+            entry(
+                "OEBPS/content.opf",
+                """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">upload-${title.hashCode()}</dc:identifier><dc:title>$title</dc:title><dc:creator>$author</dc:creator><dc:language>en</dc:language></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>""",
+            )
+            entry(
+                "OEBPS/chapter.xhtml",
+                """<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>Upload test passage.</p></body></html>""",
+            )
+        }
+    }.toByteArray()
+
     private fun rolesOf(name: String): Map<String, String> =
         meOf(name).path("libraries").values().associate { it.path("name").asString() to it.path("role").asString() }
 

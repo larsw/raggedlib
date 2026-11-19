@@ -73,6 +73,12 @@ This pause is a safety switch, not automatic detection: inside the backend's con
 Calibre GUI is open on the host. Don't resume until desktop Calibre has closed; otherwise the GUI and raggedlib could
 work from stale copies and overwrite each other's changes.
 
+Curators can add books from the Library tab with **Add books** or by dropping files there. Files with the same basename
+and different Calibre ebook extensions become formats of one book. The default limit is 500 MB per file; set
+`RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE` to change it. Multipart requests default to 2 GB total; set
+`RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE` when uploading more or larger formats together. New books are synced and queued
+for indexing immediately. Scripts can use `POST /api/libraries/{id}/books` with an API key that has `library:edit`.
+
 ### Develop on the host
 
 ```bash

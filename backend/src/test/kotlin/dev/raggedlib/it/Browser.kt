@@ -26,6 +26,8 @@ class Browser(private val base: String) {
         fun header(name: String) = headers.entries.firstOrNull { it.key.equals(name, ignoreCase = true) }?.value?.firstOrNull()
     }
 
+    data class MultipartPart(val field: String, val filename: String, val contentType: String, val bytes: ByteArray)
+
     /** Signs in through the OIDC flow: app -> dex login form -> dex -> app callback -> the app's home. */
     fun login(email: String, password: String): Browser {
         var res = raw(HttpRequest.newBuilder(URI("$base/api/auth/login/oidc")).GET())
@@ -75,6 +77,27 @@ class Browser(private val base: String) {
             .header("X-XSRF-TOKEN", xsrfToken() ?: error("no CSRF token"))
             .PUT(HttpRequest.BodyPublishers.ofByteArray(body))
         return raw(request)
+    }
+
+    fun postMultipart(path: String, parts: List<MultipartPart>, key: String? = null): Response {
+        val boundary = "raggedlib-integration-boundary"
+        if (key == null && xsrfToken() == null) get("/api/me")
+        val body = ByteArrayOutputStream().apply {
+            for (part in parts) {
+                write("--$boundary\r\n".toByteArray(StandardCharsets.UTF_8))
+                write("Content-Disposition: form-data; name=\"${part.field}\"; filename=\"${part.filename}\"\r\n".toByteArray(StandardCharsets.UTF_8))
+                write("Content-Type: ${part.contentType}\r\n\r\n".toByteArray(StandardCharsets.UTF_8))
+                write(part.bytes)
+                write("\r\n".toByteArray(StandardCharsets.UTF_8))
+            }
+            write("--$boundary--\r\n".toByteArray(StandardCharsets.UTF_8))
+        }.toByteArray()
+        val request = HttpRequest.newBuilder(URI(base + path))
+            .header("Accept", "application/json")
+            .header("Content-Type", "multipart/form-data; boundary=$boundary")
+        if (key != null) request.header("Authorization", "Bearer $key")
+        else request.header("X-XSRF-TOKEN", xsrfToken() ?: error("no CSRF token"))
+        return raw(request.POST(HttpRequest.BodyPublishers.ofByteArray(body)))
     }
 
     /** A JSON-RPC call to the MCP endpoint with an API key (or none). */
