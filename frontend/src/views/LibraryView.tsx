@@ -14,7 +14,7 @@ import {
 } from "@blueprintjs/core";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { api, bookFileUrl } from "../api/client";
-import { BOOK_STATUSES, type Book, type BookSort, type BookStatus } from "../api/types";
+import { BOOK_STATUSES, type Book, type BookDetails, type BookSort, type BookStatus } from "../api/types";
 import { useApp } from "../AppContext";
 import { BookCover } from "../components/BookCover";
 import { BookDetailsPanel } from "../components/BookDetailsPanel";
@@ -143,6 +143,44 @@ export function LibraryView({ active }: { active: boolean }) {
 
   const total = books.data?.total ?? 0;
   const pageCount = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const pageData = books.data;
+  const setPageData = books.setData;
+  const stepMetadataBook = useCallback(async (direction: -1 | 1): Promise<BookDetails> => {
+    const index = pageData?.items.findIndex((b) => b.id === selectedId) ?? -1;
+    if (!pageData || index < 0) throw new Error("This book is no longer in the current library list.");
+
+    const adjacent = index + direction;
+    if (adjacent >= 0 && adjacent < pageData.items.length) {
+      return api.bookDetails(pageData.items[adjacent]!.id);
+    }
+
+    const targetPage = page + direction;
+    if (targetPage < 0 || targetPage >= pageCount) throw new Error("There are no more books in this direction.");
+    const result = await api.books({
+      q: query || undefined,
+      status: status || undefined,
+      tag: tag || undefined,
+      publisher: publisher || undefined,
+      libraryId: library?.id,
+      sort: sortParam(sort, descending),
+      page: targetPage,
+      size: PAGE_SIZE,
+    });
+    const target = direction > 0 ? result.items[0] : result.items[result.items.length - 1];
+    if (!target) throw new Error("The next page has no books; refresh the library and try again.");
+    const details = await api.bookDetails(target.id);
+    setPage(targetPage);
+    setPageData(result);
+    return details;
+  }, [pageData, selectedId, page, pageCount, query, status, tag, publisher, library?.id, sort, descending, setPageData]);
+  const selectedIndex = pageData?.items.findIndex((b) => b.id === selectedId) ?? -1;
+  const canStepMetadata = !books.loading && selectedIndex >= 0;
+  const metadataNavigation = selectedId == null ? undefined : {
+    previous: canStepMetadata && (selectedIndex > 0 || page > 0),
+    next: canStepMetadata && (selectedIndex < (pageData?.items.length ?? 0) - 1 || page < pageCount - 1),
+    step: stepMetadataBook,
+  };
+  const [editMetadataRequest, setEditMetadataRequest] = useState(0);
   const filtered = !!(query || status || tag || publisher);
   // provenance only matters when books from more than one library can appear side by side
   const showLibraryColumn = !library && libraries.length > 1;
@@ -177,12 +215,29 @@ export function LibraryView({ active }: { active: boolean }) {
     setPublisher("");
   };
 
+  const onLibraryKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape" && selectedId != null && !e.defaultPrevented) {
+      setSelectedId(null);
+      return;
+    }
+    if (e.key.toLowerCase() !== "e" || e.altKey || e.ctrlKey || e.metaKey || e.repeat || e.defaultPrevented) return;
+    if (books.loading) return;
+    const target = e.target as HTMLElement;
+    if (target.isContentEditable || target.closest("input, textarea, select, button, a, [role='button'], [contenteditable='true']")) return;
+    const rowId = target.closest<HTMLElement>("tr.library-row")?.dataset.bookId;
+    const id = rowId ? Number(rowId) : selectedId;
+    const book = books.data?.items.find((item) => item.id === id);
+    const bookLibrary = libraries.find((item) => item.id === book?.libraryId);
+    if (!book || !bookLibrary?.writable || !roleAtLeast(roleIn(book.libraryId), "CURATOR")) return;
+    e.preventDefault();
+    setSelectedId(book.id);
+    setEditMetadataRequest((request) => request + 1);
+  };
+
   return (
     <div
       className={`library-view${panel.dragging || columns.dragging ? " is-resizing" : ""}`}
-      onKeyDown={(e) => {
-        if (e.key === "Escape" && selectedId != null && !e.defaultPrevented) setSelectedId(null);
-      }}
+      onKeyDown={onLibraryKeyDown}
     >
       <div className="view-toolbar library-toolbar">
         <InputGroup
@@ -293,6 +348,7 @@ export function LibraryView({ active }: { active: boolean }) {
                 return (
                   <tr
                     key={b.id}
+                    data-book-id={b.id}
                     className={`library-row${b.id === selectedId ? " is-selected" : ""}`}
                     tabIndex={0}
                     aria-current={b.id === selectedId ? "true" : undefined}
@@ -413,6 +469,8 @@ export function LibraryView({ active }: { active: boolean }) {
               books.setData((p) => p && { ...p, items: p.items.map((b) => (b.id === updated.id ? updated : b)) });
               setRefreshKey((k) => k + 1);
             }}
+            metadataNavigation={metadataNavigation}
+            editMetadataRequest={editMetadataRequest}
           />
         </div>
       )}

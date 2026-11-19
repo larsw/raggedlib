@@ -1,4 +1,4 @@
-import { Button, Callout, Classes, Dialog, DialogBody, DialogFooter, FormGroup, InputGroup, Intent, TextArea } from "@blueprintjs/core";
+import { Button, ButtonGroup, Callout, Classes, Dialog, DialogBody, DialogFooter, FormGroup, InputGroup, Intent, TextArea } from "@blueprintjs/core";
 import { useEffect, useState } from "react";
 import { api, errorMessage } from "../api/client";
 import type { Book, BookDetails, BookMetadataFields, CalibreExtras, MetadataSuggestions } from "../api/types";
@@ -9,8 +9,13 @@ interface Props {
   isOpen: boolean;
   book: Book;
   calibre: CalibreExtras | null;
+  navigation?: {
+    previous: boolean;
+    next: boolean;
+    step: (direction: -1 | 1) => Promise<void>;
+  };
   onClose: () => void;
-  onSaved: (details: BookDetails) => void;
+  onSaved: (details: BookDetails, close: boolean) => void;
 }
 
 interface Draft {
@@ -91,13 +96,15 @@ function changedFields(initial: Draft, draft: Draft): BookMetadataFields {
   };
 }
 
-export function BookMetadataDialog({ isOpen, book, calibre, onClose, onSaved }: Props) {
+export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose, onSaved }: Props) {
   const [initial, setInitial] = useState(() => draftFrom(book, calibre));
   const [draft, setDraft] = useState(() => draftFrom(book, calibre));
   const [suggestions, setSuggestions] = useState<MetadataSuggestions>();
   const [suggestionError, setSuggestionError] = useState<string>();
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [navigating, setNavigating] = useState(false);
+  const [confirmClose, setConfirmClose] = useState(false);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -106,6 +113,8 @@ export function BookMetadataDialog({ isOpen, book, calibre, onClose, onSaved }: 
     setDraft(next);
     setError(null);
     setSaving(false);
+    setNavigating(false);
+    setConfirmClose(false);
     setSuggestions(undefined);
     setSuggestionError(undefined);
     const ctrl = new AbortController();
@@ -126,31 +135,97 @@ export function BookMetadataDialog({ isOpen, book, calibre, onClose, onSaved }: 
   const validIdentifiers = fields.identifiers === undefined ||
     identifierLines.every((line) => /^[A-Za-z0-9_.-]+:\s*[^,]+$/.test(line));
 
-  const save = async () => {
-    if (!draft.title.trim()) return setError("A book needs a title.");
-    if (!validSeriesIndex) return setError("Series number must be a non-negative number.");
-    if (!validRating) return setError("Rating must be between 0 and 5 in half-star increments.");
-    if (!validAddedAt) return setError("Date added must be valid.");
-    if (!validIdentifiers) return setError("Enter identifiers as one type: value pair per line; values must not contain commas.");
+  const save = async (close: boolean): Promise<boolean> => {
+    if (!draft.title.trim()) {
+      setError("A book needs a title.");
+      return false;
+    }
+    if (!validSeriesIndex) {
+      setError("Series number must be a non-negative number.");
+      return false;
+    }
+    if (!validRating) {
+      setError("Rating must be between 0 and 5 in half-star increments.");
+      return false;
+    }
+    if (!validAddedAt) {
+      setError("Date added must be valid.");
+      return false;
+    }
+    if (!validIdentifiers) {
+      setError("Enter identifiers as one type: value pair per line; values must not contain commas.");
+      return false;
+    }
+    if (Object.keys(fields).length === 0) {
+      if (close) onClose();
+      return true;
+    }
     setSaving(true);
     setError(null);
     try {
-      onSaved(await api.updateBookMetadata(book.id, fields));
+      onSaved(await api.updateBookMetadata(book.id, fields), close);
+      setConfirmClose(false);
+      return true;
     } catch (err) {
       setError(errorMessage(err));
+      return false;
+    } finally {
       setSaving(false);
     }
   };
 
+  const requestClose = () => {
+    if (saving || navigating) return;
+    if (confirmClose) {
+      setConfirmClose(false);
+    } else if (Object.keys(fields).length > 0) {
+      setConfirmClose(true);
+    } else {
+      onClose();
+    }
+  };
+
+  const step = async (direction: -1 | 1) => {
+    if (!navigation) return;
+    setNavigating(true);
+    setError(null);
+    try {
+      if (Object.keys(fields).length > 0 && !(await save(false))) return;
+      await navigation.step(direction);
+    } catch (err) {
+      setError(errorMessage(err));
+    } finally {
+      setNavigating(false);
+    }
+  };
+
   return (
-    <Dialog isOpen={isOpen} onClose={onClose} title="Edit metadata" icon="edit" className="metadata-editor-dialog">
+    <Dialog isOpen={isOpen} onClose={requestClose} title="Edit metadata" icon="edit" className="metadata-editor-dialog">
       <form
         onSubmit={(e) => {
           e.preventDefault();
-          void save();
+          if (!confirmClose) void save(true);
         }}
       >
-        <DialogBody>
+        {confirmClose ? (
+          <>
+            <DialogBody>
+              <p>Save changes to "{book.title}" before closing?</p>
+              {error && <Callout intent={Intent.DANGER} icon="error" compact>{error}</Callout>}
+            </DialogBody>
+            <DialogFooter
+              actions={
+                <>
+                  <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving} />
+                  <Button type="button" text="Discard" onClick={onClose} disabled={saving} />
+                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving} />
+                </>
+              }
+            />
+          </>
+        ) : (
+          <>
+          <DialogBody>
           <div className="metadata-editor-layout">
             <div className="metadata-editor-cover">
               <BookCover bookId={book.id} hasCover={book.hasCover} width={176} title={book.title} natural />
@@ -249,22 +324,44 @@ export function BookMetadataDialog({ isOpen, book, calibre, onClose, onSaved }: 
               )}
             </div>
           </div>
-        </DialogBody>
-        <DialogFooter
-          actions={
-            <>
-              <Button text="Cancel" onClick={onClose} disabled={saving} />
+          {navigation && (
+            <ButtonGroup className="metadata-editor-navigation">
+              <Button
+                type="button"
+                icon="chevron-left"
+                aria-label="Previous book"
+                title="Save changes and open the previous book"
+                disabled={!navigation.previous || saving || navigating}
+                onClick={() => void step(-1)}
+              />
+              <Button
+                type="button"
+                icon="chevron-right"
+                aria-label="Next book"
+                title="Save changes and open the next book"
+                disabled={!navigation.next || saving || navigating}
+                onClick={() => void step(1)}
+              />
+            </ButtonGroup>
+          )}
+          </DialogBody>
+          <DialogFooter
+            actions={
+              <>
+              <Button type="button" text="Cancel" onClick={requestClose} disabled={saving || navigating} />
               <Button
                 type="submit"
                 intent={Intent.PRIMARY}
                 icon="floppy-disk"
                 text="Save"
                 loading={saving}
-                disabled={saving || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
+                disabled={saving || navigating || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
               />
             </>
-          }
-        />
+            }
+          />
+          </>
+        )}
       </form>
     </Dialog>
   );

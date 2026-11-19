@@ -1,5 +1,5 @@
 import { AnchorButton, Button, ButtonGroup, Classes, NonIdealState, Spinner, Tag, Tooltip } from "@blueprintjs/core";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, bookFileUrl } from "../api/client";
 import type { Book, BookDetails } from "../api/types";
 import { useApp } from "../AppContext";
@@ -18,6 +18,12 @@ import { isBusyStatus, StatusTag } from "./StatusTag";
 
 const SECTIONS_SHOWN = 12;
 
+interface MetadataNavigation {
+  previous: boolean;
+  next: boolean;
+  step: (direction: -1 | 1) => Promise<BookDetails>;
+}
+
 interface Props {
   bookId: number;
   /** changes whenever the library list reloads, so status and counts stay current */
@@ -35,13 +41,22 @@ interface Props {
   /** the book was put on or taken off one of the caller's lists */
   onListsChanged?: () => void;
   onBookMetadataChanged?: (book: Book) => void;
+  metadataNavigation?: MetadataNavigation;
+  editMetadataRequest?: number;
 }
 
 /** Library's right-hand panel: one book's Calibre metadata, indexing state and indexed outline. */
 export function BookDetailsPanel(props: Props) {
-  const { bookId, refreshKey, onClose } = props;
+  const { bookId, refreshKey, onClose, editMetadataRequest } = props;
   const details = useAsync((signal) => api.bookDetails(bookId, signal), [bookId, refreshKey]);
   const [editing, setEditing] = useState(false);
+  const lastEditRequest = useRef(0);
+  useEffect(() => {
+    if (editMetadataRequest === undefined || editMetadataRequest === lastEditRequest.current) return;
+    lastEditRequest.current = editMetadataRequest;
+    setEditing(true);
+  }, [editMetadataRequest]);
+  const metadataNavigation = props.metadataNavigation;
   // keep showing the previous book while the next one loads, but not after an error
   const d = details.data?.book.id === bookId || details.loading ? details.data : undefined;
 
@@ -64,15 +79,24 @@ export function BookDetailsPanel(props: Props) {
           <DetailsContent details={d} {...props} onEditMetadata={() => setEditing(true)} />
         )}
       </div>
-      {d && (
+      {d?.book.id === bookId && (
         <BookMetadataDialog
           isOpen={editing}
           book={d.book}
           calibre={d.calibre}
+          navigation={metadataNavigation ? {
+            previous: metadataNavigation.previous,
+            next: metadataNavigation.next,
+            step: async (direction) => {
+              const next = await metadataNavigation.step(direction);
+              details.setData(next);
+              props.onSelectBook(next.book.id);
+            },
+          } : undefined}
           onClose={() => setEditing(false)}
-          onSaved={(updated) => {
+          onSaved={(updated, close) => {
             details.setData(updated);
-            setEditing(false);
+            if (close) setEditing(false);
             props.onBookMetadataChanged?.(updated.book);
           }}
         />
