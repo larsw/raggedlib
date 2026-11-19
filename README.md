@@ -24,6 +24,13 @@ put `AUTH_MODE=single-user` in `.env`: no sign-in, as before raggedlib had users
 
 The library is mounted **read-only** from `~/Documents/CalibreLibrary`. Set `CALIBRE_LIBRARY` to use another path, and `CHAT_MODEL` or `EMBED_MODEL` to swap models (see `.env.example`). Changing the embedding model also means changing `vector(1024)` in the migration and re-indexing. Scanned PDFs are OCR'd in English; set `OCR_LANGUAGES` to read others too, e.g. `OCR_LANGUAGES=eng+nor+deu` (Tesseract's language codes), and rebuild the backend, which installs them.
 
+The backend image installs Calibre from its official Linux binaries, pinned to 9.18 (`CALIBRE_VERSION` and
+`CALIBRE_SHA512` in `backend/Dockerfile`), rather than the distribution's older package, so the `calibredb` and
+`ebook-convert` inside it are the same version as the desktop Calibre that maintains the libraries. To bump it, change
+both build arguments; the checksum is published at
+`https://calibre-ebook.com/signatures/calibre-<version>-x86_64.txz.sha512`. Developing on the host uses whatever
+Calibre is installed there.
+
 ### Multiple libraries
 
 raggedlib can index and search several Calibre libraries at once, as their union by default; a chooser in the navbar
