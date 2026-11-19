@@ -135,7 +135,7 @@ function DetailsContent({
   return (
     <>
       <div className="book-panel-top">
-        <BookCover bookId={book.id} hasCover={book.hasCover} width={96} title={book.title} natural />
+        <BookCover bookId={book.id} hasCover={book.hasCover} width={96} title={book.title} coverVersion={book.lastModified} natural />
         <div className="book-panel-ident">
           <h3 className="book-panel-title">{book.title}</h3>
           {book.authors.length > 0 && <div className="book-panel-authors">{book.authors.join(", ")}</div>}

@@ -50,6 +50,7 @@ data class RaggedlibProperties(
         val calibredb: String = "calibredb",
         val calibreDebug: String = "calibre-debug",
         val ebookConvert: String = "ebook-convert",
+        val ebookMeta: String = "ebook-meta",
         val pdftotext: String = "pdftotext",
         val pdftoppm: String = "pdftoppm",
         val pdfinfo: String = "pdfinfo",

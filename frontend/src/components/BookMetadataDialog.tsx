@@ -1,5 +1,5 @@
 import { Button, ButtonGroup, Callout, Classes, Dialog, DialogBody, DialogFooter, FormGroup, InputGroup, Intent, TextArea } from "@blueprintjs/core";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { api, ApiError, errorMessage } from "../api/client";
 import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataSuggestions } from "../api/types";
 import { BookCover } from "./BookCover";
@@ -214,7 +214,10 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [navigating, setNavigating] = useState(false);
+  const [coverBusy, setCoverBusy] = useState(false);
+  const [coverError, setCoverError] = useState<string>();
   const [confirmClose, setConfirmClose] = useState(false);
+  const coverInput = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -236,7 +239,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
         if (!ctrl.signal.aborted) setSuggestionError(errorMessage(err));
       });
     return () => ctrl.abort();
-  }, [book, calibre, isOpen]);
+  }, [book.id, isOpen]);
 
   const fields = changedFields(initial, draft);
   const validSeriesIndex = fields.seriesIndex == null || (Number.isFinite(fields.seriesIndex) && fields.seriesIndex >= 0);
@@ -248,6 +251,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     identifierLines.every((line) => /^[A-Za-z0-9_.-]+:\s*[^,]+$/.test(line));
 
   const save = async (close: boolean): Promise<boolean> => {
+    if (coverBusy) return false;
     if (Object.keys(conflicts).length > 0) {
       setError("Resolve each metadata conflict before saving.");
       return false;
@@ -279,7 +283,12 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setSaving(true);
     setError(null);
     try {
-      onSaved(await api.updateBookMetadata(book.id, fields, originalFields(fields, initialValues)), close);
+      const updated = await api.updateBookMetadata(book.id, fields, originalFields(fields, initialValues));
+      onSaved(updated, close);
+      const next = draftFrom(updated.book, updated.calibre);
+      setInitial(next);
+      setDraft(next);
+      setInitialValues(metadataValuesFrom(updated.book, updated.calibre));
       setConflicts({});
       setConfirmClose(false);
       return true;
@@ -314,8 +323,20 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setError(null);
   };
 
+  const changeCover = async (action: () => Promise<BookDetails>) => {
+    setCoverBusy(true);
+    setCoverError(undefined);
+    try {
+      onSaved(await action(), false);
+    } catch (err) {
+      setCoverError(errorMessage(err));
+    } finally {
+      setCoverBusy(false);
+    }
+  };
+
   const requestClose = () => {
-    if (saving || navigating) return;
+    if (saving || navigating || coverBusy) return;
     if (confirmClose) {
       setConfirmClose(false);
     } else if (Object.keys(fields).length > 0) {
@@ -356,9 +377,9 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
             <DialogFooter
               actions={
                 <>
-                  <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving} />
-                  <Button type="button" text="Discard" onClick={onClose} disabled={saving} />
-                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving || Object.keys(conflicts).length > 0} />
+                  <Button type="button" text="Keep editing" onClick={() => setConfirmClose(false)} disabled={saving || coverBusy} />
+                  <Button type="button" text="Discard" onClick={onClose} disabled={saving || coverBusy} />
+                  <Button type="button" intent={Intent.PRIMARY} text="Save" loading={saving} onClick={() => void save(true)} disabled={saving || coverBusy || Object.keys(conflicts).length > 0} />
                 </>
               }
             />
@@ -368,8 +389,49 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
           <DialogBody>
           <div className="metadata-editor-layout">
             <div className="metadata-editor-cover">
-              <BookCover bookId={book.id} hasCover={book.hasCover} width={176} title={book.title} natural />
-              <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Cover editing comes later.</p>
+              <BookCover bookId={book.id} hasCover={book.hasCover} width={176} title={book.title} coverVersion={book.lastModified} natural />
+              <div className="metadata-editor-cover-actions">
+                <input
+                  ref={coverInput}
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) void changeCover(() => api.uploadBookCover(book.id, file));
+                  }}
+                />
+                <ButtonGroup vertical fill>
+                  <Button type="button" small text="Browse…" onClick={() => coverInput.current?.click()} disabled={saving || navigating || coverBusy} />
+                  <Button
+                    type="button"
+                    small
+                    text="Remove"
+                    onClick={() => void changeCover(() => api.removeBookCover(book.id))}
+                    disabled={saving || navigating || coverBusy || !book.hasCover}
+                  />
+                </ButtonGroup>
+                <label className="metadata-editor-cover-format-label" htmlFor="metadata-cover-format">Use cover from file</label>
+                <select
+                  id="metadata-cover-format"
+                  className="metadata-editor-cover-format"
+                  value=""
+                  disabled={saving || navigating || coverBusy || book.formats.length === 0}
+                  onChange={(event) => {
+                    const format = event.currentTarget.value;
+                    if (format) void changeCover(() => api.useBookCoverFromFormat(book.id, format));
+                  }}
+                >
+                  <option value="">Choose a format…</option>
+                  {book.formats.map((format) => <option key={format} value={format}>{format}</option>)}
+                </select>
+                {coverBusy && <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Updating cover…</p>}
+                {coverError && <Callout intent={Intent.DANGER} icon="error" compact>{coverError}</Callout>}
+                <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
+                  Cover changes are saved immediately, separately from metadata.
+                </p>
+              </div>
             </div>
             <div className="metadata-editor-fields">
               <FormGroup label="Title" labelFor="metadata-title">
@@ -486,7 +548,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-left"
                 aria-label="Previous book"
                 title="Save changes and open the previous book"
-                disabled={!navigation.previous || saving || navigating || Object.keys(conflicts).length > 0}
+                disabled={!navigation.previous || saving || navigating || coverBusy || Object.keys(conflicts).length > 0}
                 onClick={() => void step(-1)}
               />
               <Button
@@ -494,7 +556,7 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                 icon="chevron-right"
                 aria-label="Next book"
                 title="Save changes and open the next book"
-                disabled={!navigation.next || saving || navigating || Object.keys(conflicts).length > 0}
+                disabled={!navigation.next || saving || navigating || coverBusy || Object.keys(conflicts).length > 0}
                 onClick={() => void step(1)}
               />
             </ButtonGroup>
@@ -503,14 +565,14 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
           <DialogFooter
             actions={
               <>
-              <Button type="button" text="Cancel" onClick={requestClose} disabled={saving || navigating} />
+              <Button type="button" text="Cancel" onClick={requestClose} disabled={saving || navigating || coverBusy} />
               <Button
                 type="submit"
                 intent={Intent.PRIMARY}
                 icon="floppy-disk"
                 text="Save"
                 loading={saving}
-                disabled={saving || navigating || Object.keys(conflicts).length > 0 || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
+                disabled={saving || navigating || coverBusy || Object.keys(conflicts).length > 0 || Object.keys(fields).length === 0 || !validSeriesIndex || !validRating || !validAddedAt || !validIdentifiers}
               />
             </>
             }

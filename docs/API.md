@@ -21,7 +21,7 @@ Every endpoint except `/api/auth/**` and `/actuator/health` needs a caller:
 Unauthenticated: `401 {"error", "loginUrl"}` (`/mcp`, or a request with a key: `401` with `WWW-Authenticate: Bearer`).
 
 Scopes (`GET /api/me/api-keys/scopes`) gate endpoints: `library:read` everything that reads libraries and books,
-`library:curate` sync/index/re-index/book vectors, `library:edit` book metadata edits (and later uploads/deletes),
+`library:curate` sync/index/re-index/book vectors, `library:edit` book metadata and cover edits,
 `favorites:read|write` `/api/lists`, `reviews:read|write` reviews.
 Key management, `/api/admin/**` and library members need a browser session.
 
@@ -62,6 +62,7 @@ interface Book {
   duplicateOf: number | null; // status DUPLICATE: the book whose passages stand in for this one (searches restricted
                               // to this book, or to a tag only it has, use that book)
   ocrPages: number;           // pages of the indexed text that came from OCR (scanned PDF pages); 0 = none
+  lastModified: string | null;// Calibre's last_modified timestamp; also versions cover URLs
 }
 
 interface Page<T> { items: T[]; total: number; page: number; size: number; }
@@ -163,7 +164,7 @@ interface BookDetails {
   calibre: CalibreExtras | null;
   duplicateOf: { id: number; title: string } | null;
   sections: { title: string; firstPage: number | null; passages: number }[];
-  lastEdit: { actor: string; at: string } | null;
+  lastEdit: { actor: string; at: string } | null; // latest metadata or cover edit made through raggedlib
 }
 ```
 
@@ -178,9 +179,12 @@ interface BookDetails {
 | POST | `/api/library/sync?libraryId=` | Library admin. Runs `calibredb list` (or reads `metadata.db`) for `libraryId`, or every library the caller administers, and upserts the books table; one library's failure doesn't block the others. Returns `{ added, updated, removed, total }` summed over all of them. Books whose calibre `last_modified` changed are reset to PENDING. |
 | GET  | `/api/books?q=&status=&tag=&publisher=&libraryId=&page=0&size=50&sort=title` | `Page<Book>`. `q` matches title/authors (case-insensitive substring). `tag` and `publisher` are exact names. `libraryId` restricts to one library (default: every library the caller can see). `sort` ∈ `title`,`author`,`publisher`,`pubdate`,`indexedAt`,`id`. |
 | GET  | `/api/books/{id}` | `Book` |
-| GET  | `/api/books/{id}/cover` | `image/jpeg` (404 if none) |
+| GET  | `/api/books/{id}/cover?v=` | `image/jpeg` (404 if none); optional version is Calibre's `last_modified` value. |
+| PUT | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Multipart `file` upload (JPEG, PNG or WebP, max 10 MB). Changes apply immediately. |
+| DELETE | `/api/books/{id}/cover` | `library:edit` and curator in a writable library. Removes the cover immediately. |
+| POST | `/api/books/{id}/cover/from-format?format=` | `library:edit` and curator in a writable library. Extracts and applies the embedded cover from an available book format immediately. |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
-| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: plain-text description and formatting flag, title/author sort, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, and `lastEdit` for the latest raggedlib metadata edit. |
+| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: plain-text description and formatting flag, title/author sort, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, and `lastEdit` for the latest raggedlib metadata or cover edit. |
 | GET | `/api/libraries/{id}/metadata-values` | Curator of the library. `MetadataSuggestions` from that library only, for author/tag/series/publisher/language autocomplete. |
 | PUT | `/api/books/{id}/metadata` | `library:edit` and curator in a writable library. Body `{ "fields": { ...changed fields }, "original": { ...starting values for exactly those fields } }`. Supported fields are `title`, `authors`, `tags`, `series`, `seriesIndex`, `publisher`, `pubdate`, `languages`, `titleSort`, `authorSort`, `description`, `identifiers`, `rating`, and `addedAt`. Sort fields accept `null` to reset to Calibre's automatic sort; rating is 0–5 in half-star increments and is converted to Calibre's 0–10 scale; identifiers are a type/value object; `addedAt` is an ISO timestamp. Description text is written as simple HTML only when edited. Under the library write lock, raggedlib compares each changed field's `original` value with the current Calibre value. If any differs, it refuses the entire save with `409` and `{ "error": "...", "details": { "conflicts": { "field": currentValue } } }`; otherwise it writes only changed fields, preserving external edits to untouched fields. Successful saves read the book back, record an activity entry, and requeue only title changes or language changes on books with OCR pages. Returns updated `BookDetails`; `403` if the caller lacks permission or the library is read-only. |
 | POST | `/api/books/{id}/reindex` | Library admin of the book's library. Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |

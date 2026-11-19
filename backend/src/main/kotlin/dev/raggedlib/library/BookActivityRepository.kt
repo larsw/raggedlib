@@ -43,11 +43,12 @@ class BookActivityRepository(
         title: String,
         actor: String,
         changes: Map<String, Map<String, Any?>>,
+        action: String = "EDIT_METADATA",
     ) {
         jdbc.update(
             """
             insert into book_activity (book_id, library_id, calibre_id, book_title, actor, action, changes)
-            values (:bookId, :libraryId, :calibreId, :title, :actor, 'EDIT_METADATA', cast(:changes as jsonb))
+            values (:bookId, :libraryId, :calibreId, :title, :actor, :action, cast(:changes as jsonb))
             """.trimIndent(),
             MapSqlParameterSource()
                 .addValue("bookId", bookId)
@@ -55,6 +56,7 @@ class BookActivityRepository(
                 .addValue("calibreId", calibreId)
                 .addValue("title", title)
                 .addValue("actor", actor)
+                .addValue("action", action)
                 .addValue("changes", mapper.writeValueAsString(changes)),
         )
     }
@@ -130,7 +132,7 @@ class BookActivityRepository(
     fun lastEdit(bookId: Long): BookEdit? = jdbc.query(
         """
         select actor, created_at from book_activity
-        where book_id = :bookId and action = 'EDIT_METADATA'
+        where book_id = :bookId and action in ('EDIT_METADATA', 'EDIT_COVER')
         order by created_at desc, id desc limit 1
         """.trimIndent(),
         mapOf("bookId" to bookId),

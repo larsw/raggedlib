@@ -2374,9 +2374,22 @@ body.is-resizing-x * {
 .metadata-editor-cover .book-cover {
   width: 100%;
 }
-.metadata-editor-cover p {
+.metadata-editor-cover-actions {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+.metadata-editor-cover-actions p {
   margin: 8px 0 0;
   text-align: center;
+}
+.metadata-editor-cover-format-label {
+  font-size: 12px;
+  font-weight: 600;
+  text-align: left;
+}
+.metadata-editor-cover-format {
+  width: 100%;
 }
 .metadata-editor-fields .bp6-form-group {
   margin-bottom: 12px;

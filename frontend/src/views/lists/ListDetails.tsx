@@ -178,7 +178,7 @@ export function ListDetails({ listId, reloadKey, selectedBookId, onSelectBook, o
                     onKeyDown={(e) => onRowKey(e, b.id)}
                   >
                     <td className="cover-cell">
-                      <BookCover bookId={b.id} hasCover={b.hasCover} width={28} title={b.title} />
+                      <BookCover bookId={b.id} hasCover={b.hasCover} width={28} title={b.title} coverVersion={b.lastModified} />
                     </td>
                     <td className="list-title-cell">
                       <div className="book-title" title={b.title}>

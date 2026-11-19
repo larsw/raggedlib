@@ -1,5 +1,5 @@
 import { Icon } from "@blueprintjs/core";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { bookCoverUrl } from "../api/client";
 
 interface Props {
@@ -8,13 +8,15 @@ interface Props {
   hasCover?: boolean;
   width?: number;
   title?: string;
+  coverVersion?: string | null;
   /** keep the image's own aspect ratio (detail views) instead of cropping it to 2:3 (thumbnails in lists) */
   natural?: boolean;
 }
 
 /** Book cover thumbnail with a neutral placeholder when missing or failing to load. */
-export function BookCover({ bookId, hasCover, width = 36, title, natural }: Props) {
+export function BookCover({ bookId, hasCover, width = 36, title, coverVersion, natural }: Props) {
   const [failed, setFailed] = useState(false);
+  useEffect(() => setFailed(false), [bookId, coverVersion]);
   const height = Math.round(width * 1.5);
   const style = { width, height };
   const imgStyle: React.CSSProperties = natural ? { width, height: "auto", maxHeight: Math.round(width * 1.8), objectFit: "contain" } : style;
@@ -29,7 +31,7 @@ export function BookCover({ bookId, hasCover, width = 36, title, natural }: Prop
     <img
       className="book-cover"
       style={imgStyle}
-      src={bookCoverUrl(bookId)}
+      src={bookCoverUrl(bookId, coverVersion)}
       alt={title ? `Cover of ${title}` : ""}
       loading="lazy"
       decoding="async"
