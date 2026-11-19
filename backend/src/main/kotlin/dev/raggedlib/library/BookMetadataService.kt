@@ -20,7 +20,10 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
-data class MetadataUpdateRequest(val fields: Map<String, JsonNode> = emptyMap())
+data class MetadataUpdateRequest(
+    val fields: Map<String, JsonNode> = emptyMap(),
+    val original: Map<String, JsonNode> = emptyMap(),
+)
 
 @Service
 class BookMetadataService(
@@ -45,40 +48,57 @@ class BookMetadataService(
 
         val requested = parse(request.fields)
         if (requested.isEmpty()) badRequest("change at least one metadata field")
+        if (request.original.keys != request.fields.keys) {
+            badRequest("provide an original value for every changed metadata field")
+        }
+        val original = parse(request.original, allowNullBaseline = true)
 
         writeLock.withLibrary(library.root) {
             val current = books.find(bookId) ?: dev.raggedlib.config.notFound("book $bookId not found")
-            val oldValues = values(current.book) + values(calibre.extras(library.root, current.book.calibreId))
-            val changed = requested.filter { (name, value) -> oldValues[name] != value }
-            if (changed.isNotEmpty()) {
+            val currentRecord = calibre.find(library.root, current.book.calibreId)
+                ?: dev.raggedlib.config.notFound("book ${current.book.calibreId} no longer exists in Calibre")
+            val oldValues = values(currentRecord) + values(calibre.extras(library.root, current.book.calibreId))
+            val merge = mergeMetadataFields(original, oldValues, requested)
+            if (merge.conflicts.isNotEmpty()) {
+                throw ApiException(
+                    HttpStatus.CONFLICT,
+                    "metadata changed in Calibre; choose which values to keep and save again",
+                    mapOf("conflicts" to merge.conflicts),
+                )
+            }
+            val changed = merge.changes
+            val updated = if (changed.isNotEmpty()) {
                 val cliFields = changed.map { (name, value) ->
                     CALIBRE_FIELDS.getValue(name) to toCalibreValue(name, value)
                 }.toMap()
                 writer.setFields(library, current.book.calibreId, cliFields)
-                val updated = calibre.find(library.root, current.book.calibreId)
+                calibre.find(library.root, current.book.calibreId)
                     ?: error("calibredb didn't return book ${current.book.calibreId} after updating it")
-                val newValues = values(updated) + values(calibre.extras(library.root, current.book.calibreId))
-                val changes = changed.keys.associateWith { name ->
-                    mapOf("old" to oldValues[name], "new" to newValues[name])
-                }
-                val titleChanged = current.book.title != updated.title
-                val languagesChanged = current.book.languages != updated.languages
-                val reindex = titleChanged || (languagesChanged && current.book.ocrPages > 0)
-                val actor = access.caller().userId?.let { access.user().label } ?: access.caller().label
-
-                tx.executeWithoutResult {
-                    books.updateMetadata(bookId, updated, current.book.sourceFormat ?: Formats.choose(updated.formats.keys), reset = reindex)
+            } else {
+                currentRecord
+            }
+            val titleChanged = current.book.title != updated.title
+            val languagesChanged = current.book.languages != updated.languages
+            val reindex = titleChanged || (languagesChanged && current.book.ocrPages > 0)
+            tx.executeWithoutResult {
+                books.updateMetadata(bookId, updated, current.book.sourceFormat ?: Formats.choose(updated.formats.keys), reset = reindex)
+                if (changed.isNotEmpty()) {
+                    val newValues = values(updated) + values(calibre.extras(library.root, current.book.calibreId))
+                    val changes = changed.keys.associateWith { name ->
+                        mapOf("old" to oldValues[name], "new" to newValues[name])
+                    }
+                    val actor = access.caller().userId?.let { access.user().label } ?: access.caller().label
                     activity.recordEdit(bookId, current.book.libraryId, current.book.calibreId, updated.title, actor, changes)
                 }
-                if (reindex) ingest.enqueue(bookId)
             }
+            if (reindex) ingest.enqueue(bookId)
         }
         return details.details(bookId)
     }
 
     private fun accessLibrary(id: Long) = access.requireLibrary(id, LibraryRole.CURATOR)
 
-    private fun parse(fields: Map<String, JsonNode>): Map<String, Any?> {
+    private fun parse(fields: Map<String, JsonNode>, allowNullBaseline: Boolean = false): Map<String, Any?> {
         if (fields.isEmpty()) badRequest("provide fields to change")
         val unknown = fields.keys - CALIBRE_FIELDS.keys
         if (unknown.isNotEmpty()) badRequest("unknown metadata field(s): ${unknown.sorted().joinToString()}")
@@ -95,13 +115,14 @@ class BookMetadataService(
                         ?: badRequest("seriesIndex must be a non-negative number")
                 }
                 "titleSort", "authorSort" -> if (node.isNull) null else text(node, name).trim()
-                "description" -> text(node, name)
+                "description" -> if (allowNullBaseline && node.isNull) null else text(node, name)
                 "rating" -> if (node.isNull) null else {
                     if (!node.isNumber) badRequest("rating must be a number or null")
                     node.doubleValue().takeIf { it.isFinite() && it in 0.0..5.0 && it * 2 % 1.0 == 0.0 }
                         ?: badRequest("rating must be between 0 and 5 in half-star increments")
                 }
                 "addedAt" -> {
+                    if (allowNullBaseline && node.isNull) return@mapValues null
                     if (node.isNull) badRequest("addedAt must be a date and time")
                     runCatching { Instant.parse(text(node, name)) }
                         .getOrElse { badRequest("addedAt must be an ISO timestamp") }
@@ -131,17 +152,6 @@ class BookMetadataService(
         return node.stringValue()
     }
 
-    private fun values(book: Book): Map<String, Any?> = mapOf(
-        "title" to book.title,
-        "authors" to book.authors,
-        "tags" to book.tags,
-        "series" to book.series,
-        "seriesIndex" to book.seriesIndex,
-        "publisher" to book.publisher,
-        "pubdate" to book.pubdate?.atZone(ZoneOffset.UTC)?.toLocalDate()?.toString(),
-        "languages" to book.languages,
-    )
-
     private fun values(record: dev.raggedlib.calibre.CalibreRecord): Map<String, Any?> = mapOf(
         "title" to record.title,
         "authors" to record.authors,
@@ -153,14 +163,17 @@ class BookMetadataService(
         "languages" to record.languages,
     )
 
-    private fun values(extras: CalibreExtras?): Map<String, Any?> = mapOf(
-        "titleSort" to extras?.titleSort,
-        "authorSort" to extras?.authorSort,
-        "description" to extras?.description,
-        "identifiers" to extras?.identifiers.orEmpty(),
-        "rating" to extras?.rating,
-        "addedAt" to extras?.addedAt,
-    )
+    private fun values(extras: CalibreExtras?): Map<String, Any?> {
+        val values = mapOf(
+            "titleSort" to extras?.titleSort,
+            "authorSort" to extras?.authorSort,
+            "description" to extras?.description,
+            "identifiers" to extras?.identifiers.orEmpty(),
+            "rating" to extras?.rating,
+            "addedAt" to extras?.addedAt,
+        )
+        return if (extras?.publisher != null) values + ("publisher" to extras.publisher) else values
+    }
 
     private fun toCalibreValue(name: String, value: Any?): String = when (name) {
         "authors" -> (value as List<*>).joinToString(" & ")

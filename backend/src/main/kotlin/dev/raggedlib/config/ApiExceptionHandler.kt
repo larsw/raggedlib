@@ -21,19 +21,24 @@ internal fun isClientDisconnect(e: Throwable): Boolean =
         .take(20)
         .any { it is AsyncRequestNotUsableException || it.javaClass.simpleName == "ClientAbortException" }
 
-class ApiException(val status: HttpStatus, message: String) : RuntimeException(message)
+class ApiException(val status: HttpStatus, message: String, val details: Any? = null) : RuntimeException(message)
 
 fun notFound(message: String): Nothing = throw ApiException(HttpStatus.NOT_FOUND, message)
 fun badRequest(message: String): Nothing = throw ApiException(HttpStatus.BAD_REQUEST, message)
 
 data class ErrorBody(val error: String)
+data class DetailedErrorBody(val error: String, val details: Any)
 
 @RestControllerAdvice
 class ApiExceptionHandler {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @ExceptionHandler(ApiException::class)
-    fun api(e: ApiException) = ResponseEntity.status(e.status).body(ErrorBody(e.message ?: e.status.reasonPhrase))
+    fun api(e: ApiException): ResponseEntity<Any> {
+        val error = e.message ?: e.status.reasonPhrase
+        val body = e.details?.let { DetailedErrorBody(error, it) } ?: ErrorBody(error)
+        return ResponseEntity.status(e.status).body<Any>(body)
+    }
 
     @ExceptionHandler(ResponseStatusException::class)
     fun rse(e: ResponseStatusException) =

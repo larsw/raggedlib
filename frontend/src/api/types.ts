@@ -68,6 +68,8 @@ export interface BookMetadataFields {
   addedAt?: string | null;
 }
 
+export type BookMetadataOriginalFields = Omit<BookMetadataFields, "description"> & { description?: string | null };
+
 export interface CalibreExtras {
   description: string | null; // plain text, paragraphs separated by blank lines
   descriptionHasFormatting: boolean; // true when editing plain text would discard richer HTML

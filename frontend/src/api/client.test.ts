@@ -83,3 +83,12 @@ describe("401", () => {
     off();
   });
 });
+
+describe("structured API errors", () => {
+  test("preserves conflict details on ApiError", async () => {
+    respondWith(409, '{"error":"metadata changed","details":{"conflicts":{"tags":["theirs"]}}}');
+    const err = (await api.books().catch((e: unknown) => e)) as ApiError;
+    expect(err.status).toBe(409);
+    expect(err.details).toEqual({ conflicts: { tags: ["theirs"] } });
+  });
+});
