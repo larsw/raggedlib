@@ -22,8 +22,8 @@ export function toGrantable(role: LibraryRole | null | undefined): GrantableRole
 /** What each role allows, for tooltips. */
 export const ROLE_HELP: Record<GrantableRole, string> = {
   viewer: "Browse, search, ask and read the library's books; review them and put them on lists",
-  curator: "Also sync the library, (re)index its books, and remove others' reviews of them",
-  admin: "Also grant and revoke roles in the library",
+  curator: "Also edit, upload and delete books in writable libraries, and remove others' reviews",
+  admin: "Also sync the library, manage indexing, and grant or revoke roles",
 };
 
 /** The caller's role in [libraryId], from a list of libraries with roles (GET /api/libraries or /api/me). */

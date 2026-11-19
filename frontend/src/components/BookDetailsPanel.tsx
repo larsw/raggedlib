@@ -9,6 +9,7 @@ import { isReaderFormat, readerFormat, type ReaderTarget } from "../lib/reader";
 import { formatRating } from "../lib/reviews";
 import { formatBytes, formatDate, formatDateTime, formatNumber, formatYear, pluralize } from "../lib/format";
 import { BookCover } from "./BookCover";
+import { BookMetadataDialog } from "./BookMetadataDialog";
 import { ErrorState } from "./ErrorState";
 import { AddToListButton } from "./lists/AddToListButton";
 import { ReviewsSection } from "./reviews/ReviewsSection";
@@ -33,12 +34,14 @@ interface Props {
   onReindex: (book: Book) => void;
   /** the book was put on or taken off one of the caller's lists */
   onListsChanged?: () => void;
+  onBookMetadataChanged?: (book: Book) => void;
 }
 
 /** Library's right-hand panel: one book's Calibre metadata, indexing state and indexed outline. */
 export function BookDetailsPanel(props: Props) {
   const { bookId, refreshKey, onClose } = props;
   const details = useAsync((signal) => api.bookDetails(bookId, signal), [bookId, refreshKey]);
+  const [editing, setEditing] = useState(false);
   // keep showing the previous book while the next one loads, but not after an error
   const d = details.data?.book.id === bookId || details.loading ? details.data : undefined;
 
@@ -58,9 +61,21 @@ export function BookDetailsPanel(props: Props) {
         ) : !d ? (
           <NonIdealState icon={<Spinner size={24} />} />
         ) : (
-          <DetailsContent details={d} {...props} />
+          <DetailsContent details={d} {...props} onEditMetadata={() => setEditing(true)} />
         )}
       </div>
+      {d && (
+        <BookMetadataDialog
+          isOpen={editing}
+          book={d.book}
+          onClose={() => setEditing(false)}
+          onSaved={(updated) => {
+            details.setData(updated);
+            setEditing(false);
+            props.onBookMetadataChanged?.(updated.book);
+          }}
+        />
+      )}
     </aside>
   );
 }
@@ -74,11 +89,14 @@ function DetailsContent({
   onAsk,
   onSearchIn,
   onReindex,
+  onEditMetadata,
   onListsChanged,
-}: Props & { details: BookDetails }) {
+}: Props & { details: BookDetails; onEditMetadata: () => void }) {
   const { book, calibre, duplicateOf, sections } = details;
   const { openReader, libraries, roleIn } = useApp();
-  const libraryName = libraries.find((l) => l.id === book.libraryId)?.name;
+  const library = libraries.find((l) => l.id === book.libraryId);
+  const libraryName = library?.name;
+  const canEdit = roleAtLeast(roleIn(book.libraryId), "CURATOR") && library?.writable === true;
   const canReindex = roleAtLeast(roleIn(book.libraryId), "ADMIN");
   const year = formatYear(book.pubdate);
   const isPdf = book.sourceFormat === "PDF";
@@ -109,6 +127,12 @@ function DetailsContent({
           )}
         </div>
       </div>
+      {details.lastEdit && (
+        <p className="book-last-edit" title="This records changes made through raggedlib.">
+          Last edited by <strong>{details.lastEdit.actor}</strong> · {formatDate(details.lastEdit.at)}{" "}
+          <span className={Classes.TEXT_MUTED}>(through raggedlib)</span>
+        </p>
+      )}
 
       <ButtonGroup className="book-panel-actions" fill>
         {readable ? (
@@ -133,6 +157,7 @@ function DetailsContent({
 
       <div className="book-panel-secondary">
         <AddToListButton bookId={book.id} onChanged={onListsChanged} />
+        {canEdit && <Button variant="minimal" icon="edit" text="Edit metadata" onClick={onEditMetadata} />}
         {rated && rated.averageRating != null && (
           <button
             type="button"

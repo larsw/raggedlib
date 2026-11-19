@@ -91,8 +91,8 @@ Every user has a role per library, and sees only the libraries where it has one:
 | Role | May |
 |---|---|
 | Viewer | browse, search, ask and read the library's books; review them and put them on favorite lists |
-| Curator | also sync the library, index and re-index its books, and remove other users' reviews of them |
-| Library admin | also grant and revoke roles in the library (Administration → Library members) |
+| Curator | also edit, upload and delete books in writable libraries, and remove other users' reviews |
+| Library admin | also sync the library, start/stop/retry indexing, re-index books, and grant or revoke roles (Administration → Library members) |
 | Global admin | everything, in every library: users, server settings, system-wide API keys |
 
 A user's role in a library is the highest of: one granted in the app, one mapped from a group in the identity
@@ -180,7 +180,7 @@ tools search the libraries; with a personal key, more tools reach the key owner'
 Every MCP request needs an API key, sent as `Authorization: Bearer <key>` or `X-API-Key: <key>`:
 
 - **Personal keys** (as in onto-workbench): each user mints their own in the web UI, under their name in the navbar →
-  *API keys*, choosing the scopes (`library:read`, `library:curate`, `favorites:read|write`, `reviews:read|write`),
+  *API keys*, choosing the scopes (`library:read`, `library:curate`, `library:edit`, `favorites:read|write`, `reviews:read|write`),
   optionally a subset of their libraries, and an expiry. The key is shown once; only its hash is stored. It acts as
   the user, never with more than the user's own roles, and `tools/list` shows only the tools its scopes allow.
   Revoking it takes effect at once.

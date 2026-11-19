@@ -30,14 +30,24 @@ class CalibreMetadataSource(
         }
     }
 
-    private fun viaCalibredb(libraryRoot: Path): List<CalibreRecord> {
+    /** Reads one book back from Calibre after a write. */
+    fun find(libraryRoot: Path, calibreId: Long): CalibreRecord? =
+        viaCalibredb(libraryRoot, "id:$calibreId").singleOrNull()
+
+    private fun viaCalibredb(libraryRoot: Path, search: String? = null): List<CalibreRecord> {
+        val command = buildList {
+            addAll(
+                listOf(
+                    props.tools.calibredb, "list",
+                    "--library-path", libraryRoot.toString(),
+                    "--for-machine",
+                    "--fields", "id,title,authors,formats,tags,languages,pubdate,series,series_index,cover,last_modified,publisher",
+                ),
+            )
+            if (search != null) addAll(listOf("--search", search))
+        }
         val result = processRunner.run(
-            listOf(
-                props.tools.calibredb, "list",
-                "--library-path", libraryRoot.toString(),
-                "--for-machine",
-                "--fields", "id,title,authors,formats,tags,languages,pubdate,series,series_index,cover,last_modified,publisher",
-            ),
+            command,
             props.tools.calibredbTimeout,
         )
         if (result.exitCode != 0) {

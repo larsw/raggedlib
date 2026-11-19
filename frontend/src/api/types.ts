@@ -48,6 +48,18 @@ export interface BookDetails {
   calibre: CalibreExtras | null; // null when Calibre's metadata.db can't be read
   duplicateOf: { id: number; title: string } | null;
   sections: { title: string; firstPage: number | null; passages: number }[]; // indexed outline, reading order
+  lastEdit: { actor: string; at: string } | null; // latest metadata change made through raggedlib
+}
+
+export interface BookMetadataFields {
+  title?: string;
+  authors?: string[];
+  tags?: string[];
+  series?: string | null;
+  seriesIndex?: number | null;
+  publisher?: string | null;
+  pubdate?: string | null;
+  languages?: string[];
 }
 
 export interface CalibreExtras {

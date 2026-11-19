@@ -2,6 +2,7 @@ package dev.raggedlib.it
 
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.springframework.beans.factory.annotation.Autowired
 import org.springframework.boot.test.context.SpringBootTest
 import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
@@ -40,8 +41,41 @@ class AuthIntegrationTest {
         private val appPort = freePort()
         private val dexPort = freePort()
         private val base = "http://localhost:$appPort"
+        private val calibreAvailable = commandWorks(
+            listOf(
+                "calibre-debug", "-c",
+                "from calibre.db.schema_upgrades import SchemaUpgrade as S; " +
+                    "print(max(int(m.rsplit('_', 1)[1]) for m in dir(S) if m.startswith('upgrade_version_')))",
+            ),
+        ) && commandWorks(listOf("calibredb", "--version"))
         private val libraryRoots: List<Path> = listOf(Files.createTempDirectory("rl-alpha"), Files.createTempDirectory("rl-beta"))
+        private val calibreTestUnavailableReason: String? = when {
+            !calibreAvailable -> "calibredb and calibre-debug are required"
+            else -> try {
+                runCalibredb(
+                    "add", "--empty", "--title", "Alpha Book", "--authors", "Ann Author",
+                    "--library-path", libraryRoots[0].toString(),
+                )
+                null
+            } catch (e: IllegalStateException) {
+                if (e.message?.contains("Another calibre program") == true) e.message
+                else throw e
+            }
+        }
         private const val STATIC_KEY = "static-ci-key-0123456789"
+
+        private fun commandWorks(command: List<String>): Boolean = runCatching {
+            val process = ProcessBuilder(command).redirectErrorStream(true).start()
+            process.inputStream.bufferedReader().use { it.readText() }
+            process.waitFor() == 0
+        }.getOrDefault(false)
+
+        private fun runCalibredb(vararg args: String): String {
+            val process = ProcessBuilder(listOf("calibredb") + args).redirectErrorStream(true).start()
+            val output = process.inputStream.bufferedReader().use { it.readText() }
+            check(process.waitFor() == 0) { "calibredb ${args.first()} failed: $output" }
+            return output
+        }
 
         @Container
         @JvmField
@@ -79,8 +113,10 @@ class AuthIntegrationTest {
             r.add("OIDC_ISSUER_URI") { "http://localhost:$dexPort/dex" }
             r.add("raggedlib.libraries[0].name") { "Alpha" }
             r.add("raggedlib.libraries[0].path") { libraryRoots[0].toString() }
+            r.add("raggedlib.libraries[0].writable") { true }
             r.add("raggedlib.libraries[1].name") { "Beta" }
             r.add("raggedlib.libraries[1].path") { libraryRoots[1].toString() }
+            r.add("raggedlib.libraries[1].writable") { true }
             r.add("raggedlib.mcp.api-keys[0].name") { "ci" }
             r.add("raggedlib.mcp.api-keys[0].key") { STATIC_KEY }
             r.add("raggedlib.rerank.enabled") { false }
@@ -206,6 +242,87 @@ class AuthIntegrationTest {
         // a library admin may (nothing is running, so stopping changes nothing)
         val stop = as_("librarian").post("/api/ingest/stop")
         assertEquals(200, stop.status, stop.body)
+    }
+
+    @Test
+    fun `metadata edits require curator role and edit scope and read-only libraries explain why`() {
+        val request = mapOf("fields" to mapOf("tags" to listOf("new")))
+        assertEquals(403, as_("reader").put("/api/books/$alphaBook/metadata", request).status)
+
+        val key = as_("curator").post(
+            "/api/me/api-keys",
+            mapOf("name" to "read-only agent", "scopes" to listOf("library:read")),
+        ).json.path("rawKey").asString()
+        assertEquals(403, Browser(base).put("/api/books/$alphaBook/metadata", request, key = key).status)
+
+        val readOnly = as_("admin").put("/api/books/$betaBook/metadata", request)
+        assertEquals(403, readOnly.status)
+        assertTrue(readOnly.body.contains("no metadata.db"), readOnly.body)
+    }
+
+    @Test
+    fun `a metadata edit writes only changed fields, logs it, and sync does not requeue it`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val alphaLibrary = as_("admin").get("/api/libraries").json.values()
+            .first { it.path("name").asString() == "Alpha" }
+        assumeTrue(alphaLibrary.path("writable").asBoolean(), alphaLibrary.path("readOnlyReason").asString())
+
+        runCalibredb(
+            "set_metadata", "1", "--library-path", libraryRoots[0].toString(),
+            "--field", "title:Changed outside raggedlib",
+        )
+        val edited = as_("curator").put(
+            "/api/books/$alphaBook/metadata",
+            mapOf("fields" to mapOf("tags" to listOf("updated"))),
+        )
+        assertEquals(200, edited.status, edited.body)
+        assertEquals("Changed outside raggedlib", edited.json.path("book").path("title").asString())
+        assertEquals(listOf("updated"), edited.json.path("book").path("tags").values().map { it.asString() })
+        assertEquals("INDEXED", edited.json.path("book").path("status").asString())
+
+        val details = as_("curator").get("/api/books/$alphaBook/details").json
+        assertEquals(as_("curator").get("/api/me").json.path("displayName").asString(), details.path("lastEdit").path("actor").asString())
+        assertTrue(details.path("lastEdit").path("at").isTextual)
+        assertEquals(
+            "updated",
+            jdbc.queryForObject(
+                "select changes -> 'tags' -> 'new' ->> 0 from book_activity where book_id = :id",
+                mapOf("id" to alphaBook), String::class.java,
+            ),
+        )
+
+        val sync = as_("librarian").post("/api/library/sync?libraryId=$alpha")
+        assertEquals(200, sync.status, sync.body)
+        assertEquals("INDEXED", as_("curator").get("/api/books/$alphaBook").json.path("status").asString())
+        assertEquals(listOf("updated"), as_("curator").get("/api/books/$alphaBook").json.path("tags").values().map { it.asString() })
+
+        val systemKey = as_("admin").post(
+            "/api/admin/api-keys",
+            mapOf(
+                "name" to "metadata bot",
+                "scopes" to listOf("library:read", "library:edit"),
+                "libraryIds" to listOf(alpha),
+            ),
+        )
+        assertEquals(201, systemKey.status, systemKey.body)
+        val bot = Browser(base).put(
+            "/api/books/$alphaBook/metadata",
+            mapOf("fields" to mapOf("publisher" to "Bot Press")),
+            key = systemKey.json.path("rawKey").asString(),
+        )
+        assertEquals(200, bot.status, bot.body)
+        assertEquals("Bot Press", bot.json.path("book").path("publisher").asString())
+        assertTrue(
+            as_("curator").get("/api/books/$alphaBook/details").json.path("lastEdit").path("actor").asString().contains("metadata bot"),
+        )
+
+        val renamed = as_("curator").put(
+            "/api/books/$alphaBook/metadata",
+            mapOf("fields" to mapOf("title" to "Reindex this book")),
+        )
+        assertEquals(200, renamed.status, renamed.body)
+        assertEquals("Reindex this book", renamed.json.path("book").path("title").asString())
+        assertTrue(renamed.json.path("book").path("status").asString() != "INDEXED")
     }
 
     @Test

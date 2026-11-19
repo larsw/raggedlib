@@ -21,15 +21,17 @@ Every endpoint except `/api/auth/**` and `/actuator/health` needs a caller:
 Unauthenticated: `401 {"error", "loginUrl"}` (`/mcp`, or a request with a key: `401` with `WWW-Authenticate: Bearer`).
 
 Scopes (`GET /api/me/api-keys/scopes`) gate endpoints: `library:read` everything that reads libraries and books,
-`library:curate` sync/index/re-index/book vectors, `favorites:read|write` `/api/lists`, `reviews:read|write` reviews.
+`library:curate` sync/index/re-index/book vectors, `library:edit` book metadata edits (and later uploads/deletes),
+`favorites:read|write` `/api/lists`, `reviews:read|write` reviews.
 Key management, `/api/admin/**` and library members need a browser session.
 
 Roles gate data, per library: `VIEWER` < `CURATOR` < `ADMIN` (`NONE` = no access). A user's role in a library is the
 highest of: a role granted in the app, a role mapped from an IdP group (`raggedlib.auth.group-roles`), and
 `raggedlib.auth.default-library-role`; a global admin (admin claim, or granted in the app) is `ADMIN` everywhere.
-A system-wide key is `VIEWER`, or `CURATOR` with `library:curate`. A key restricted to some libraries has no role in
-the others. Viewers read; curators also watch indexing and remove reviews of their libraries' books; library admins
-also sync their libraries, start, stop and retry indexing, re-index books, and grant roles in the library. (So a
+A system-wide key is `VIEWER`, or `CURATOR` with `library:curate` or `library:edit`. A key restricted to some
+libraries has no role in the others. Viewers read; curators also watch indexing, edit/upload/delete books in writable
+libraries, and remove reviews of their libraries' books; library admins also sync their libraries, start, stop and
+retry indexing, re-index books, and grant roles in the library. (So a
 system-wide key, never a library admin, can't sync or index; a library admin's personal key with `library:curate`
 can.) A library or book the caller can't see is `404`, an action its role doesn't allow `403`.
 
@@ -128,6 +130,27 @@ interface SystemInfo {
 }
 ```
 
+`BookDetails` also includes the most recent metadata edit made through raggedlib:
+
+```ts
+interface CalibreExtras {
+  description: string | null;
+  publisher: string | null;
+  identifiers: Record<string, string>;
+  rating: number | null;
+  addedAt: string | null;
+  fileSizes: Record<string, number>;
+}
+
+interface BookDetails {
+  book: Book;
+  calibre: CalibreExtras | null;
+  duplicateOf: { id: number; title: string } | null;
+  sections: { title: string; firstPage: number | null; passages: number }[];
+  lastEdit: { actor: string; at: string } | null;
+}
+```
+
 ## Endpoints
 
 | Method | Path | Description |
@@ -139,7 +162,8 @@ interface SystemInfo {
 | GET  | `/api/books/{id}` | `Book` |
 | GET  | `/api/books/{id}/cover` | `image/jpeg` (404 if none) |
 | GET  | `/api/books/{id}/file?format=PDF` | Streams the book file (inline, correct content-type). Frontend links `.../file?format=PDF#page=12`. |
-| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: description as plain text, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, and `sections: {title, firstPage, passages}[]`, the indexed outline in reading order. |
+| GET  | `/api/books/{id}/details` | `BookDetails`: the `Book`, Calibre extras read from `metadata.db` (`calibre`: description as plain text, publisher, identifiers, rating 0.5–5, addedAt, fileSizes; null if unreadable), `duplicateOf: {id, title}` for a DUPLICATE, the indexed outline in `sections`, and `lastEdit` for the latest raggedlib metadata edit. |
+| PUT | `/api/books/{id}/metadata` | `library:edit` and curator in a writable library. Body `{ "fields": { "title"?, "authors"?, "tags"?, "series"?, "seriesIndex"?, "publisher"?, "pubdate"?, "languages"? } }` with only changed fields. Writes only those fields via `calibredb`, reads the book back, records an activity entry, and requeues only title changes or language changes on books with OCR pages. Returns updated `BookDetails`; `403` if the caller lacks permission or the library is read-only. |
 | POST | `/api/books/{id}/reindex` | Library admin of the book's library. Sets PENDING and queues the book (starting ingestion if idle); its passages stay searchable until the new ones replace them. Returns `Book`. |
 | GET  | `/api/tags?libraryId=` | `{ name: string, count: number }[]` sorted by count desc; `libraryId` restricts to one library |
 | GET  | `/api/publishers?libraryId=` | `{ name: string, count: number }[]`: publishers by number of books, like `/api/tags` (books without one are left out) |
