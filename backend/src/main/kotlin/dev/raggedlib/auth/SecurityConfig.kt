@@ -130,6 +130,8 @@ class SecurityConfig {
                     .hasAuthority(ApiScope.LIBRARY_CURATE.authority)
                 a.requestMatchers(HttpMethod.PUT, "/api/settings")
                     .access(all(hasAuthority(Authorities.ADMIN), hasAuthority(ApiScope.LIBRARY_CURATE.authority)))
+                a.requestMatchers(HttpMethod.PUT, "/api/books/*/metadata")
+                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers("/api/**").hasAuthority(ApiScope.LIBRARY_READ.authority)
                 a.anyRequest().denyAll()
             }

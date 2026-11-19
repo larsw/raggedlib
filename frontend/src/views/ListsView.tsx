@@ -143,6 +143,10 @@ export function ListsView({ active }: { active: boolean }) {
               onSearchIn={searchIn}
               onReindex={reindex}
               onListsChanged={reloadAll}
+              onBookMetadataChanged={() => {
+                setBookKey((k) => k + 1);
+                reloadAll();
+              }}
             />
           </div>
         )}

@@ -5,8 +5,8 @@ import com.fasterxml.jackson.annotation.JsonValue
 /**
  * A user's role in one library, from least to most. Each includes the ones below it:
  * - VIEWER: browse, search, ask and read the library's books; review them and put them on lists.
- * - CURATOR: also sync the library, index and re-index its books, and remove other users' reviews of them.
- * - ADMIN: also grant and revoke roles in the library.
+ * - CURATOR: also edit, upload and delete books in writable libraries, and remove other users' reviews.
+ * - ADMIN: also sync the library, manage indexing, and grant or revoke roles.
  *
  * A global admin is ADMIN in every library. NONE (no access) is never stored, only computed.
  */
@@ -32,7 +32,8 @@ enum class LibraryRole {
  */
 enum class ApiScope(@get:JsonValue val id: String, val description: String, val perUser: Boolean) {
     LIBRARY_READ("library:read", "Search, ask and browse the books of the libraries you can view", false),
-    LIBRARY_CURATE("library:curate", "Sync libraries and (re-)index books, in the libraries you curate", false),
+    LIBRARY_CURATE("library:curate", "Sync libraries and manage indexing, in the libraries you administer", false),
+    LIBRARY_EDIT("library:edit", "Upload books and edit their metadata, in the libraries you curate", false),
     FAVORITES_READ("favorites:read", "Read your favorite lists, and the lists others share", true),
     FAVORITES_WRITE("favorites:write", "Create, change and delete your favorite lists", true),
     REVIEWS_READ("reviews:read", "Read book reviews", true),

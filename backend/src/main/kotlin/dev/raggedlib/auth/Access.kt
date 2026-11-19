@@ -52,9 +52,13 @@ object RoleResolver {
         }
     }
 
-    /** A system-wide key acts as viewer, or as curator with `library:curate`; never as library admin. */
+    /** A system-wide key acts as viewer, or as curator with a library write scope; never as library admin. */
     fun systemRoles(scopes: Set<ApiScope>, libraries: Collection<LibraryInfo>): Map<Long, LibraryRole> {
-        val role = if (ApiScope.LIBRARY_CURATE in scopes) LibraryRole.CURATOR else LibraryRole.VIEWER
+        val role = if (scopes.any { it == ApiScope.LIBRARY_CURATE || it == ApiScope.LIBRARY_EDIT }) {
+            LibraryRole.CURATOR
+        } else {
+            LibraryRole.VIEWER
+        }
         return libraries.associate { it.id to role }
     }
 

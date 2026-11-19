@@ -409,6 +409,10 @@ export function LibraryView({ active }: { active: boolean }) {
             onAsk={askAbout}
             onSearchIn={searchIn}
             onReindex={(b) => reindex(b).then(() => setRefreshKey((k) => k + 1))}
+            onBookMetadataChanged={(updated) => {
+              books.setData((p) => p && { ...p, items: p.items.map((b) => (b.id === updated.id ? updated : b)) });
+              setRefreshKey((k) => k + 1);
+            }}
           />
         </div>
       )}

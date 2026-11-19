@@ -17,6 +17,8 @@ data class BookDetails(
     val duplicateOf: BookRef?,
     /** Indexed sections in reading order, with their first page (PDFs) and number of passages. */
     val sections: List<SectionInfo>,
+    /** Most recent metadata edit made through raggedlib. */
+    val lastEdit: BookEdit?,
 )
 
 data class BookRef(val id: Long, val title: String)
@@ -26,6 +28,7 @@ data class SectionInfo(val title: String, val firstPage: Int?, val passages: Int
 @Service
 class BookDetailsService(
     private val books: BookRepository,
+    private val activity: BookActivityRepository,
     private val jdbc: NamedParameterJdbcTemplate,
     private val registry: LibraryRegistry,
 ) {
@@ -42,7 +45,7 @@ class BookDetailsService(
             null
         }
         val keeper = book.duplicateOf?.let { books.find(it)?.book }?.let { BookRef(it.id, it.title) }
-        return BookDetails(book, extras, keeper, sections(id))
+        return BookDetails(book, extras, keeper, sections(id), activity.lastEdit(id))
     }
 
     /** Sections in reading order: by first page where there are pages, else by first passage. */

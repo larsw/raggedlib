@@ -17,6 +17,8 @@ import org.springframework.http.ResponseEntity
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.PostMapping
+import org.springframework.web.bind.annotation.PutMapping
+import org.springframework.web.bind.annotation.RequestBody
 import org.springframework.web.bind.annotation.RequestMapping
 import org.springframework.web.bind.annotation.RequestParam
 import org.springframework.web.bind.annotation.RestController
@@ -31,6 +33,7 @@ class BookController(
     private val library: LibraryService,
     private val paths: LibraryPaths,
     private val details: BookDetailsService,
+    private val metadata: BookMetadataService,
     private val access: Access,
 ) {
     private val sorts = setOf("title", "author", "publisher", "pubdate", "indexedAt", "id")
@@ -69,6 +72,9 @@ class BookController(
         access.requireBook(id)
         return details.details(id).let { d -> if (d.duplicateOf != null && !access.canSeeBook(d.duplicateOf.id)) d.copy(duplicateOf = null) else d }
     }
+
+    @PutMapping("/books/{id}/metadata")
+    fun updateMetadata(@PathVariable id: Long, @RequestBody req: MetadataUpdateRequest): BookDetails = metadata.update(id, req)
 
     @PostMapping("/books/{id}/reindex")
     fun reindex(@PathVariable id: Long): Book {

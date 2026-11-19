@@ -6,6 +6,7 @@ import type {
   ApiKeyRequest,
   Book,
   BookDetails,
+  BookMetadataFields,
   BookQuery,
   BookReviews,
   ClusterSpace,
@@ -222,6 +223,8 @@ export const api = {
   book: (id: number, signal?: AbortSignal) => getJson<Book>(`/books/${id}`, signal),
 
   bookDetails: (id: number, signal?: AbortSignal) => getJson<BookDetails>(`/books/${id}/details`, signal),
+  updateBookMetadata: (id: number, fields: BookMetadataFields) =>
+    putJson<BookDetails>(`/books/${id}/metadata`, { fields }),
 
   reindex: (id: number) => postJson<Book>(`/books/${id}/reindex`),
 

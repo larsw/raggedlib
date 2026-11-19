@@ -53,9 +53,10 @@ class RoleResolverTest {
     }
 
     @Test
-    fun `a system key views, or curates with library curate, and never administers`() {
+    fun `a system key views, or curates with a write scope, and never administers`() {
         assertEquals(mapOf(1L to VIEWER, 2L to VIEWER), RoleResolver.systemRoles(setOf(ApiScope.LIBRARY_READ), libs))
         assertEquals(mapOf(1L to CURATOR, 2L to CURATOR), RoleResolver.systemRoles(setOf(ApiScope.LIBRARY_READ, ApiScope.LIBRARY_CURATE), libs))
+        assertEquals(mapOf(1L to CURATOR, 2L to CURATOR), RoleResolver.systemRoles(setOf(ApiScope.LIBRARY_READ, ApiScope.LIBRARY_EDIT), libs))
     }
 
     @Test
@@ -73,6 +74,6 @@ class RoleResolverTest {
         assertFalse(VIEWER.atLeast(CURATOR))
         assertEquals(ApiScope.FAVORITES_WRITE, ApiScope.parse("favorites:write"))
         assertFailsWith<IllegalArgumentException> { ApiScope.parse("favorites:*") }
-        assertEquals(setOf(ApiScope.LIBRARY_READ, ApiScope.LIBRARY_CURATE), ApiScope.SYSTEM)
+        assertEquals(setOf(ApiScope.LIBRARY_READ, ApiScope.LIBRARY_CURATE, ApiScope.LIBRARY_EDIT), ApiScope.SYSTEM)
     }
 }
