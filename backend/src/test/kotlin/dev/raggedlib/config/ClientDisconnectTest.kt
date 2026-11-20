@@ -2,6 +2,7 @@ package dev.raggedlib.config
 
 import org.apache.catalina.connector.ClientAbortException
 import org.springframework.http.converter.HttpMessageNotWritableException
+import org.springframework.util.unit.DataSize
 import org.springframework.web.context.request.async.AsyncRequestNotUsableException
 import java.io.IOException
 import kotlin.test.Test
@@ -32,6 +33,6 @@ class ClientDisconnectTest {
 
     @Test
     fun `the handler answers nothing for a disconnect`() {
-        assertNull(ApiExceptionHandler().other(abortedWrite()))
+        assertNull(ApiExceptionHandler(DataSize.ofMegabytes(500), DataSize.ofGigabytes(2)).other(abortedWrite()))
     }
 }

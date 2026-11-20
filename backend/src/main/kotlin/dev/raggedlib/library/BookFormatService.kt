@@ -1,7 +1,6 @@
 package dev.raggedlib.library
 
 import dev.raggedlib.auth.Access
-import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.calibre.CalibreLibraryWriteLock
 import dev.raggedlib.calibre.CalibreRecord
 import dev.raggedlib.calibre.CalibreMetadataSource
@@ -10,7 +9,6 @@ import dev.raggedlib.calibre.Formats
 import dev.raggedlib.config.ApiException
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.config.badRequest
-import dev.raggedlib.config.notFound
 import dev.raggedlib.ingest.IngestService
 import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
@@ -25,6 +23,7 @@ class BookFormatService(
     private val access: Access,
     private val books: BookRepository,
     private val props: RaggedlibProperties,
+    private val limits: UploadLimits,
     private val calibre: CalibreMetadataSource,
     private val writer: CalibreMetadataWriter,
     private val writeLock: CalibreLibraryWriteLock,
@@ -33,17 +32,11 @@ class BookFormatService(
     private val tx: TransactionTemplate,
     private val details: BookDetailsService,
 ) {
-    init {
-        require(props.upload.maxFormatSize.toBytes() > 0) { "raggedlib.upload.max-format-size must be positive" }
-    }
-
     fun add(bookId: Long, file: MultipartFile, replace: Boolean): BookDetails {
         val format = Formats.fromFilename(file.originalFilename.orEmpty())
             ?: badRequest("upload a Calibre ebook format")
         if (file.isEmpty) badRequest("format file is empty")
-        if (file.size > props.upload.maxFormatSize.toBytes()) {
-            badRequest("format file must be no larger than ${props.upload.maxFormatSize}")
-        }
+        requireWithinLimit(file.originalFilename.orEmpty(), file.size, limits.maxFormatSize)
         val tempFile = temporaryFile(format)
         try {
             file.transferTo(tempFile)
@@ -58,15 +51,13 @@ class BookFormatService(
         val formats = files.map { file ->
             val format = Formats.fromFilename(file.fileName.toString()) ?: badRequest("upload a Calibre ebook format")
             if (!Files.isRegularFile(file) || Files.size(file) == 0L) badRequest("format file is empty")
-            if (Files.size(file) > props.upload.maxFormatSize.toBytes()) {
-                badRequest("format file must be no larger than ${props.upload.maxFormatSize}")
-            }
+            requireWithinLimit(file.fileName.toString(), Files.size(file), limits.maxFormatSize)
             format
         }
         if (formats.size != formats.toSet().size) badRequest("upload contains more than one file for the same format")
-        val library = editableLibrary(bookId)
+        val library = access.requireEditableBook(bookId).library
         return writeLock.withLibrary(library.root) {
-            val current = editableBook(bookId, library.id)
+            val current = access.requireEditableBook(bookId).row
             val replacedFormats = formats.filter { it in current.formatPaths }
             if (replacedFormats.isNotEmpty() && !replace) {
                 throw ApiException(
@@ -91,7 +82,7 @@ class BookFormatService(
                 updated,
                 nextSource,
                 reindex,
-                if (replacedFormats.isNotEmpty()) "REPLACE_FORMAT" else "ADD_FORMAT",
+                if (replacedFormats.isNotEmpty()) BookActivityAction.REPLACE_FORMAT else BookActivityAction.ADD_FORMAT,
             )
             if (reindex) ingest.enqueue(bookId)
             details.details(bookId)
@@ -101,33 +92,20 @@ class BookFormatService(
     fun remove(bookId: Long, format: String): BookDetails {
         val normalized = format.uppercase()
         if (!normalized.matches(Regex("[A-Z0-9]{1,10}"))) badRequest("format must be a file extension")
-        val library = editableLibrary(bookId)
+        val library = access.requireEditableBook(bookId).library
         return writeLock.withLibrary(library.root) {
-            val current = editableBook(bookId, library.id)
+            val current = access.requireEditableBook(bookId).row
             if (normalized !in current.formatPaths) badRequest("book has no $normalized format")
             writer.removeFormat(library, current.book.calibreId, normalized)
             val updated = readBack(library.root, current.book.calibreId)
             val currentSource = current.book.sourceFormat ?: Formats.choose(current.formatPaths.keys)
             val nextSource = Formats.choose(updated.formats.keys)
             val reindex = updated.formats.isNotEmpty() && nextSource != currentSource
-            save(current, updated, nextSource, reindex, "REMOVE_FORMAT")
+            save(current, updated, nextSource, reindex, BookActivityAction.REMOVE_FORMAT)
             if (updated.formats.isEmpty()) ingest.noFormats(bookId)
             else if (reindex) ingest.enqueue(bookId)
             details.details(bookId)
         }
-    }
-
-    private fun editableLibrary(bookId: Long) = run {
-        access.requireScope(ApiScope.LIBRARY_EDIT)
-        val book = access.requireEditableBook(bookId)
-        access.requireEditableLibrary(book.book.libraryId)
-    }
-
-    private fun editableBook(bookId: Long, libraryId: Long): BookRow {
-        access.requireScope(ApiScope.LIBRARY_EDIT)
-        access.requireEditableBook(bookId)
-        access.requireEditableLibrary(libraryId)
-        return books.find(bookId) ?: notFound("book $bookId not found")
     }
 
     private fun save(
@@ -135,7 +113,7 @@ class BookFormatService(
         updated: CalibreRecord,
         sourceFormat: String?,
         reindex: Boolean,
-        action: String,
+        action: BookActivityAction,
     ) {
         tx.executeWithoutResult {
             books.updateMetadata(current.book.id, updated, sourceFormat, reset = reindex)
