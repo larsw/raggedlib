@@ -10,7 +10,7 @@ class CommentTextTest {
     fun `paragraphs, line breaks and lists become text`() {
         val html = "<div><p>Learn <b>Rust</b> &amp; Go.</p><p>Covers:</p><ul><li>ownership</li><li>traits</li></ul>" +
             "<p>Line one<br/>line&nbsp;two</p></div>"
-        assertEquals("Learn Rust & Go.\nCovers:\n• ownership\n• traits\n\nLine one\nline two", CommentText.toPlainText(html))
+        assertEquals("Learn Rust & Go.\n\nCovers:\n\n• ownership\n• traits\n\nLine one\nline two", CommentText.toPlainText(html))
     }
 
     @Test
@@ -25,5 +25,12 @@ class CommentTextTest {
         assertTrue(CommentText.hasFormatting("<p><strong>Important</strong></p>"))
         assertTrue(CommentText.hasFormatting("<p style=\"color:red\">Styled</p>"))
         assertEquals("<p>First &amp; second<br>line</p><p>Next</p>", CommentText.toSimpleHtml("First & second\nline\n\nNext"))
+    }
+
+    @Test
+    fun `an edited description keeps its paragraphs and line breaks`() {
+        for (text in listOf("First paragraph\n\nSecond paragraph", "One line\nanother\n\nNext & last")) {
+            assertEquals(text, CommentText.toPlainText(CommentText.toSimpleHtml(text)))
+        }
     }
 }

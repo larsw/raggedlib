@@ -27,7 +27,10 @@ data class CalibreExtras(
  * rendering third-party HTML would need sanitising, and the markup carries little beyond paragraphs and lists.
  */
 object CommentText {
-    private val block = Regex("(?i)<\\s*(br|/p|/div|/h[1-6]|/li|/ul|/ol|/blockquote|/tr)\\b[^>]*>")
+    /** Ends a paragraph: a blank line, which [toSimpleHtml] turns back into paragraphs. */
+    private val paragraphEnd = Regex("(?i)<\\s*(/p|/div|/h[1-6]|/ul|/ol|/blockquote|/table)\\b[^>]*>")
+    /** Ends a line within one: a line break, list item or table row. */
+    private val lineEnd = Regex("(?i)<\\s*(br|/li|/tr)\\b[^>]*>")
     private val listItem = Regex("(?i)<\\s*li\\b[^>]*>")
     private val tag = Regex("<[^>]*>")
     private val scriptOrStyle = Regex("(?is)<\\s*(script|style)\\b.*?<\\s*/\\s*\\1\\s*>")
@@ -36,7 +39,8 @@ object CommentText {
 
     fun toPlainText(html: String): String {
         val withBreaks = scriptOrStyle.replace(html, "")
-            .let { block.replace(it, "\n") }
+            .let { paragraphEnd.replace(it, "\n\n") }
+            .let { lineEnd.replace(it, "\n") }
             .let { listItem.replace(it, "• ") } // the closing tag before it already broke the line
         val text = HtmlUtils.htmlUnescape(tag.replace(withBreaks, ""))
         return text.lines()
