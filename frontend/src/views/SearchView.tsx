@@ -84,7 +84,7 @@ export function SearchView() {
           <InputGroup
             size="large"
             leftIcon="search"
-            placeholder="Search passages, e.g. heap spraying, CSRF tokens, borrow checker…"
+            placeholder="Search passages by topic, term or phrase…"
             aria-label="Search query"
             value={query}
             onChange={(e) => setQuery(e.currentTarget.value)}
