@@ -94,6 +94,23 @@ class SingleUserModeIntegrationTest {
     }
 
     @Test
+    fun `a request is cancelled by its id, by whoever made it`() {
+        val libraryId = browser.get("/api/libraries").json.values().first().path("id").asLong()
+        fun vectors(id: String) = browser.get("/api/vectors?libraryId=$libraryId", headers = mapOf("X-Request-Id" to id))
+
+        // a cancel that came before its request (still on its way) cancels it when it arrives
+        assertEquals(204, browser.post("/api/requests/early-1/cancel").status)
+        assertEquals(499, vectors("early-1").status)
+        assertEquals(200, vectors("early-1").status, "once")
+        // only whoever made the request can: with other credentials, it's another caller's request id
+        assertEquals(204, Browser(base).post("/api/requests/early-2/cancel", key = STATIC_KEY).status)
+        assertEquals(200, vectors("early-2").status)
+        // a write like any other: a session needs the CSRF token
+        assertEquals(403, browser.post("/api/requests/early-3/cancel", csrf = false).status)
+        assertEquals(200, vectors("early-3").status)
+    }
+
+    @Test
     fun `mode oidc without an OIDC client refuses to start`() {
         // command-line arguments: they take precedence over application.yml, as an environment variable would
         val args = buildList {

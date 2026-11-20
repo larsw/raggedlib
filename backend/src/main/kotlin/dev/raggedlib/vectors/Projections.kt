@@ -1,5 +1,6 @@
 package dev.raggedlib.vectors
 
+import dev.raggedlib.cancel.Cancellation
 import kotlin.math.abs
 import kotlin.math.exp
 import kotlin.math.ln
@@ -10,8 +11,10 @@ import kotlin.math.sqrt
 import kotlin.random.Random
 
 /**
- * 2-D or 3-D projections of embeddings. Pure functions, no I/O. t-SNE and UMAP lay out in as many dimensions as
- * their starting layout has (PCA with 2 or 3 components).
+ * 2-D or 3-D projections of embeddings. Pure functions, no I/O, except that they give up with
+ * [dev.raggedlib.cancel.RequestCancelledException] once [Cancellation.current] is cancelled (in [Parallel], and
+ * between UMAP's epochs). t-SNE and UMAP lay out in as many dimensions as their starting layout has (PCA with 2 or 3
+ * components).
  *
  * t-SNE and UMAP work on cosine geometry: [squaredCosineDistances] of the L2-normalised rows, where the cosine
  * distance is half the squared Euclidean distance. The matrix is row-major, n × n.
@@ -189,7 +192,9 @@ object Projections {
         val nextSample = epochsPerSample.copyOf()
         val nextNegative = epochsPerNegative.copyOf()
 
+        val cancellation = Cancellation.current() // the only long loop here that isn't [Parallel]'s
         for (epoch in 0 until epochs) {
+            cancellation.throwIfCancelled()
             val alpha = 1.0 - epoch.toDouble() / epochs
             for (e in kept.indices) {
                 if (nextSample[e] > epoch) continue

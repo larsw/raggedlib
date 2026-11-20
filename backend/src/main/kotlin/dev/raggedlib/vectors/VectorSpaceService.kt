@@ -1,13 +1,14 @@
 package dev.raggedlib.vectors
 
 import com.fasterxml.jackson.annotation.JsonValue
+import dev.raggedlib.cancel.RequestCancelledException
+import dev.raggedlib.cancel.cancellableQuery
+import dev.raggedlib.cancel.cancellableQueryEach
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.ingest.ChunkStore
 import dev.raggedlib.search.TermStatistics
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
-import org.springframework.jdbc.core.namedparam.MapSqlParameterSource
-import org.springframework.jdbc.core.namedparam.NamedParameterJdbcTemplate
 import org.springframework.stereotype.Service
 import kotlin.math.sqrt
 
@@ -184,7 +185,6 @@ data class VectorSpace(
 @Service
 class VectorSpaceService(
     private val jdbc: JdbcTemplate,
-    private val named: NamedParameterJdbcTemplate,
     private val props: RaggedlibProperties,
     private val bookVectors: BookVectors,
     private val termStats: TermStatistics,
@@ -228,13 +228,27 @@ class VectorSpaceService(
         String::class.java, libraryId, libraryId,
     )!!
 
+    /** [block], logging how far [what] got if it is cancelled (the requests for it were, see [SampleCache]). */
+    private inline fun <T> StepTimer.loggingCancellation(what: () -> String, block: () -> T): T = try {
+        block()
+    } catch (e: RequestCancelledException) {
+        log.info("{}: cancelled after {} ms ({})", what(), elapsedMs(), summary())
+        throw e
+    }
+
+    private fun compute(libraryId: Long, spec: LayoutSpec, seed: Long): VectorSpace {
+        val timer = StepTimer()
+        return timer.loggingCancellation({
+            "Vectors: library $libraryId, ${spec.size} ${spec.level.json()}, ${spec.method.json()} to ${spec.dims}-D"
+        }) { layout(libraryId, spec, seed, timer) }
+    }
+
     /**
      * A 2-D or 3-D layout of [LayoutSpec.size] passages (or book vectors) of library [libraryId]'s books. The sample
      * is the rows with the smallest md5(id, seed), so the same seed gives the same points and a new seed a new sample.
      */
-    private fun compute(libraryId: Long, spec: LayoutSpec, seed: Long): VectorSpace {
+    private fun layout(libraryId: Long, spec: LayoutSpec, seed: Long, timer: StepTimer): VectorSpace {
         val (level, method, size, dims, requested) = spec
-        val timer = StepTimer()
         val (total, missing) = timer.step("count") { countTotal(level, libraryId) to bookVectors.countMissing(libraryId) }
         val rows = sample(timer, level, libraryId, size, seed)
 
@@ -303,12 +317,18 @@ class VectorSpaceService(
         )
     }
 
-    /** HDBSCAN clusters of the library's current sample at [TopicSpec.level], labelled by c-TF-IDF over their text. */
     private fun computeTopics(libraryId: Long, requested: TopicSpec, seed: Long): TopicSpace {
         val spec = requested.resolved()
+        val timer = StepTimer()
+        return timer.loggingCancellation({
+            "Topics: library $libraryId, ${spec.size} ${spec.level.json()}, ${spec.space.json()} space"
+        }) { cluster(libraryId, spec, seed, timer) }
+    }
+
+    /** HDBSCAN clusters of the library's current sample at [TopicSpec.level], labelled by c-TF-IDF over their text. */
+    private fun cluster(libraryId: Long, spec: TopicSpec, seed: Long, timer: StepTimer): TopicSpace {
         val minClusterSize = spec.minClusterSize!!
         val minSamples = spec.minSamples!!
-        val timer = StepTimer()
         val total = timer.step("count") { countTotal(spec.level, libraryId) }
         val rows = sample(timer, spec.level, libraryId, spec.size, seed)
         val n = rows.size
@@ -381,11 +401,11 @@ class VectorSpaceService(
         if (clusterOf.isEmpty()) return emptyMap()
         val sql = if (level == VectorLevel.PASSAGES) WORD_COUNT_PASSAGES_SQL else WORD_COUNT_BOOKS_SQL
         val counts = HashMap<Int, HashMap<String, Int>>()
-        named.query(sql, MapSqlParameterSource("ids", clusterOf.keys.toList())) { rs ->
-            val cluster = clusterOf[rs.getString(1)] ?: return@query
-            val word = rs.getString(2) ?: return@query
-            counts.getOrPut(cluster) { HashMap() }.merge(word, 1, Int::plus)
-        }
+        jdbc.cancellableQueryEach(sql, { rs ->
+            val cluster = clusterOf[rs.getString(1)]
+            val word = rs.getString(2)
+            if (cluster != null && word != null) counts.getOrPut(cluster) { HashMap() }.merge(word, 1, Int::plus)
+        }, clusterOf.keys.toTypedArray())
         return counts
     }
 
@@ -399,7 +419,8 @@ class VectorSpaceService(
             VectorLevel.BOOKS -> BOOK_SAMPLE_SQL
         }
         val fetched = timer.step("sample") {
-            jdbc.query(sampleSql, { rs, _ ->
+            // a pass over all of the library's passages: stopped in Postgres if the requests for it are cancelled
+            jdbc.cancellableQuery(sampleSql, { rs, _ ->
                 FetchedRow(
                     id = rs.getString(1),
                     bookId = rs.getLong(2),
@@ -423,7 +444,7 @@ class VectorSpaceService(
             VectorLevel.PASSAGES -> PASSAGE_COUNT_SQL
             VectorLevel.BOOKS -> BOOK_COUNT_SQL
         }
-        return jdbc.queryForObject(countSql, Long::class.java, libraryId) ?: 0L
+        return jdbc.cancellableQuery(countSql, { rs, _ -> rs.getLong(1) }, libraryId).singleOrNull() ?: 0L
     }
 
     private class FetchedRow(
@@ -482,11 +503,11 @@ class VectorSpaceService(
         """.trimIndent()
 
         private val WORD_COUNT_PASSAGES_SQL = """
-            select v.id::text, unnest(tsvector_to_array(v.content_tsv)) from vector_store v where v.id::text in (:ids)
+            select v.id::text, unnest(tsvector_to_array(v.content_tsv)) from vector_store v where v.id::text = any(?::text[])
         """.trimIndent()
 
         private val WORD_COUNT_BOOKS_SQL = """
-            select b.id::text, unnest(tsvector_to_array(to_tsvector('english', b.title))) from active_books b where b.id::text in (:ids)
+            select b.id::text, unnest(tsvector_to_array(to_tsvector('english', b.title))) from active_books b where b.id::text = any(?::text[])
         """.trimIndent()
     }
 }

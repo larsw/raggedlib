@@ -1,5 +1,9 @@
 package dev.raggedlib.vectors
 
+import dev.raggedlib.cancel.Cancellation
+import dev.raggedlib.cancel.RequestCancelledException
+import org.junit.jupiter.api.Assumptions.assumeTrue
+import java.util.concurrent.atomic.AtomicInteger
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
@@ -57,5 +61,29 @@ class ParallelTest {
         val a = layout()
         val b = layout()
         for (m in a.indices) for (i in a[m].indices) assertTrue(a[m][i].contentEquals(b[m][i]), "method $m point $i")
+    }
+
+    @Test
+    fun `a cancelled computation does no more chunks, on the pool's threads too`() {
+        val cancelled = Cancellation().apply { cancel() }
+        var visited = 0
+        assertFailsWith<RequestCancelledException> { cancelled.bind { Parallel.forEach(1000) { visited++ } } }
+        assertFailsWith<RequestCancelledException> { cancelled.bind { Parallel.forEach(10) { visited++ } } }
+        assertEquals(0, visited)
+
+        // cancelled during the first chunk: the chunks no thread has started yet don't run
+        assumeTrue(Runtime.getRuntime().availableProcessors() < 64, "every chunk would start at once")
+        val cancellation = Cancellation()
+        val done = AtomicInteger()
+        assertFailsWith<RequestCancelledException> {
+            cancellation.bind {
+                Parallel.forEach(6400) {
+                    if (it == 0) cancellation.cancel()
+                    Thread.sleep(0, 100_000)
+                    done.incrementAndGet()
+                }
+            }
+        }
+        assertTrue(done.get() < 6400, "${done.get()} done")
     }
 }

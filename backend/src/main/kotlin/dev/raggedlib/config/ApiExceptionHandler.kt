@@ -1,5 +1,7 @@
 package dev.raggedlib.config
 
+import dev.raggedlib.cancel.RequestCancellations
+import dev.raggedlib.cancel.RequestCancelledException
 import org.slf4j.LoggerFactory
 import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
@@ -35,6 +37,9 @@ internal fun uploadLimitMessage(e: Throwable, maxFileSize: DataSize, maxRequestS
     }
 }
 
+/** nginx's "client closed request", which the web UI's server answers an aborted request with too */
+const val CLIENT_CLOSED_REQUEST = 499
+
 class ApiException(val status: HttpStatus, message: String, val details: Any? = null) : RuntimeException(message)
 
 fun notFound(message: String): Nothing = throw ApiException(HttpStatus.NOT_FOUND, message)
@@ -65,6 +70,13 @@ class ApiExceptionHandler(
     @ExceptionHandler(MaxUploadSizeExceededException::class)
     fun uploadTooLarge(e: MaxUploadSizeExceededException) =
         ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ErrorBody(uploadLimitMessage(e, maxFileSize, maxRequestSize)))
+
+    /** The client gave up on the request and had it cancelled ([RequestCancellations]): no one to answer. */
+    @ExceptionHandler(RequestCancelledException::class)
+    fun cancelled(e: RequestCancelledException): ResponseEntity<Void> {
+        log.debug("Request cancelled: {}", e.message)
+        return ResponseEntity.status(CLIENT_CLOSED_REQUEST).build()
+    }
 
     @ExceptionHandler(NoResourceFoundException::class)
     fun noResource(e: NoResourceFoundException) =

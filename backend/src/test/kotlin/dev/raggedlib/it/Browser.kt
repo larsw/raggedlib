@@ -57,7 +57,8 @@ class Browser(private val base: String) {
         error("sign-in of $email did not come back to the app")
     }
 
-    fun get(path: String, key: String? = null) = send("GET", path, null, key)
+    fun get(path: String, key: String? = null, headers: Map<String, String> = emptyMap()) =
+        send("GET", path, null, key, headers = headers)
     fun post(path: String, body: Any? = null, key: String? = null, csrf: Boolean = true) = send("POST", path, body, key, csrf)
     fun put(path: String, body: Any? = null, key: String? = null, csrf: Boolean = true) = send("PUT", path, body, key, csrf)
     fun delete(path: String, key: String? = null, csrf: Boolean = true) = send("DELETE", path, null, key, csrf)
@@ -125,8 +126,16 @@ class Browser(private val base: String) {
 
     fun xsrfToken(): String? = cookies.cookieStore.cookies.firstOrNull { it.name == "XSRF-TOKEN" }?.value
 
-    private fun send(method: String, path: String, body: Any?, key: String?, csrf: Boolean = false): Response {
+    private fun send(
+        method: String,
+        path: String,
+        body: Any?,
+        key: String?,
+        csrf: Boolean = false,
+        headers: Map<String, String> = emptyMap(),
+    ): Response {
         val b = HttpRequest.newBuilder(URI(base + path)).header("Accept", "application/json")
+        for ((name, value) in headers) b.header(name, value)
         if (key != null) b.header("Authorization", "Bearer $key")
         if (csrf && key == null) {
             // the UI reads the XSRF-TOKEN cookie (set on any API call) and echoes it

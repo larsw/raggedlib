@@ -3,6 +3,14 @@
 Base URL: `http://localhost:8080/api` (the web UI proxies it as `/api`, and `/mcp` too). All bodies JSON (camelCase).
 Errors: HTTP 4xx/5xx with `{"error": "message"}`. Timestamps ISO-8601 strings. IDs are calibre book ids (Long).
 
+Cancelling: a request sent with an `X-Request-Id: <id>` header (unique per caller while it runs, e.g. a UUID) can be
+cancelled while the backend works on it by `POST /api/requests/{id}/cancel` from the same caller (same session or
+API key). The backend can't tell on its own that a client went away, so without a cancel an abandoned request runs to
+its end. `GET /api/vectors` and `/api/vectors/topics` honour it: their Postgres queries are cancelled and their
+computing stops (a layout two requests wait for stops only once both are cancelled), and the request ends with `499`
+and no body. The web UI's server gives every request it proxies an id of its own (replacing the browser's), and
+cancels it when the browser aborts it before the answer came, e.g. when a toolbar change supersedes a layout.
+
 ## Authentication and authorization
 
 Every endpoint except `/api/auth/**` and `/actuator/health` needs a caller:
@@ -227,6 +235,7 @@ interface BookUploadDecisionResult {
 | POST | `/api/chat` | Body `ChatRequest` → `text/event-stream` (see below) |
 | GET | `/api/vectors?libraryId=&level=passages\|books&method=pca\|umap\|tsne&size=1000&dims=2\|3&seed=&neighbors=&minDist=&epochs=&perplexity=&iterations=` | `VectorSpace`: a seeded sample of the passages (`level=passages`, default) or book vectors (`level=books`: one per book, the normalized average of its passages' embeddings) of one library's books (`libraryId` required; `404` if unknown), projected to 2-D or, with `dims=3`, 3-D (points get a `z`). `size` 1..2000 (default 1000); the same seed gives the same sample and layout. Without `seed`, the library's current sample (seed 1 until reshuffled); a `seed` (Reshuffle) becomes the library's current sample. The last layout per library, level, method, size and dims is cached in memory until the library's passages or book vectors change (a book indexed, re-indexed or removed; book vectors computed) or it is reshuffled; `cached` says whether it came from there. Coordinates are only comparable within one response. `t-SNE` is O(n²) per iteration, so it is the slowest at large sizes. Optional tuning, each only for its method (the others are ignored; `400` if out of range): UMAP `neighbors` 2..100 (default 15), `minDist` 0..0.99 (0.1), `epochs` 50..1000 (300); t-SNE `perplexity` 2..100 (30, at most (points − 1) / 3), `iterations` 300..2000 (1000). Each set of parameters is cached apart; `params` reports the ones used. |
 | GET | `/api/vectors/topics?libraryId=&level=passages\|books&size=1000&space=raw\|umap&seed=&minClusterSize=&minSamples=` | `TopicSpace`: HDBSCAN topics of the same sample as `/api/vectors` (same library, level, size and seed), labelled by class-based TF-IDF, clustered on the raw embeddings or a UMAP reduction (`space`). `minClusterSize` 2..500 (default about 2.5 % of `size`, between 5 and 50) is the smallest topic; `minSamples` 1..500 (default `minClusterSize`): higher means fewer, denser topics and more noise. The response reports both as used. Cached like the layouts. |
+| POST | `/api/requests/{id}/cancel` | Cancels the caller's request with `X-Request-Id: {id}` (see Cancelling, above). `204` whether or not it was still running; a cancel that arrives before its request (within a minute) cancels it when it arrives. |
 | POST | `/api/vectors/book-vectors?libraryId=` | Curator. Computes book vectors for books (of `libraryId`, default every library the caller curates) that have passages but no book vector, or one older than their last indexing: averaged from the stored passage embeddings, nothing re-indexed (about 3 s for ~1,800 books). Indexing computes a book's vector itself; this is for books indexed before book vectors existed. Returns `{ computed, missing }`. |
 
 ```ts

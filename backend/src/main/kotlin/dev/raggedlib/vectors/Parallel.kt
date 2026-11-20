@@ -1,5 +1,7 @@
 package dev.raggedlib.vectors
 
+import dev.raggedlib.cancel.Cancellation
+import dev.raggedlib.cancel.RequestCancelledException
 import java.util.concurrent.Callable
 import java.util.concurrent.ExecutionException
 import java.util.concurrent.Executors
@@ -15,6 +17,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * Its own fixed pool (a plain one: a ForkJoinPool hands a task's exception back as a copy), not the common one, so a
  * large layout doesn't starve whatever else in the app uses that. Bodies must not call [Parallel] themselves: a
  * chunk waiting on chunks queued behind it in the same pool could wait forever.
+ *
+ * Each chunk first checks the caller's [Cancellation.current]: once the request a layout is for is cancelled, it
+ * stops within a chunk's work, with [RequestCancelledException].
  */
 internal object Parallel {
     private const val CHUNKS = 64
@@ -30,6 +35,7 @@ internal object Parallel {
     /** Runs [body] for every i in `0 until n`. Each i must touch only its own outputs. */
     fun forEach(n: Int, body: (Int) -> Unit) {
         if (n < MIN_PARALLEL) {
+            Cancellation.current().throwIfCancelled()
             for (i in 0 until n) body(i)
             return
         }
@@ -45,12 +51,18 @@ internal object Parallel {
 
     /** [block] over each chunk `from until to` of `0 until n`; the results in chunk order. */
     fun <T> chunked(n: Int, block: (from: Int, to: Int) -> T): List<T> {
+        // the pool's threads don't see the caller's: each chunk checks this one
+        val cancellation = Cancellation.current()
+        cancellation.throwIfCancelled()
         val chunks = minOf(CHUNKS, n)
         if (chunks <= 1) return if (n <= 0) emptyList() else listOf(block(0, n))
         val tasks = List(chunks) { c ->
             val from = (n.toLong() * c / chunks).toInt()
             val to = (n.toLong() * (c + 1) / chunks).toInt()
-            Callable { block(from, to) }
+            Callable {
+                cancellation.throwIfCancelled()
+                block(from, to)
+            }
         }
         return pool.invokeAll(tasks).map { future ->
             try {

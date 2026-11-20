@@ -140,3 +140,82 @@ test("a server with the upload limit passes a body larger than Bun's default lim
     backend.stop(true);
   }
 }, 60_000);
+
+/** A backend that records requests and answers `/api/slow` only once the proxy gives up on it, and a proxy before it. */
+function proxiedBackend() {
+  const seen: { method: string; path: string; headers: Headers }[] = [];
+  const cancelled = Promise.withResolvers<void>();
+  const backend = Bun.serve({
+    port: 0,
+    async fetch(request) {
+      const path = new URL(request.url).pathname;
+      seen.push({ method: request.method, path, headers: request.headers });
+      if (path.endsWith("/cancel")) {
+        cancelled.resolve();
+        return new Response(null, { status: 204 });
+      }
+      if (path === "/api/slow") await new Promise((resolve) => request.signal.addEventListener("abort", resolve));
+      return Response.json({ ok: true });
+    },
+  });
+  const proxy = createProxy(backend.url.toString());
+  const frontend = Bun.serve({ port: 0, fetch: (request, server) => proxy(request, server) });
+  return {
+    seen,
+    cancelled: cancelled.promise,
+    url: (path: string) => new URL(path, frontend.url),
+    stop: () => {
+      frontend.stop(true);
+      backend.stop(true);
+    },
+  };
+}
+
+async function until(condition: () => boolean) {
+  for (let i = 0; !condition(); i++) {
+    if (i > 200) throw new Error("timed out");
+    await Bun.sleep(5);
+  }
+}
+
+test("a request the browser aborts before the answer is cancelled at the backend, as its caller", async () => {
+  const b = proxiedBackend();
+  try {
+    const ctrl = new AbortController();
+    const pending = fetch(b.url("/api/slow?x=1"), {
+      signal: ctrl.signal,
+      headers: { cookie: "SESSION=abc; XSRF-TOKEN=tok%2B1", "x-request-id": "the-browser's" },
+    }).catch(() => "aborted");
+    await until(() => b.seen.length === 1);
+    ctrl.abort();
+    expect(await pending).toBe("aborted");
+    await b.cancelled;
+
+    const [request, cancel] = b.seen;
+    const id = request!.headers.get("x-request-id")!;
+    expect(id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(cancel!.method).toBe("POST");
+    expect(cancel!.path).toBe(`/api/requests/${id}/cancel`);
+    expect(cancel!.headers.get("cookie")).toBe("SESSION=abc; XSRF-TOKEN=tok%2B1");
+    expect(cancel!.headers.get("x-xsrf-token")).toBe("tok+1");
+    expect(cancel!.headers.get("x-request-id")).toBeNull();
+    await Bun.sleep(20); // the 204 on its way back to the proxy, before the servers stop
+  } finally {
+    b.stop();
+  }
+});
+
+test("an answered request isn't cancelled, and each request gets an id of its own", async () => {
+  const b = proxiedBackend();
+  try {
+    expect((await fetch(b.url("/api/fast"))).status).toBe(200);
+    expect((await fetch(b.url("/api/fast"))).status).toBe(200);
+    await Bun.sleep(50);
+    expect(b.seen.map((r) => r.path)).toEqual(["/api/fast", "/api/fast"]);
+    const [first, second] = b.seen.map((r) => r.headers.get("x-request-id"));
+    expect(first).toBeTruthy();
+    expect(first).not.toBe(second);
+  } finally {
+    b.stop();
+  }
+});
