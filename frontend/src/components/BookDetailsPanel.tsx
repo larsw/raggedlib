@@ -4,7 +4,7 @@ import { api, bookFileUrl, errorMessage } from "../api/client";
 import type { Book, BookDetails } from "../api/types";
 import { useApp } from "../AppContext";
 import { useAsync } from "../hooks/useAsync";
-import { roleAtLeast } from "../lib/auth";
+import { curatesWritable, roleAtLeast } from "../lib/auth";
 import { isReaderFormat, readerFormat, type ReaderTarget } from "../lib/reader";
 import { formatRating } from "../lib/reviews";
 import { formatBytes, formatDate, formatDateTime, formatNumber, formatYear, pluralize } from "../lib/format";
@@ -125,7 +125,7 @@ function DetailsContent({
   const { openReader, libraries, roleIn } = useApp();
   const library = libraries.find((l) => l.id === book.libraryId);
   const libraryName = library?.name;
-  const canEdit = roleAtLeast(roleIn(book.libraryId), "CURATOR") && library?.writable === true;
+  const canEdit = curatesWritable(library);
   const editingPaused = library?.editingPaused === true;
   const canReindex = roleAtLeast(roleIn(book.libraryId), "ADMIN");
   const year = formatYear(book.pubdate);

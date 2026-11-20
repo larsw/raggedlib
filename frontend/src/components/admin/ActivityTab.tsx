@@ -1,7 +1,7 @@
 import { Button, Classes, HTMLSelect, HTMLTable, NonIdealState, Spinner, Tag } from "@blueprintjs/core";
 import { useState } from "react";
 import { api } from "../../api/client";
-import type { BookActivityAction } from "../../api/types";
+import { BOOK_ACTIVITY_ACTIONS, type BookActivityAction } from "../../api/types";
 import { useApp } from "../../AppContext";
 import { useAsync } from "../../hooks/useAsync";
 import { formatDateTime, formatNumber } from "../../lib/format";
@@ -9,20 +9,8 @@ import { ErrorState } from "../ErrorState";
 
 const PAGE_SIZE = 25;
 
-const ACTIONS: { value: BookActivityAction; label: string }[] = [
-  { value: "UPLOAD", label: "Upload" },
-  { value: "ADD_FORMAT", label: "Add format" },
-  { value: "REMOVE_FORMAT", label: "Remove format" },
-  { value: "REPLACE_FORMAT", label: "Replace format" },
-  { value: "EDIT_METADATA", label: "Edit" },
-  { value: "EDIT_COVER", label: "Cover" },
-  { value: "DELETE_BOOK", label: "Delete" },
-  { value: "PAUSE_EDITING", label: "Pause editing" },
-  { value: "RESUME_EDITING", label: "Resume editing" },
-];
-
-function actionLabel(action: BookActivityAction) {
-  return ACTIONS.find((item) => item.value === action)?.label ?? action;
+function actionLabel(action: BookActivityAction): string {
+  return BOOK_ACTIVITY_ACTIONS[action] ?? action;
 }
 
 function displayValue(value: unknown): string {
@@ -90,7 +78,7 @@ export function ActivityTab({ onOpenBook }: { onOpenBook: (bookId: number, libra
           }}
           options={[
             { value: "", label: "All actions" },
-            ...ACTIONS.map((item) => ({ value: item.value, label: item.label })),
+            ...Object.entries(BOOK_ACTIVITY_ACTIONS).map(([value, label]) => ({ value, label })),
           ]}
         />
         <span className="spacer" />

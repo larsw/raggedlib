@@ -1,4 +1,4 @@
-import type { GrantableRole, LibraryRole } from "../api/types";
+import type { GrantableRole, Library, LibraryRole } from "../api/types";
 
 /** Library roles in order: each includes the ones before it. */
 export const LIBRARY_ROLES: readonly LibraryRole[] = ["NONE", "VIEWER", "CURATOR", "ADMIN"];
@@ -8,6 +8,16 @@ export const GRANTABLE_ROLES: readonly GrantableRole[] = ["viewer", "curator", "
 
 export function roleAtLeast(role: LibraryRole | null | undefined, min: LibraryRole): boolean {
   return LIBRARY_ROLES.indexOf(role ?? "NONE") >= LIBRARY_ROLES.indexOf(min);
+}
+
+/** The caller can change books in [library]: a writable library where it is curator or more (paused or not). */
+export function curatesWritable(library: Pick<Library, "writable" | "role"> | null | undefined): boolean {
+  return !!library?.writable && roleAtLeast(library.role, "CURATOR");
+}
+
+/** ...and right now: editing isn't paused there. Uploads, metadata, covers, formats and deletions all need this. */
+export function canEditBooksIn(library: Pick<Library, "writable" | "role" | "editingPaused"> | null | undefined): boolean {
+  return curatesWritable(library) && !library!.editingPaused;
 }
 
 /** "viewer", "curator", "admin" or "no access". */

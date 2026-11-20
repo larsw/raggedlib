@@ -10,6 +10,7 @@ import type {
   BookUploadChoice,
   BookUploadDecisionResult,
   BookUploadResult,
+  UploadOptions,
   BookMetadataFields,
   BookMetadataOriginalFields,
   BookQuery,
@@ -260,6 +261,7 @@ export const api = {
     form.append("file", file);
     return (await send(`/books/${id}/formats?replace=${replace}`, { method: "PUT", body: form })).json() as Promise<BookDetails>;
   },
+  uploadOptions: (signal?: AbortSignal) => getJson<UploadOptions>("/upload-options", signal),
   uploadBooks: async (libraryId: number, files: File[]) => {
     const form = new FormData();
     files.forEach((file) => form.append("files", file, file.name));

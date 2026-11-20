@@ -1,9 +1,21 @@
-import { Button, ButtonGroup, Callout, Checkbox, Classes, Dialog, DialogBody, DialogFooter, FormGroup, HTMLSelect, InputGroup, Intent, TextArea } from "@blueprintjs/core";
-import { useEffect, useRef, useState } from "react";
+import { Button, ButtonGroup, Callout, Classes, Dialog, DialogBody, DialogFooter, FormGroup, InputGroup, Intent, TextArea } from "@blueprintjs/core";
+import { useCallback, useEffect, useState } from "react";
 import { api, ApiError, errorMessage } from "../api/client";
-import type { Book, BookDetails, BookMetadataFields, BookMetadataOriginalFields, CalibreExtras, MetadataCandidate, MetadataCoverCandidate, MetadataSuggestions } from "../api/types";
-import { formatBytes } from "../lib/format";
-import { BookCover } from "./BookCover";
+import type { Book, BookDetails, BookMetadataFields, CalibreExtras, MetadataSuggestions } from "../api/types";
+import { MetadataCoverPanel } from "./metadata/MetadataCoverPanel";
+import {
+  changedFields,
+  draftFrom,
+  draftWithValue,
+  isMetadataField,
+  METADATA_FIELD_LABELS,
+  metadataConflicts,
+  metadataValueText,
+  metadataValuesFrom,
+  originalFields,
+} from "./metadata/metadataDraft";
+import { MetadataFormatsPanel } from "./metadata/MetadataFormatsPanel";
+import { MetadataSourceLookup } from "./metadata/MetadataSourceLookup";
 import { MetadataValueSelect } from "./MetadataValueSelect";
 
 interface Props {
@@ -19,267 +31,6 @@ interface Props {
   onSaved: (details: BookDetails, close: boolean) => void;
 }
 
-interface Draft {
-  title: string;
-  authors: string[];
-  tags: string[];
-  series: string;
-  seriesIndex: string;
-  publisher: string;
-  pubdate: string;
-  languages: string[];
-  titleSort: string;
-  authorSort: string;
-  description: string;
-  identifiers: string;
-  rating: string;
-  addedAt: string;
-}
-
-type MetadataLookupField = "title" | "authors" | "publisher" | "pubdate" | "identifiers" | "languages" | "tags" | "description";
-
-const METADATA_LOOKUP_FIELDS: MetadataLookupField[] = [
-  "title", "authors", "publisher", "pubdate", "identifiers", "languages", "tags", "description",
-];
-
-const METADATA_LOOKUP_LABELS: Record<MetadataLookupField, string> = {
-  title: "Title",
-  authors: "Authors",
-  publisher: "Publisher",
-  pubdate: "Published",
-  identifiers: "Identifiers",
-  languages: "Languages",
-  tags: "Tags",
-  description: "Description",
-};
-
-function localDateTime(value: string | null | undefined): string {
-  if (!value) return "";
-  const date = new Date(value);
-  return Number.isNaN(date.getTime()) ? "" : new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
-}
-
-function draftFrom(book: Book, calibre: CalibreExtras | null): Draft {
-  return {
-    title: book.title,
-    authors: book.authors,
-    tags: book.tags,
-    series: book.series ?? "",
-    seriesIndex: book.seriesIndex?.toString() ?? "",
-    publisher: calibre?.publisher ?? book.publisher ?? "",
-    pubdate: book.pubdate?.slice(0, 10) ?? "",
-    languages: book.languages,
-    titleSort: calibre?.titleSort ?? "",
-    authorSort: calibre?.authorSort ?? "",
-    description: calibre?.description ?? "",
-    identifiers: Object.entries(calibre?.identifiers ?? {}).map(([type, value]) => `${type}: ${value}`).join("\n"),
-    rating: calibre?.rating?.toString() ?? "",
-    addedAt: localDateTime(calibre?.addedAt),
-  };
-}
-
-function metadataValuesFrom(book: Book, calibre: CalibreExtras | null): Record<string, unknown> {
-  return {
-    title: book.title,
-    authors: book.authors,
-    tags: book.tags,
-    series: book.series,
-    seriesIndex: book.seriesIndex,
-    publisher: calibre?.publisher ?? book.publisher ?? null,
-    pubdate: book.pubdate?.slice(0, 10) ?? null,
-    languages: book.languages,
-    titleSort: calibre?.titleSort ?? null,
-    authorSort: calibre?.authorSort ?? null,
-    description: calibre?.description ?? null,
-    identifiers: calibre?.identifiers ?? {},
-    rating: calibre?.rating ?? null,
-    addedAt: calibre?.addedAt ?? null,
-  };
-}
-
-const METADATA_FIELD_LABELS: Record<keyof BookMetadataFields, string> = {
-  title: "Title",
-  authors: "Authors",
-  tags: "Tags",
-  series: "Series",
-  seriesIndex: "Series number",
-  publisher: "Publisher",
-  pubdate: "Published",
-  languages: "Languages",
-  titleSort: "Title sort",
-  authorSort: "Author sort",
-  description: "Description",
-  identifiers: "Identifiers",
-  rating: "Rating",
-  addedAt: "Date added",
-};
-
-function isMetadataField(field: string): field is keyof BookMetadataFields {
-  return Object.prototype.hasOwnProperty.call(METADATA_FIELD_LABELS, field);
-}
-
-function metadataConflicts(details: unknown): Partial<Record<keyof BookMetadataFields, unknown>> | null {
-  if (typeof details !== "object" || details === null || Array.isArray(details)) return null;
-  const rawConflicts = (details as { conflicts?: unknown }).conflicts;
-  if (typeof rawConflicts !== "object" || rawConflicts === null || Array.isArray(rawConflicts)) return null;
-  const result: Partial<Record<keyof BookMetadataFields, unknown>> = {};
-  for (const [field, value] of Object.entries(rawConflicts)) {
-    if (isMetadataField(field)) result[field] = value;
-  }
-  return result;
-}
-
-function stringValue(value: unknown): string {
-  return typeof value === "string" ? value : "";
-}
-
-function stringList(value: unknown): string[] {
-  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
-}
-
-function stringMap(value: unknown): Record<string, string> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return {};
-  const result: Record<string, string> = {};
-  for (const [key, item] of Object.entries(value)) {
-    if (typeof item === "string") result[key] = item;
-  }
-  return result;
-}
-
-function draftWithValue(draft: Draft, field: keyof BookMetadataFields, value: unknown): Draft {
-  switch (field) {
-    case "title": return { ...draft, title: stringValue(value) };
-    case "authors": return { ...draft, authors: stringList(value) };
-    case "tags": return { ...draft, tags: stringList(value) };
-    case "series": return { ...draft, series: stringValue(value) };
-    case "seriesIndex": return { ...draft, seriesIndex: typeof value === "number" ? String(value) : "" };
-    case "publisher": return { ...draft, publisher: stringValue(value) };
-    case "pubdate": return { ...draft, pubdate: stringValue(value).slice(0, 10) };
-    case "languages": return { ...draft, languages: stringList(value) };
-    case "titleSort": return { ...draft, titleSort: stringValue(value) };
-    case "authorSort": return { ...draft, authorSort: stringValue(value) };
-    case "description": return { ...draft, description: stringValue(value) };
-    case "identifiers": return {
-      ...draft,
-      identifiers: Object.entries(stringMap(value)).map(([type, identifier]) => `${type}: ${identifier}`).join("\n"),
-    };
-    case "rating": return { ...draft, rating: typeof value === "number" ? String(value) : "" };
-    case "addedAt": return { ...draft, addedAt: localDateTime(stringValue(value)) };
-  }
-}
-
-function metadataValueText(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "(empty)";
-  if (Array.isArray(value)) return value.length > 0 ? value.map(String).join(", ") : "(empty)";
-  if (typeof value === "object") {
-    const entries = Object.entries(value).map(([key, item]) => `${key}: ${String(item)}`);
-    return entries.length > 0 ? entries.join(", ") : "(empty)";
-  }
-  return String(value);
-}
-
-function candidateValues(candidate: MetadataCandidate): Partial<Record<MetadataLookupField, unknown>> {
-  return {
-    title: candidate.title,
-    authors: candidate.authors,
-    publisher: candidate.publisher,
-    pubdate: candidate.publishedDate,
-    identifiers: candidate.identifiers,
-    languages: candidate.languages,
-    tags: candidate.tags,
-    description: candidate.description,
-  };
-}
-
-function draftValues(draft: Draft): Record<MetadataLookupField, unknown> {
-  return {
-    title: draft.title,
-    authors: draft.authors,
-    publisher: draft.publisher,
-    pubdate: draft.pubdate,
-    identifiers: identifiers(draft.identifiers),
-    languages: draft.languages,
-    tags: draft.tags,
-    description: draft.description,
-  };
-}
-
-function hasValue(value: unknown): boolean {
-  if (value === null || value === undefined) return false;
-  if (typeof value === "string") return value.trim().length > 0;
-  if (Array.isArray(value)) return value.length > 0;
-  if (typeof value === "object") return Object.keys(value).length > 0;
-  return true;
-}
-
-function sameMetadataValue(field: MetadataLookupField, left: unknown, right: unknown): boolean {
-  if (field === "identifiers" && typeof left === "object" && left !== null && typeof right === "object" && right !== null) {
-    const sorted = (value: object) => Object.entries(value).sort(([a], [b]) => a.localeCompare(b));
-    return JSON.stringify(sorted(left)) === JSON.stringify(sorted(right));
-  }
-  return JSON.stringify(left) === JSON.stringify(right);
-}
-
-function fieldsToSelect(candidate: MetadataCandidate, draft: Draft): Set<MetadataLookupField> {
-  const incoming = candidateValues(candidate);
-  const current = draftValues(draft);
-  return new Set(
-    METADATA_LOOKUP_FIELDS.filter((field) => hasValue(incoming[field]) && !sameMetadataValue(field, incoming[field], current[field])),
-  );
-}
-
-function coverCandidateFile(candidate: MetadataCoverCandidate): File {
-  const binary = atob(candidate.image);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
-  const extension = candidate.mediaType.slice("image/".length);
-  return new File([bytes.buffer], `cover.${extension}`, { type: candidate.mediaType });
-}
-
-function originalFields(fields: BookMetadataFields, baseline: Record<string, unknown>): BookMetadataOriginalFields {
-  const original: BookMetadataOriginalFields = {};
-  for (const field of Object.keys(fields)) {
-    if (isMetadataField(field)) Object.assign(original, { [field]: baseline[field] });
-  }
-  return original;
-}
-
-function identifiers(value: string): Record<string, string> {
-  return Object.fromEntries(
-    value.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).map((line) => {
-      const colon = line.indexOf(":");
-      return [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
-    }),
-  );
-}
-
-function sameValues(a: string[], b: string[]): boolean {
-  return a.length === b.length && a.every((value, index) => value === b[index]);
-}
-
-function changedFields(initial: Draft, draft: Draft): BookMetadataFields {
-  return {
-    ...(draft.title.trim() !== initial.title ? { title: draft.title.trim() } : {}),
-    ...(!sameValues(draft.authors, initial.authors) ? { authors: draft.authors } : {}),
-    ...(!sameValues(draft.tags, initial.tags) ? { tags: draft.tags } : {}),
-    ...(draft.series !== initial.series ? { series: draft.series.trim() || null } : {}),
-    ...(draft.seriesIndex !== initial.seriesIndex
-      ? { seriesIndex: draft.seriesIndex.trim() === "" ? null : Number(draft.seriesIndex) }
-      : {}),
-    ...(draft.publisher !== initial.publisher ? { publisher: draft.publisher.trim() || null } : {}),
-    ...(draft.pubdate !== initial.pubdate ? { pubdate: draft.pubdate || null } : {}),
-    ...(!sameValues(draft.languages, initial.languages) ? { languages: draft.languages } : {}),
-    ...(draft.titleSort !== initial.titleSort ? { titleSort: draft.titleSort.trim() || null } : {}),
-    ...(draft.authorSort !== initial.authorSort ? { authorSort: draft.authorSort.trim() || null } : {}),
-    ...(draft.description !== initial.description ? { description: draft.description } : {}),
-    ...(draft.identifiers !== initial.identifiers ? { identifiers: identifiers(draft.identifiers) } : {}),
-    ...(draft.rating !== initial.rating ? { rating: draft.rating.trim() === "" ? null : Number(draft.rating) } : {}),
-    ...(draft.addedAt !== initial.addedAt
-      ? { addedAt: draft.addedAt ? new Date(draft.addedAt).toISOString() : null }
-      : {}),
-  };
-}
-
 export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose, onSaved }: Props) {
   const [initial, setInitial] = useState(() => draftFrom(book, calibre));
   const [draft, setDraft] = useState(() => draftFrom(book, calibre));
@@ -289,31 +40,16 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
   const [suggestionError, setSuggestionError] = useState<string>();
   const [metadataLookupEnabled, setMetadataLookupEnabled] = useState(false);
   const [metadataSettingsError, setMetadataSettingsError] = useState<string>();
-  const [metadataCandidates, setMetadataCandidates] = useState<MetadataCandidate[]>([]);
-  const [selectedCandidateIndex, setSelectedCandidateIndex] = useState(0);
-  const [selectedMetadataFields, setSelectedMetadataFields] = useState<Set<MetadataLookupField>>(new Set());
-  const [metadataLookupLoading, setMetadataLookupLoading] = useState(false);
-  const [metadataLookupError, setMetadataLookupError] = useState<string>();
-  const [metadataLookupNoResults, setMetadataLookupNoResults] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [navigating, setNavigating] = useState(false);
   const [coverBusy, setCoverBusy] = useState(false);
-  const [coverError, setCoverError] = useState<string>();
-  const [coverCandidates, setCoverCandidates] = useState<MetadataCoverCandidate[]>([]);
-  const [coverLookupLoading, setCoverLookupLoading] = useState(false);
-  const [coverLookupMessage, setCoverLookupMessage] = useState<string>();
-  const [coverLookupWarning, setCoverLookupWarning] = useState(true);
   const [formatBusy, setFormatBusy] = useState(false);
-  const [formatError, setFormatError] = useState<string>();
+  const [metadataLookupLoading, setMetadataLookupLoading] = useState(false);
   const [confirmClose, setConfirmClose] = useState(false);
-  const coverInput = useRef<HTMLInputElement>(null);
-  const formatInput = useRef<HTMLInputElement>(null);
-  const metadataLookupAbort = useRef<AbortController | null>(null);
-  const coverLookupAbort = useRef<AbortController | null>(null);
-  const draftRef = useRef(draft);
-  draftRef.current = draft;
   const fileBusy = coverBusy || formatBusy;
+  // the cover and format panels save on their own; the editor shows what they return
+  const savedFromPanel = useCallback((details: BookDetails) => onSaved(details, false), [onSaved]);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -330,15 +66,6 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setSuggestionError(undefined);
     setMetadataLookupEnabled(false);
     setMetadataSettingsError(undefined);
-    setMetadataCandidates([]);
-    setSelectedCandidateIndex(0);
-    setSelectedMetadataFields(new Set());
-    setMetadataLookupLoading(false);
-    setMetadataLookupError(undefined);
-    setMetadataLookupNoResults(false);
-    setCoverCandidates([]);
-    setCoverLookupLoading(false);
-    setCoverLookupMessage(undefined);
     const ctrl = new AbortController();
     api.metadataSuggestions(book.libraryId, ctrl.signal)
       .then(setSuggestions)
@@ -352,83 +79,8 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
       });
     return () => {
       ctrl.abort();
-      metadataLookupAbort.current?.abort();
-      coverLookupAbort.current?.abort();
     };
   }, [book.id, isOpen]);
-
-  const lookupCoverCandidates = async () => {
-    coverLookupAbort.current?.abort();
-    const ctrl = new AbortController();
-    coverLookupAbort.current = ctrl;
-    setCoverLookupLoading(true);
-    setCoverLookupMessage(undefined);
-    setCoverCandidates([]);
-    try {
-      const result = await api.metadataCoverCandidates(book.id, ctrl.signal);
-      if (ctrl.signal.aborted) return;
-      setCoverCandidates(result.candidates);
-      if (result.candidates.length === 0) {
-        setCoverLookupWarning(!result.timedOut);
-        setCoverLookupMessage(result.timedOut
-          ? "Cover lookup timed out. Try again."
-          : result.failedSources.length > 0
-            ? `No covers were found. Unavailable sources: ${result.failedSources.join(", ")}.`
-            : "No covers were found.");
-      } else if (result.timedOut || result.failedSources.length > 0) {
-        setCoverLookupWarning(true);
-        setCoverLookupMessage(result.timedOut
-          ? "Some sources timed out. Showing the covers received so far."
-          : `Some sources failed: ${result.failedSources.join(", ")}.`);
-      }
-    } catch (err) {
-      if (!ctrl.signal.aborted) {
-        setCoverLookupWarning(err instanceof ApiError && err.status === 504);
-        setCoverLookupMessage(err instanceof ApiError && err.status === 504
-          ? "Cover lookup timed out. Try again."
-          : errorMessage(err));
-      }
-    } finally {
-      if (!ctrl.signal.aborted) setCoverLookupLoading(false);
-    }
-  };
-
-  const lookupMetadata = async () => {
-    metadataLookupAbort.current?.abort();
-    const ctrl = new AbortController();
-    metadataLookupAbort.current = ctrl;
-    setMetadataLookupLoading(true);
-    setMetadataLookupError(undefined);
-    setMetadataLookupNoResults(false);
-    setMetadataCandidates([]);
-    setSelectedMetadataFields(new Set());
-    try {
-      const candidates = await api.metadataCandidates(book.id, ctrl.signal);
-      if (ctrl.signal.aborted) return;
-      setMetadataCandidates(candidates);
-      if (candidates.length === 0) {
-        setMetadataLookupNoResults(true);
-        setMetadataLookupError("No metadata candidates were found. Try adding an ISBN or checking the title and authors.");
-      } else if (candidates[0]) {
-        setSelectedCandidateIndex(0);
-        setSelectedMetadataFields(fieldsToSelect(candidates[0], draftRef.current));
-      }
-    } catch (err) {
-      if (!ctrl.signal.aborted) {
-        setMetadataLookupError(err instanceof ApiError && err.status === 504
-          ? "The metadata lookup timed out. Try again."
-          : errorMessage(err));
-      }
-    } finally {
-      if (!ctrl.signal.aborted) setMetadataLookupLoading(false);
-    }
-  };
-
-  const selectCandidate = (index: number) => {
-    setSelectedCandidateIndex(index);
-    const candidate = metadataCandidates[index];
-    if (candidate) setSelectedMetadataFields(fieldsToSelect(candidate, draftRef.current));
-  };
 
   const fields = changedFields(initial, draft);
   const validSeriesIndex = fields.seriesIndex == null || (Number.isFinite(fields.seriesIndex) && fields.seriesIndex >= 0);
@@ -512,49 +164,6 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
     setError(null);
   };
 
-  const changeCover = async (action: () => Promise<BookDetails>, onSuccess?: () => void) => {
-    setCoverBusy(true);
-    setCoverError(undefined);
-    try {
-      onSaved(await action(), false);
-      onSuccess?.();
-    } catch (err) {
-      setCoverError(errorMessage(err));
-    } finally {
-      setCoverBusy(false);
-    }
-  };
-
-  const changeFormat = async (
-    action: () => Promise<BookDetails>,
-    replaceAfterConflict?: () => Promise<BookDetails>,
-  ) => {
-    setFormatBusy(true);
-    setFormatError(undefined);
-    try {
-      try {
-        onSaved(await action(), false);
-      } catch (err) {
-        if (!(err instanceof ApiError && err.status === 409 && replaceAfterConflict && window.confirm(err.message))) throw err;
-        onSaved(await replaceAfterConflict(), false);
-      }
-    } catch (err) {
-      setFormatError(errorMessage(err));
-    } finally {
-      setFormatBusy(false);
-    }
-  };
-
-  const uploadFormat = (file: File) => {
-    const format = file.name.split(".").pop()?.toUpperCase() ?? "";
-    const exists = book.formats.some((value) => value.toUpperCase() === format);
-    if (exists && !window.confirm(`Replace its ${format}?`)) return;
-    void changeFormat(
-      () => api.uploadBookFormat(book.id, file, exists),
-      exists ? undefined : () => api.uploadBookFormat(book.id, file, true),
-    );
-  };
-
   const requestClose = () => {
     if (saving || navigating || fileBusy || metadataLookupLoading) return;
     if (confirmClose) {
@@ -609,135 +218,22 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
           <DialogBody>
           <div className="metadata-editor-layout">
             <div className="metadata-editor-cover">
-              <div className="metadata-editor-cover-preview">
-                <BookCover bookId={book.id} hasCover={book.hasCover} width={176} title={book.title} coverVersion={book.lastModified} natural />
-              </div>
-              <div className="metadata-editor-cover-actions">
-                <input
-                  ref={coverInput}
-                  type="file"
-                  accept="image/jpeg,image/png,image/webp"
-                  hidden
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    event.currentTarget.value = "";
-                    if (file) void changeCover(() => api.uploadBookCover(book.id, file));
-                  }}
-                />
-                <ButtonGroup vertical fill>
-                  <Button type="button" small text="Browse…" onClick={() => coverInput.current?.click()} disabled={saving || navigating || fileBusy} />
-                  <Button
-                    type="button"
-                    small
-                    text="Remove"
-                    onClick={() => void changeCover(() => api.removeBookCover(book.id))}
-                    disabled={saving || navigating || fileBusy || !book.hasCover}
-                  />
-                </ButtonGroup>
-                {metadataLookupEnabled && (
-                  <Button
-                    type="button"
-                    small
-                    icon="cloud-download"
-                    text="Download cover"
-                    loading={coverLookupLoading}
-                    disabled={saving || navigating || fileBusy || coverLookupLoading}
-                    onClick={() => void lookupCoverCandidates()}
-                  />
-                )}
-                {coverLookupLoading && <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Searching cover sources…</p>}
-                {coverLookupMessage && (
-                  <Callout intent={coverLookupWarning ? Intent.WARNING : Intent.DANGER} icon={coverLookupWarning ? "warning-sign" : "error"} compact>
-                    {coverLookupMessage}
-                  </Callout>
-                )}
-                {coverCandidates.length > 0 && (
-                  <section className="metadata-cover-candidates" aria-label="Cover candidates">
-                    {coverCandidates.map((candidate, index) => (
-                      <button
-                        key={`${candidate.source}-${index}`}
-                        type="button"
-                        className="metadata-cover-candidate"
-                        aria-label={`Use ${candidate.source} cover, ${candidate.width} by ${candidate.height} pixels`}
-                        disabled={saving || navigating || fileBusy}
-                        onClick={() => void changeCover(
-                          () => api.uploadBookCover(book.id, coverCandidateFile(candidate)),
-                          () => {
-                            setCoverCandidates([]);
-                            setCoverLookupMessage(undefined);
-                          },
-                        )}
-                      >
-                        <img src={`data:${candidate.mediaType};base64,${candidate.image}`} alt="" />
-                        <span>{candidate.source}</span>
-                        <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>{candidate.width} × {candidate.height}</span>
-                      </button>
-                    ))}
-                  </section>
-                )}
-                <label className="metadata-editor-cover-format-label" htmlFor="metadata-cover-format">Use cover from file</label>
-                <select
-                  id="metadata-cover-format"
-                  className="metadata-editor-cover-format"
-                  value=""
-                  disabled={saving || navigating || fileBusy || book.formats.length === 0}
-                  onChange={(event) => {
-                    const format = event.currentTarget.value;
-                    if (format) void changeCover(() => api.useBookCoverFromFormat(book.id, format));
-                  }}
-                >
-                  <option value="">Choose a format…</option>
-                  {book.formats.map((format) => <option key={format} value={format}>{format}</option>)}
-                </select>
-                {coverBusy && <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Updating cover…</p>}
-                {coverError && <Callout intent={Intent.DANGER} icon="error" compact>{coverError}</Callout>}
-                <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
-                  Cover changes are saved immediately, separately from metadata.
-                </p>
-              </div>
-              <div className="metadata-editor-formats">
-                <strong>Formats</strong>
-                <input
-                  ref={formatInput}
-                  type="file"
-                  accept=".azw,.azw1,.azw3,.azw4,.cb7,.cbc,.cbr,.cbz,.chm,.docx,.djvu,.epub,.fb2,.fbz,.html,.htmlz,.imp,.kepub,.lit,.lrf,.lrx,.mobi,.odt,.oebzip,.pdb,.pdf,.pml,.pmlz,.pobi,.prc,.rtf,.snb,.tpz,.txt,.txtz,.updb,.zip"
-                  hidden
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    event.currentTarget.value = "";
-                    if (file) uploadFormat(file);
-                  }}
-                />
-                {book.formats.length === 0 ? (
-                  <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>No formats</p>
-                ) : (
-                  <ul>
-                    {book.formats.map((format) => (
-                      <li key={format}>
-                        <span>{format} <span className={Classes.TEXT_MUTED}>{formatBytes(calibre?.fileSizes[format])}</span></span>
-                        <Button
-                          type="button"
-                          small
-                          variant="minimal"
-                          text="Remove"
-                          aria-label={`Remove ${format}`}
-                          disabled={saving || navigating || fileBusy}
-                          onClick={() => void changeFormat(() => api.removeBookFormat(book.id, format))}
-                        />
-                      </li>
-                    ))}
-                  </ul>
-                )}
-                <Button
-                  type="button"
-                  small
-                  text="Add format"
-                  onClick={() => formatInput.current?.click()}
-                  disabled={saving || navigating || fileBusy}
-                />
-                {formatBusy && <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Updating formats…</p>}
-                {formatError && <Callout intent={Intent.DANGER} icon="error" compact>{formatError}</Callout>}
-              </div>
+              <MetadataCoverPanel
+                key={`cover-${book.id}`}
+                book={book}
+                lookupEnabled={metadataLookupEnabled}
+                disabled={saving || navigating || fileBusy}
+                onSaved={savedFromPanel}
+                onBusyChange={setCoverBusy}
+              />
+              <MetadataFormatsPanel
+                key={`formats-${book.id}`}
+                book={book}
+                calibre={calibre}
+                disabled={saving || navigating || fileBusy}
+                onSaved={savedFromPanel}
+                onBusyChange={setFormatBusy}
+              />
             </div>
             <div className="metadata-editor-fields">
               {metadataSettingsError ? (
@@ -745,104 +241,17 @@ export function BookMetadataDialog({ isOpen, book, calibre, navigation, onClose,
                   Metadata lookup is unavailable because the server setting could not be loaded: {metadataSettingsError}
                 </Callout>
               ) : metadataLookupEnabled && (
-                <section className="metadata-source-lookup" aria-label="Metadata source lookup">
-                  <Callout intent={Intent.PRIMARY} icon="info-sign" compact>
-                    Your title, authors and identifiers, including ISBN, are sent to Google Books, Amazon, Open Library
-                    and other configured Calibre sources. Review each field before applying it; nothing is saved until
-                    you choose Save.
-                  </Callout>
-                  <Button
-                    type="button"
-                    small
-                    icon="cloud-download"
-                    text="Look up metadata"
-                    loading={metadataLookupLoading}
-                    disabled={saving || navigating || fileBusy || metadataLookupLoading}
-                    onClick={() => void lookupMetadata()}
-                  />
-                  {metadataLookupLoading && <span className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>Searching metadata sources…</span>}
-                  {metadataLookupError && (
-                    <Callout intent={metadataLookupNoResults ? Intent.WARNING : Intent.DANGER} icon={metadataLookupNoResults ? "warning-sign" : "error"} compact>
-                      {metadataLookupError}
-                    </Callout>
-                  )}
-                  {metadataCandidates.length > 0 && (
-                    <div className="metadata-source-candidates">
-                      <FormGroup label="Candidate edition" labelFor="metadata-candidate">
-                        <HTMLSelect
-                          id="metadata-candidate"
-                          fill
-                          value={String(selectedCandidateIndex)}
-                          options={metadataCandidates.map((candidate, index) => ({
-                            value: String(index),
-                            label: `${candidate.title || "Untitled"} · ${candidate.source}`,
-                          }))}
-                          onChange={(event) => selectCandidate(Number(event.currentTarget.value))}
-                        />
-                      </FormGroup>
-                      {(() => {
-                        const candidate = metadataCandidates[selectedCandidateIndex];
-                        if (!candidate) return null;
-                        const incoming = candidateValues(candidate);
-                        const current = draftValues(draft);
-                        const availableFields = METADATA_LOOKUP_FIELDS.filter((field) => hasValue(incoming[field]));
-                        return (
-                          <>
-                            <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
-                              Source: {candidate.source}. Select the fields to copy into this draft.
-                            </p>
-                            <div className="metadata-source-comparison-wrap">
-                              <table className="metadata-source-comparison">
-                                <thead>
-                                  <tr><th scope="col">Field</th><th scope="col">Current draft</th><th scope="col">Source</th></tr>
-                                </thead>
-                                <tbody>
-                                  {availableFields.map((field) => (
-                                    <tr key={field}>
-                                      <th scope="row">
-                                        <Checkbox
-                                          checked={selectedMetadataFields.has(field)}
-                                          label={METADATA_LOOKUP_LABELS[field]}
-                                          onChange={() => setSelectedMetadataFields((selected) => {
-                                            const next = new Set(selected);
-                                            if (next.has(field)) next.delete(field);
-                                            else next.add(field);
-                                            return next;
-                                          })}
-                                        />
-                                      </th>
-                                      <td>{metadataValueText(current[field])}</td>
-                                      <td>{metadataValueText(incoming[field])}</td>
-                                    </tr>
-                                  ))}
-                                </tbody>
-                              </table>
-                              {availableFields.length === 0 && (
-                                <p className={`${Classes.TEXT_MUTED} ${Classes.TEXT_SMALL}`}>
-                                  This candidate has no supported fields to apply.
-                                </p>
-                              )}
-                            </div>
-                            <Button
-                              type="button"
-                              small
-                              intent={Intent.PRIMARY}
-                              text={`Apply ${selectedMetadataFields.size} selected field${selectedMetadataFields.size === 1 ? "" : "s"}`}
-                              disabled={selectedMetadataFields.size === 0 || saving || navigating || fileBusy}
-                              onClick={() => {
-                                setDraft((currentDraft) => [...selectedMetadataFields].reduce(
-                                  (nextDraft, field) => draftWithValue(nextDraft, field, incoming[field]),
-                                  currentDraft,
-                                ));
-                                setSelectedMetadataFields(new Set());
-                              }}
-                            />
-                          </>
-                        );
-                      })()}
-                    </div>
-                  )}
-                </section>
+                <MetadataSourceLookup
+                  key={`lookup-${book.id}`}
+                  bookId={book.id}
+                  draft={draft}
+                  disabled={saving || navigating || fileBusy}
+                  onLoadingChange={setMetadataLookupLoading}
+                  onApply={(values) => setDraft((current) => Object.entries(values).reduce(
+                    (next, [field, value]) => draftWithValue(next, field as keyof BookMetadataFields, value),
+                    current,
+                  ))}
+                />
               )}
               <FormGroup label="Title" labelFor="metadata-title">
                 <InputGroup id="metadata-title" autoFocus value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.currentTarget.value })} />
