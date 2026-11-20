@@ -161,6 +161,9 @@ services:
       RAGGEDLIB_LIBRARIES_1_WRITABLE: ${CALIBRE_LIBRARY_1_WRITABLE:-false}
       RAGGEDLIB_LIBRARIES_1_NAME: ${CALIBRE_LIBRARY_1_NAME:-}
       RAGGEDLIB_LIBRARIES_1_PATH: /library/1
+      # Upload limits for writable libraries: per file, and per request (the web UI's server takes the same).
+      RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE: ${UPLOAD_MAX_FORMAT_SIZE:-500MB}
+      RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-2GB}
       # Library 2: uncomment here and the matching volume below, and set CALIBRE_LIBRARY_2 (+ _NAME) in .env, to add a third.
       #RAGGEDLIB_LIBRARIES_2_NAME: ${CALIBRE_LIBRARY_2_NAME:-}
       #RAGGEDLIB_LIBRARIES_2_PATH: /library/2
@@ -188,6 +191,8 @@ services:
     environment:
       BACKEND_URL: http://backend:8080
       PORT: "3000"
+      # the largest upload it passes through to the backend; keep it the same as the backend's
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-2GB}
     ports:
       - "127.0.0.1:3000:3000"
 
