@@ -1,7 +1,6 @@
 package dev.raggedlib.library
 
 import dev.raggedlib.auth.Access
-import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.calibre.CalibreExtras
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.calibre.CalibreMetadataWriter
@@ -15,14 +14,18 @@ import org.springframework.http.HttpStatus
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
 import tools.jackson.databind.JsonNode
+import tools.jackson.databind.node.NullNode
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneOffset
 
+/** A JSON `null` clears a field (in [fields]) or says it was empty (in [original]). */
 data class MetadataUpdateRequest(
-    val fields: Map<String, JsonNode> = emptyMap(),
-    val original: Map<String, JsonNode> = emptyMap(),
+    val fields: Map<String, JsonNode?> = emptyMap(),
+    val original: Map<String, JsonNode?> = emptyMap(),
 )
+
+private fun Map<String, JsonNode?>.nullsAsJson(): Map<String, JsonNode> = mapValues { it.value ?: NullNode.instance }
 
 data class BookMetadataSnapshot(
     val bookId: Long,
@@ -43,13 +46,10 @@ class BookMetadataService(
     private val details: BookDetailsService,
 ) {
     fun snapshot(bookId: Long): BookMetadataSnapshot {
-        access.requireScope(ApiScope.LIBRARY_EDIT)
-        val authorized = access.requireEditableBook(bookId)
-        val library = access.requireEditableLibrary(authorized.book.libraryId)
+        val library = access.requireEditableBook(bookId).library
 
         return writeLock.withLibrary(library.root) {
-            access.requireEditableLibrary(authorized.book.libraryId)
-            val current = books.find(bookId) ?: dev.raggedlib.config.notFound("book $bookId not found")
+            val current = access.requireEditableBook(bookId).row
             val record = calibre.find(library.root, current.book.calibreId)
                 ?: dev.raggedlib.config.notFound("book ${current.book.calibreId} no longer exists in Calibre")
             val values = values(record) + values(calibre.extras(library.root, current.book.calibreId))
@@ -58,20 +58,17 @@ class BookMetadataService(
     }
 
     fun update(bookId: Long, request: MetadataUpdateRequest): BookDetails {
-        access.requireScope(ApiScope.LIBRARY_EDIT)
-        val authorized = access.requireEditableBook(bookId)
-        val library = access.requireEditableLibrary(authorized.book.libraryId)
+        val library = access.requireEditableBook(bookId).library
 
-        val requested = parse(request.fields)
+        val requested = parse(request.fields.nullsAsJson())
         if (requested.isEmpty()) badRequest("change at least one metadata field")
         if (request.original.keys != request.fields.keys) {
             badRequest("provide an original value for every changed metadata field")
         }
-        val original = parse(request.original, allowNullBaseline = true)
+        val original = parse(request.original.nullsAsJson(), allowNullBaseline = true)
 
         writeLock.withLibrary(library.root) {
-            access.requireEditableLibrary(authorized.book.libraryId)
-            val current = books.find(bookId) ?: dev.raggedlib.config.notFound("book $bookId not found")
+            val current = access.requireEditableBook(bookId).row
             val currentRecord = calibre.find(library.root, current.book.calibreId)
                 ?: dev.raggedlib.config.notFound("book ${current.book.calibreId} no longer exists in Calibre")
             val oldValues = values(currentRecord) + values(calibre.extras(library.root, current.book.calibreId))

@@ -116,9 +116,7 @@ class MetadataSourceLookupService(
 
     private fun lookupRequest(bookId: Long): MetadataLookupRequest {
         requireLookupEnabled()
-        access.requireScope(ApiScope.LIBRARY_EDIT)
-        val authorized = access.requireEditableBook(bookId)
-        val library = access.requireEditableLibrary(authorized.book.libraryId)
+        val (authorized, library) = access.requireEditableBook(bookId)
         val identifiers = calibre.extras(library.root, authorized.book.calibreId)?.identifiers.orEmpty()
         return MetadataLookupRequest(authorized.book.title, authorized.book.authors, identifiers)
     }

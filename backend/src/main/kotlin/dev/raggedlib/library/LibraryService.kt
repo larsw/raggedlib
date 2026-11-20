@@ -42,7 +42,7 @@ class LibraryService(
                 log.warn("Sync failed for library '{}' ({}): {}", lib.name, lib.root, e.message)
             }
         }
-        SyncResult(added, updated, removed, total, sources.joinToString("+").ifEmpty { "none" })
+        SyncResult(added, updated, removed, total, sources.joinToString("+").ifEmpty { SyncResult.NOTHING_SYNCED })
     }
 
     /** Syncs one library and returns the Calibre records identified by [calibreIds], propagating sync failures. */
@@ -87,19 +87,24 @@ class LibraryService(
                     added++
                     continue
                 }
+                var restoredNow = false
                 if (old.deletedAt != null) {
                     if (books.restore(old.book.id)) {
                         restored++
+                        restoredNow = true
                     } else if (books.find(old.book.id) == null) {
                         books.insert(lib.id, r, preferred)
                         added++
                         continue
                     }
                 }
-                val changed = old.lastModified != r.lastModified || old.formatPaths.keys != r.formats.keys
+                // Restoring a book from Calibre's trash bumps its last_modified, though the book itself is unchanged:
+                // then only different formats need re-indexing, and the rest is kept as metadata.
+                val changed = old.formatPaths.keys != r.formats.keys ||
+                    (old.lastModified != r.lastModified && !restoredNow)
                 // also refreshes what an older index didn't store (publisher, before V7) without re-indexing
-                val metadataOnly = old.formatPaths != r.formats || old.coverPath != r.coverPath ||
-                    old.book.publisher != r.publisher
+                val metadataOnly = old.lastModified != r.lastModified || old.formatPaths != r.formats ||
+                    old.coverPath != r.coverPath || old.book.publisher != r.publisher
                 if (changed) {
                     // passages stay searchable until re-indexing replaces them (reusing unchanged embeddings)
                     books.updateMetadata(old.book.id, r, preferred, reset = true)

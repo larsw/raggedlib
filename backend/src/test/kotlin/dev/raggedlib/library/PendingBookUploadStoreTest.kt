@@ -9,6 +9,7 @@ import java.nio.file.Path
 import java.nio.file.attribute.FileTime
 import java.time.Duration
 import java.time.Instant
+import java.util.Properties
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
@@ -44,7 +45,38 @@ class PendingBookUploadStoreTest {
     }
 
     @Test
-    fun `removes pending upload directories older than 24 hours`() {
+    fun `removes pending uploads made more than 24 hours ago`() {
+        val (store, directory) = retainOne()
+        setCreatedAt(directory, Instant.now().minus(Duration.ofHours(25)))
+
+        store.cleanupExpired()
+
+        assertFalse(Files.exists(directory))
+    }
+
+    @Test
+    fun `goes by the stored upload time, not the directory's`() {
+        val (store, directory) = retainOne()
+        Files.setLastModifiedTime(directory, FileTime.from(Instant.now().minus(Duration.ofHours(25))))
+
+        store.cleanupExpired()
+
+        assertTrue(Files.exists(directory))
+    }
+
+    @Test
+    fun `removes a pending upload whose manifest is unreadable once the directory is old`() {
+        val (store, directory) = retainOne()
+        Files.delete(directory.resolve(PendingBookUploadStore.MANIFEST))
+        store.cleanupExpired()
+        assertTrue(Files.exists(directory))
+
+        Files.setLastModifiedTime(directory, FileTime.from(Instant.now().minus(Duration.ofHours(25))))
+        store.cleanupExpired()
+        assertFalse(Files.exists(directory))
+    }
+
+    private fun retainOne(): Pair<PendingBookUploadStore, Path> {
         val source = Files.createDirectory(root.resolve("source"))
         Files.write(source.resolve("Book.epub"), byteArrayOf(1))
         val store = PendingBookUploadStore(RaggedlibProperties(tmpDir = root))
@@ -53,11 +85,13 @@ class PendingBookUploadStoreTest {
             source,
             listOf(UploadFile(MockMultipartFile("files", "Book.epub", "application/epub+zip", byteArrayOf(1)), "Book.epub", "EPUB")),
         )
-        val directory = root.resolve("raggedlib-upload-pending").resolve(id)
-        Files.setLastModifiedTime(directory, FileTime.from(Instant.now().minus(Duration.ofHours(25))))
+        return store to root.resolve("raggedlib-upload-pending").resolve(id)
+    }
 
-        store.cleanupExpired()
-
-        assertFalse(Files.exists(directory))
+    private fun setCreatedAt(directory: Path, at: Instant) {
+        val path = directory.resolve(PendingBookUploadStore.MANIFEST)
+        val manifest = Properties().apply { Files.newInputStream(path).use(::load) }
+        manifest.setProperty("createdAt", at.toEpochMilli().toString())
+        Files.newOutputStream(path).use { manifest.store(it, null) }
     }
 }

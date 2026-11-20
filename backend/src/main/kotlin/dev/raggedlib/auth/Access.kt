@@ -34,6 +34,9 @@ internal fun formatActivityActor(caller: Caller, userLabel: String?): String = w
     else -> caller.label
 }
 
+/** A book that passed [Access.requireEditableBook], with the library it is edited in. */
+data class EditableBook(val row: BookRow, val library: LibraryInfo)
+
 /** Members of [group] have [role] in [library] (a name, an id, or `*`). */
 data class GroupRule(val group: String, val role: LibraryRole, val library: String) {
     fun covers(lib: LibraryInfo) = library == "*" || library.equals(lib.name, ignoreCase = true) || library == lib.id.toString()
@@ -193,8 +196,13 @@ class Access(
         return lib
     }
 
-    /** A curator may edit only when the library is writable and editing hasn't been paused. */
+    /**
+     * A library the caller may change books in now: the `library:edit` scope, curator (or more) in it, and the
+     * library writable with editing not paused. Called again under the library's write lock, since a pause or a
+     * role change can land while a request waits for it.
+     */
     fun requireEditableLibrary(libraryId: Long): LibraryInfo {
+        requireScope(ApiScope.LIBRARY_EDIT)
         requireLibrary(libraryId, LibraryRole.CURATOR)
         return registry.requireEditingAllowed(libraryId)
     }
@@ -210,11 +218,11 @@ class Access(
         return row
     }
 
-    /** A book the caller can edit, with the library's write gate applied. */
-    fun requireEditableBook(bookId: Long): BookRow {
+    /** A book the caller may change now, and its library: the same gate as [requireEditableLibrary]. */
+    fun requireEditableBook(bookId: Long): EditableBook {
+        requireScope(ApiScope.LIBRARY_EDIT)
         val row = requireBook(bookId, LibraryRole.CURATOR)
-        registry.requireEditingAllowed(row.book.libraryId)
-        return row
+        return EditableBook(row, registry.requireEditingAllowed(row.book.libraryId))
     }
 
     fun canSeeBook(bookId: Long): Boolean = books.find(bookId)?.let { role(it.book.libraryId).atLeast(LibraryRole.VIEWER) } ?: false

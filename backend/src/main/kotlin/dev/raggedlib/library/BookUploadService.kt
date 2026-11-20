@@ -7,13 +7,16 @@ import dev.raggedlib.calibre.CalibreLibraryWriteLock
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.calibre.CalibreMetadataWriter
 import dev.raggedlib.calibre.Formats
-import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.config.badRequest
+import dev.raggedlib.config.label
 import dev.raggedlib.config.notFound
+import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.ingest.IngestService
+import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 import org.springframework.transaction.support.TransactionTemplate
+import org.springframework.util.unit.DataSize
 import org.springframework.web.multipart.MultipartFile
 import java.nio.file.Files
 import java.nio.file.Path
@@ -47,7 +50,7 @@ internal data class UploadGroup(
     val files: List<UploadFile>,
 )
 
-internal fun groupUploadFiles(files: List<MultipartFile>, maxBytes: Long, maxSizeLabel: String): List<UploadGroup> {
+internal fun groupUploadFiles(files: List<MultipartFile>, maxSize: DataSize): List<UploadGroup> {
     if (files.isEmpty()) badRequest("choose at least one book file")
     val groups = linkedMapOf<String, MutableList<UploadFile>>()
     for (part in files) {
@@ -60,7 +63,7 @@ internal fun groupUploadFiles(files: List<MultipartFile>, maxBytes: Long, maxSiz
         val base = name.substringBeforeLast('.', "")
         if (base.isBlank() || base == "." || base == "..") badRequest("file '$name' must have a name before its extension")
         if (part.isEmpty) badRequest("file '$name' is empty")
-        if (part.size > maxBytes) badRequest("file '$name' must be no larger than $maxSizeLabel")
+        requireWithinLimit(name, part.size, maxSize)
         val key = base.lowercase(Locale.ROOT)
         groups.getOrPut(key) { mutableListOf() }.add(UploadFile(part, name, format))
     }
@@ -73,10 +76,26 @@ internal fun groupUploadFiles(files: List<MultipartFile>, maxBytes: Long, maxSiz
     }
 }
 
+internal fun requireWithinLimit(name: String, bytes: Long, maxSize: DataSize) {
+    if (bytes > maxSize.toBytes()) badRequest("file '$name' is larger than the ${maxSize.label()} limit")
+}
+
+/** [block]'s value, or null when it fails (logged as [what]); an interrupt is passed on, flag set again. */
+private inline fun <T> orNullLogging(log: Logger, what: String, block: () -> T): T? = try {
+    block()
+} catch (e: InterruptedException) {
+    Thread.currentThread().interrupt()
+    throw e
+} catch (e: Exception) {
+    log.warn("{}: {}", what, e.message)
+    null
+}
+
 @Service
 class BookUploadService(
     private val access: Access,
     private val props: RaggedlibProperties,
+    private val limits: UploadLimits,
     private val writer: CalibreMetadataWriter,
     private val metadata: CalibreMetadataSource,
     private val writeLock: CalibreLibraryWriteLock,
@@ -90,14 +109,9 @@ class BookUploadService(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    init {
-        require(props.upload.maxFormatSize.toBytes() > 0) { "raggedlib.upload.max-format-size must be positive" }
-    }
-
     fun add(libraryId: Long, files: List<MultipartFile>): BookUploadResult {
-        access.requireScope(ApiScope.LIBRARY_EDIT)
         val target = access.requireEditableLibrary(libraryId)
-        val groups = groupUploadFiles(files, props.upload.maxFormatSize.toBytes(), props.upload.maxFormatSize.toString())
+        val groups = groupUploadFiles(files, limits.maxFormatSize)
         val actor = access.activityActor()
         Files.createDirectories(props.tmpDir)
         val staging = Files.createTempDirectory(props.tmpDir, "raggedlib-upload-")
@@ -109,18 +123,16 @@ class BookUploadService(
                     file.part.transferTo(destination.toFile())
                     val actualSize = Files.size(destination)
                     if (actualSize == 0L) badRequest("file '${file.name}' is empty")
-                    if (actualSize > props.upload.maxFormatSize.toBytes()) {
-                        badRequest("file '${file.name}' must be no larger than ${props.upload.maxFormatSize}")
-                    }
+                    requireWithinLimit(file.name, actualSize, limits.maxFormatSize)
                 }
                 directory
             }
 
+            // Books Calibre added before a failure are still synced, logged and indexed; then the failure is raised.
             val calibreIds = mutableListOf<Long?>()
             var addFailure: Exception? = null
             try {
                 writeLock.withLibrary(target.root) {
-                    access.requireScope(ApiScope.LIBRARY_EDIT)
                     access.requireEditableLibrary(libraryId)
                     directories.forEach { directory -> calibreIds += writer.addBook(target, directory) }
                 }
@@ -133,22 +145,10 @@ class BookUploadService(
 
             val addedIds = calibreIds.filterNotNull().toCollection(LinkedHashSet())
             val addedBooks = try {
-                val synced = library.syncAndFindBooks(libraryId, addedIds)
-                tx.executeWithoutResult {
-                    synced.values.forEach { book ->
-                        activity.recordEdit(
-                            bookId = book.id,
-                            libraryId = book.libraryId,
-                            calibreId = book.calibreId,
-                            title = book.title,
-                            actor = actor,
-                            changes = mapOf("formats" to mapOf("old" to emptyList<String>(), "new" to book.formats)),
-                            action = "UPLOAD",
-                        )
-                    }
+                library.syncAndFindBooks(libraryId, addedIds).also { synced ->
+                    synced.values.forEach { book -> recordUpload(book, actor) }
+                    synced.values.forEach { ingest.enqueue(it.id) }
                 }
-                synced.values.forEach { ingest.enqueue(it.id) }
-                synced
             } catch (e: Exception) {
                 if (addFailure == null) throw e
                 addFailure.addSuppressed(e)
@@ -156,65 +156,59 @@ class BookUploadService(
             }
             addFailure?.let { throw it }
 
-            val items = groups.indices.map { index ->
-                val group = groups[index]
-                val calibreId = calibreIds[index]
-                val book = calibreId?.let { addedBooks[it] }
-                    ?: if (calibreId == null) null else error("synced book $calibreId was not returned")
-                if (calibreId != null) {
-                    BookUploadItem(group.files.map { it.name }, book, alreadyInLibrary = false)
-                } else {
-                    val identity = try {
-                        metadata.identity(directories[index].resolve(group.files.first().name), group.name)
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                        throw e
-                    } catch (e: Exception) {
-                        log.warn("Couldn't read metadata for duplicate upload '{}': {}", group.name, e.message)
-                        null
-                    }
-                    val pendingId = pending.retain(libraryId, directories[index], group.files)
-                    var lookupError = if (identity == null) "Could not read the uploaded book's title and authors." else null
-                    val duplicateBooks = if (identity == null) emptyList() else try {
-                        library.syncAndFindMatchingBooks(libraryId, identity)
-                    } catch (e: InterruptedException) {
-                        Thread.currentThread().interrupt()
-                        throw e
-                    } catch (e: Exception) {
-                        log.warn("Couldn't find duplicate upload '{}' in library '{}': {}", group.name, target.name, e.message)
-                        lookupError = "Could not find the matching book in the library."
-                        emptyList()
-                    }
-                    BookUploadItem(
+            val items = groups.mapIndexed { index, group ->
+                when (val calibreId = calibreIds[index]) {
+                    null -> duplicateItem(target, group, directories[index])
+                    else -> BookUploadItem(
                         group.files.map { it.name },
-                        book = null,
-                        alreadyInLibrary = true,
-                        duplicateBooks = duplicateBooks,
-                        pendingId = pendingId,
-                        duplicateLookupError = lookupError,
+                        addedBooks[calibreId] ?: error("synced book $calibreId was not returned"),
+                        alreadyInLibrary = false,
                     )
                 }
             }
-
-            return BookUploadResult(
-                items,
-            )
+            return BookUploadResult(items)
         } finally {
             deleteTree(staging)
         }
     }
 
+    /** A group Calibre refused as a duplicate: kept for a decision, with the books it matches. */
+    private fun duplicateItem(target: LibraryInfo, group: UploadGroup, directory: Path): BookUploadItem {
+        val identity = orNullLogging(log, "Couldn't read metadata for duplicate upload '${group.name}'") {
+            metadata.identity(directory.resolve(group.files.first().name), group.name)
+        }
+        val pendingId = pending.retain(target.id, directory, group.files)
+        val duplicateBooks = identity?.let {
+            orNullLogging(log, "Couldn't find duplicate upload '${group.name}' in library '${target.name}'") {
+                library.syncAndFindMatchingBooks(target.id, identity)
+            }
+        }
+        return BookUploadItem(
+            group.files.map { it.name },
+            book = null,
+            alreadyInLibrary = true,
+            duplicateBooks = duplicateBooks.orEmpty(),
+            pendingId = pendingId,
+            duplicateLookupError = when {
+                identity == null -> "Could not read the uploaded book's title and authors."
+                duplicateBooks == null -> "Could not find the matching book in the library."
+                else -> null
+            },
+        )
+    }
+
+    /**
+     * Skipping only discards the kept files, so it needs no write access: it works in a paused or read-only library.
+     * The other choices change the library and need it writable and not paused.
+     */
     fun decide(libraryId: Long, pendingId: String, decision: BookUploadDecision): BookUploadDecisionResult {
         access.requireScope(ApiScope.LIBRARY_EDIT)
         access.requireLibrary(libraryId, LibraryRole.CURATOR)
         return pending.withPending(libraryId, pendingId) { upload ->
-            if (decision.choice == BookUploadChoice.SKIP) {
-                pending.discard(upload.id)
-                return@withPending BookUploadDecisionResult(decision.choice, null)
-            }
-            val target = access.requireEditableLibrary(libraryId)
             val book = when (decision.choice) {
+                BookUploadChoice.SKIP -> null
                 BookUploadChoice.ADD_FORMAT, BookUploadChoice.REPLACE_FORMAT -> {
+                    access.requireEditableLibrary(libraryId)
                     val bookId = decision.bookId ?: badRequest("choose a matching book")
                     if (books.find(bookId)?.book?.libraryId != libraryId) notFound("book $bookId not found")
                     formats.addStaged(
@@ -224,8 +218,8 @@ class BookUploadService(
                     ).book
                 }
                 BookUploadChoice.ADD_SEPARATE -> {
+                    val target = access.requireEditableLibrary(libraryId)
                     val calibreId = writeLock.withLibrary(target.root) {
-                        access.requireScope(ApiScope.LIBRARY_EDIT)
                         access.requireEditableLibrary(libraryId)
                         writer.addBook(target, upload.files.first().path.parent, allowDuplicates = true)
                             ?: error("calibredb refused an upload requested as a separate book")
@@ -235,7 +229,6 @@ class BookUploadService(
                     ingest.enqueue(added.id)
                     added
                 }
-                BookUploadChoice.SKIP -> error("skip decisions are handled before library write checks")
             }
             pending.discard(upload.id)
             BookUploadDecisionResult(decision.choice, book)
@@ -251,14 +244,8 @@ class BookUploadService(
                 title = book.title,
                 actor = actor,
                 changes = mapOf("formats" to mapOf("old" to emptyList<String>(), "new" to book.formats)),
-                action = "UPLOAD",
+                action = BookActivityAction.UPLOAD,
             )
-        }
-    }
-
-    private fun deleteTree(directory: Path) {
-        Files.walk(directory).use { paths ->
-            paths.sorted(Comparator.reverseOrder()).forEach { Files.deleteIfExists(it) }
         }
     }
 }

@@ -68,6 +68,15 @@ export interface BookUploadResult {
 
 export type BookUploadChoice = "ADD_FORMAT" | "REPLACE_FORMAT" | "ADD_SEPARATE" | "SKIP";
 
+/** GET /api/upload-options: what the backend accepts in an upload of book files. */
+export interface UploadOptions {
+  formats: string[]; // Calibre format names: "EPUB", "PDF", …
+  maxFormatSize: number; // bytes, per file
+  maxFormatSizeLabel: string; // "500 MB"
+  maxRequestSize: number; // bytes, for all files of one upload
+  maxRequestSizeLabel: string;
+}
+
 export interface BookUploadDecisionResult {
   choice: BookUploadChoice;
   book: Book | null;
@@ -211,16 +220,20 @@ export interface LibraryEditingView {
   editingPaused: boolean;
 }
 
-export type BookActivityAction =
-  | "UPLOAD"
-  | "ADD_FORMAT"
-  | "REMOVE_FORMAT"
-  | "REPLACE_FORMAT"
-  | "EDIT_METADATA"
-  | "EDIT_COVER"
-  | "DELETE_BOOK"
-  | "PAUSE_EDITING"
-  | "RESUME_EDITING";
+/** What an activity entry records, with its label; in the backend's order (BookActivityAction). */
+export const BOOK_ACTIVITY_ACTIONS = {
+  UPLOAD: "Upload",
+  ADD_FORMAT: "Add format",
+  REMOVE_FORMAT: "Remove format",
+  REPLACE_FORMAT: "Replace format",
+  EDIT_METADATA: "Edit",
+  EDIT_COVER: "Cover",
+  DELETE_BOOK: "Delete",
+  PAUSE_EDITING: "Pause editing",
+  RESUME_EDITING: "Resume editing",
+} as const;
+
+export type BookActivityAction = keyof typeof BOOK_ACTIVITY_ACTIONS;
 
 export interface BookActivityEntry {
   id: number;

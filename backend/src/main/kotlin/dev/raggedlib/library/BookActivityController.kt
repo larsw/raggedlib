@@ -29,9 +29,9 @@ class BookActivityController(
         val libraryIds = if (libraryId == null) administered else {
             setOf(access.requireLibrary(libraryId, LibraryRole.ADMIN).id)
         }
-        val normalizedAction = action?.uppercase()
-        if (normalizedAction != null && normalizedAction !in ACTIONS) {
-            badRequest("action must be one of ${ACTIONS.sorted().joinToString()}")
+        val normalizedAction = action?.let { requested ->
+            BookActivityAction.entries.firstOrNull { it.name == requested.uppercase() }
+                ?: badRequest("action must be one of ${BookActivityAction.entries.map { it.name }.sorted().joinToString()}")
         }
         return activity.list(
             libraryIds,
@@ -44,16 +44,5 @@ class BookActivityController(
 
     private companion object {
         const val MAX_PAGE_SIZE = 100
-        val ACTIONS = setOf(
-            "UPLOAD",
-            "ADD_FORMAT",
-            "REMOVE_FORMAT",
-            "REPLACE_FORMAT",
-            "EDIT_METADATA",
-            "EDIT_COVER",
-            "DELETE_BOOK",
-            "PAUSE_EDITING",
-            "RESUME_EDITING",
-        )
     }
 }

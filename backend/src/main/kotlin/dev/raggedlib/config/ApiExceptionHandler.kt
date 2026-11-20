@@ -1,9 +1,11 @@
 package dev.raggedlib.config
 
 import org.slf4j.LoggerFactory
+import org.springframework.beans.factory.annotation.Value
 import org.springframework.http.HttpStatus
 import org.springframework.http.ResponseEntity
 import org.springframework.http.converter.HttpMessageNotReadableException
+import org.springframework.util.unit.DataSize
 import org.springframework.web.bind.MissingServletRequestParameterException
 import org.springframework.web.multipart.MaxUploadSizeExceededException
 import org.springframework.web.bind.annotation.ExceptionHandler
@@ -22,6 +24,17 @@ internal fun isClientDisconnect(e: Throwable): Boolean =
         .take(20)
         .any { it is AsyncRequestNotUsableException || it.javaClass.simpleName == "ClientAbortException" }
 
+/** Tomcat's cause names the limit: FileSizeLimitExceededException (one file) or SizeLimitExceededException (all). */
+internal fun uploadLimitMessage(e: Throwable, maxFileSize: DataSize, maxRequestSize: DataSize): String {
+    val causes = generateSequence(e) { it.cause.takeIf { c -> c !== it } }.take(20).toList()
+    fun mentions(name: String) = causes.any { it.javaClass.simpleName == name || it.message.orEmpty().contains(name) }
+    return when {
+        mentions("FileSizeLimitExceededException") -> "a file is larger than the ${maxFileSize.label()} limit for one file"
+        mentions("SizeLimitExceededException") -> "the upload is larger than the ${maxRequestSize.label()} limit for one request"
+        else -> "the upload is too large: each file can be up to ${maxFileSize.label()}, and one request up to ${maxRequestSize.label()}"
+    }
+}
+
 class ApiException(val status: HttpStatus, message: String, val details: Any? = null) : RuntimeException(message)
 
 fun notFound(message: String): Nothing = throw ApiException(HttpStatus.NOT_FOUND, message)
@@ -31,7 +44,10 @@ data class ErrorBody(val error: String)
 data class DetailedErrorBody(val error: String, val details: Any)
 
 @RestControllerAdvice
-class ApiExceptionHandler {
+class ApiExceptionHandler(
+    @Value("\${spring.servlet.multipart.max-file-size:500MB}") private val maxFileSize: DataSize,
+    @Value("\${spring.servlet.multipart.max-request-size:2GB}") private val maxRequestSize: DataSize,
+) {
     private val log = LoggerFactory.getLogger(javaClass)
 
     @ExceptionHandler(ApiException::class)
@@ -45,9 +61,10 @@ class ApiExceptionHandler {
     fun rse(e: ResponseStatusException) =
         ResponseEntity.status(e.statusCode).body(ErrorBody(e.reason ?: e.statusCode.toString()))
 
+    /** Spring's multipart limits stop an upload before the services see it; say which one did. */
     @ExceptionHandler(MaxUploadSizeExceededException::class)
-    fun uploadTooLarge() =
-        ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ErrorBody("upload exceeds the configured file or request size limit"))
+    fun uploadTooLarge(e: MaxUploadSizeExceededException) =
+        ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE).body(ErrorBody(uploadLimitMessage(e, maxFileSize, maxRequestSize)))
 
     @ExceptionHandler(NoResourceFoundException::class)
     fun noResource(e: NoResourceFoundException) =

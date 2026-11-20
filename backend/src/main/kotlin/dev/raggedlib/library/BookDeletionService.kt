@@ -1,8 +1,6 @@
 package dev.raggedlib.library
 
 import dev.raggedlib.auth.Access
-import dev.raggedlib.auth.ApiScope
-import dev.raggedlib.auth.LibraryRole
 import dev.raggedlib.calibre.CalibreLibraryWriteLock
 import dev.raggedlib.calibre.CalibreMetadataWriter
 import org.slf4j.LoggerFactory
@@ -26,13 +24,10 @@ class BookDeletionService(
     private val log = LoggerFactory.getLogger(javaClass)
 
     fun delete(bookId: Long) {
-        access.requireScope(ApiScope.LIBRARY_EDIT)
-        val authorized = access.requireBook(bookId, LibraryRole.CURATOR)
-        val library = access.requireEditableLibrary(authorized.book.libraryId)
+        val library = access.requireEditableBook(bookId).library
         val actor = access.activityActor()
         writeLock.withLibrary(library.root) {
-            access.requireScope(ApiScope.LIBRARY_EDIT)
-            val current = access.requireEditableBook(bookId)
+            val current = access.requireEditableBook(bookId).row
             writer.removeBook(library, current.book.calibreId)
         }
         markDeleted(listOf(bookId), actor)
@@ -52,7 +47,7 @@ class BookDeletionService(
                         title = row.book.title,
                         actor = actor,
                         changes = mapOf("deleted" to mapOf("old" to false, "new" to true)),
-                        action = "DELETE_BOOK",
+                        action = BookActivityAction.DELETE_BOOK,
                     )
                 }
             }

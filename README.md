@@ -76,9 +76,12 @@ work from stale copies and overwrite each other's changes.
 Curators can add books from the Library tab with **Add books** or by dropping files there. Files with the same basename
 and different Calibre ebook extensions become formats of one book. When Calibre finds the same title and authors in
 that library, choose to add the upload as formats, replace existing formats, create a separate book, or skip it.
-Undecided uploads are held for up to 24 hours. The default limit is 500 MB per file; set
-`RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE` to change it. Multipart requests default to 2 GB total; set
-`RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE` when uploading more or larger formats together. New books are synced and queued
+Undecided uploads are held for up to 24 hours: leave the dialog to edit one of the new books, or choose **Decide
+later**, and **Undecided uploads** in the toolbar brings it back. While editing is paused, **Add books** stays visible
+but says why it can't add books. The default limit is 500 MB per file and 2 GB for one upload; set
+`UPLOAD_MAX_FORMAT_SIZE` and `UPLOAD_MAX_REQUEST_SIZE` in `.env` to change them (outside Docker, the backend reads
+`RAGGEDLIB_UPLOAD_MAX_FORMAT_SIZE` and `RAGGEDLIB_UPLOAD_MAX_REQUEST_SIZE`, and the web UI's server
+`UPLOAD_MAX_REQUEST_SIZE`). The Add books dialog checks files against these limits before sending them. New books are synced and queued
 for indexing immediately. Scripts can use `POST /api/libraries/{id}/books` and its decision endpoint with an API key
 that has `library:edit`.
 

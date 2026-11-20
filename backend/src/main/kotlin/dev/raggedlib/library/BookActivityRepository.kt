@@ -9,6 +9,19 @@ import java.time.Instant
 
 data class BookEdit(val actor: String, val at: Instant)
 
+/** What a [BookActivityEntry] records; stored by name in `book_activity.action`. */
+enum class BookActivityAction {
+    UPLOAD,
+    ADD_FORMAT,
+    REMOVE_FORMAT,
+    REPLACE_FORMAT,
+    EDIT_METADATA,
+    EDIT_COVER,
+    DELETE_BOOK,
+    PAUSE_EDITING,
+    RESUME_EDITING,
+}
+
 data class BookActivityChange(val old: JsonNode?, val new: JsonNode?)
 
 data class BookActivityEntry(
@@ -18,7 +31,7 @@ data class BookActivityEntry(
     val bookId: Long?,
     val bookTitle: String?,
     val actor: String,
-    val action: String,
+    val action: BookActivityAction,
     val changes: Map<String, BookActivityChange>,
     val at: Instant,
 )
@@ -43,7 +56,7 @@ class BookActivityRepository(
         title: String,
         actor: String,
         changes: Map<String, Map<String, Any?>>,
-        action: String = "EDIT_METADATA",
+        action: BookActivityAction = BookActivityAction.EDIT_METADATA,
     ) {
         jdbc.update(
             """
@@ -56,25 +69,25 @@ class BookActivityRepository(
                 .addValue("calibreId", calibreId)
                 .addValue("title", title)
                 .addValue("actor", actor)
-                .addValue("action", action)
+                .addValue("action", action.name)
                 .addValue("changes", mapper.writeValueAsString(changes)),
         )
     }
 
-    fun recordLibraryAction(libraryId: Long, actor: String, action: String) {
+    fun recordLibraryAction(libraryId: Long, actor: String, action: BookActivityAction) {
         jdbc.update(
             """
             insert into book_activity (library_id, actor, action)
             values (:libraryId, :actor, :action)
             """.trimIndent(),
-            mapOf("libraryId" to libraryId, "actor" to actor, "action" to action),
+            mapOf("libraryId" to libraryId, "actor" to actor, "action" to action.name),
         )
     }
 
     fun list(
         libraryIds: Set<Long>,
         user: String?,
-        action: String?,
+        action: BookActivityAction?,
         page: Int,
         size: Int,
     ): BookActivityPage {
@@ -86,7 +99,7 @@ class BookActivityRepository(
         }.joinToString(" and ")
         val params = MapSqlParameterSource("libraryIds", libraryIds)
             .addValue("actor", user)
-            .addValue("action", action)
+            .addValue("action", action?.name)
         val total = jdbc.queryForObject(
             "select count(*) from book_activity a where $where",
             params,
@@ -117,7 +130,7 @@ class BookActivityRepository(
                 bookId,
                 rs.getString("book_title"),
                 rs.getString("actor"),
-                rs.getString("action"),
+                BookActivityAction.valueOf(rs.getString("action")),
                 changes,
                 rs.getTimestamp("created_at").toInstant(),
             )
@@ -132,18 +145,18 @@ class BookActivityRepository(
     fun lastEdit(bookId: Long): BookEdit? = jdbc.query(
         """
         select actor, created_at from book_activity
-        where book_id = :bookId and action in ('EDIT_METADATA', 'EDIT_COVER')
+        where book_id = :bookId and action in (:actions)
         order by created_at desc, id desc limit 1
         """.trimIndent(),
-        mapOf("bookId" to bookId),
+        mapOf("bookId" to bookId, "actions" to listOf(BookActivityAction.EDIT_METADATA.name, BookActivityAction.EDIT_COVER.name)),
     ) { rs, _ -> BookEdit(rs.getString("actor"), rs.getTimestamp("created_at").toInstant()) }.firstOrNull()
 
     fun addedBy(bookId: Long): BookEdit? = jdbc.query(
         """
         select actor, created_at from book_activity
-        where book_id = :bookId and action = 'UPLOAD'
+        where book_id = :bookId and action = :action
         order by created_at asc, id asc limit 1
         """.trimIndent(),
-        mapOf("bookId" to bookId),
+        mapOf("bookId" to bookId, "action" to BookActivityAction.UPLOAD.name),
     ) { rs, _ -> BookEdit(rs.getString("actor"), rs.getTimestamp("created_at").toInstant()) }.firstOrNull()
 }

@@ -28,7 +28,7 @@ class MetadataDbReader(private val libraryRoot: Path) {
                 ps.setLong(1, bookId)
                 ps.executeQuery().use { rs -> buildList { while (rs.next()) add(read(rs)) } }
             }
-            val book = query("select timestamp, title_sort, author_sort from books where id = ?") {
+            val book = query("select timestamp, sort, author_sort from books where id = ?") {
                 Triple(it.getString(1), it.getString(2), it.getString(3))
             }.firstOrNull() ?: return@use null
             val descriptionHtml = query("select text from comments where book = ?") { it.getString(1) }.firstOrNull()

@@ -1,5 +1,6 @@
 import path from "node:path";
 import index from "./index.html";
+import { maxRequestBodySize } from "./limits";
 import { createProxy } from "./proxy";
 
 const BACKEND_URL = (process.env.BACKEND_URL ?? "http://localhost:8080").replace(/\/+$/, "");
@@ -35,6 +36,8 @@ async function foliate(req: Request): Promise<Response> {
 const server = Bun.serve({
   hostname: HOST,
   port: PORT,
+  // book uploads stream through to the backend, which enforces the real limits
+  maxRequestBodySize: maxRequestBodySize(process.env),
   routes: {
     "/healthz": new Response("ok", { headers: { "content-type": "text/plain" } }),
     "/api/*": proxy,

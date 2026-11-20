@@ -1250,6 +1250,10 @@ body.is-resizing-x * {
   font-weight: 600;
   pointer-events: none;
 }
+.book-upload-drop-overlay.is-blocked {
+  border-color: var(--app-muted);
+  color: var(--app-muted);
+}
 .book-upload-library {
   display: flex;
   align-items: center;
@@ -1308,6 +1312,24 @@ body.is-resizing-x * {
   align-items: center;
   gap: 8px;
 }
+.book-upload-confirm-close {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* read by screen readers, not shown */
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
 .book-upload-progress {
   display: flex;
   align-items: center;

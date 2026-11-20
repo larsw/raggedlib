@@ -57,7 +57,14 @@ data class MetadataSuggestions(
     val languages: List<String>,
 )
 
-data class SyncResult(val added: Int, val updated: Int, val removed: Int, val total: Int, val source: String)
+data class SyncResult(val added: Int, val updated: Int, val removed: Int, val total: Int, val source: String) {
+    /** At least one of the requested libraries synced; [source] is [NOTHING_SYNCED] when every one failed. */
+    fun anySynced() = source != NOTHING_SYNCED
+
+    companion object {
+        const val NOTHING_SYNCED = "none"
+    }
+}
 
 /** GET /api/libraries: one configured Calibre library. [path] is shown to admins only; [role] is the caller's. */
 data class Library(

@@ -131,17 +131,18 @@ class SecurityConfig {
                     .hasAuthority(ApiScope.LIBRARY_CURATE.authority)
                 a.requestMatchers(HttpMethod.PUT, "/api/settings")
                     .access(all(hasAuthority(Authorities.ADMIN), hasAuthority(ApiScope.LIBRARY_CURATE.authority)))
-                a.requestMatchers(HttpMethod.PUT, "/api/books/*/metadata")
+                // editing books in writable libraries (the libraries, roles and pauses are checked by Access)
+                a.requestMatchers(HttpMethod.PUT, "/api/books/*/metadata", "/api/books/*/cover", "/api/books/*/formats")
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
-                a.requestMatchers(HttpMethod.POST, "/api/books/*/metadata-candidates")
-                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
-                a.requestMatchers(HttpMethod.POST, "/api/books/*/cover-candidates")
-                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
-                a.requestMatchers(HttpMethod.DELETE, "/api/books/*")
-                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
-                a.requestMatchers(HttpMethod.POST, "/api/libraries/*/books")
-                    .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
-                a.requestMatchers(HttpMethod.POST, "/api/libraries/*/books/*/decision")
+                a.requestMatchers(
+                    HttpMethod.POST,
+                    "/api/books/*/metadata-candidates",
+                    "/api/books/*/cover-candidates",
+                    "/api/books/*/cover/from-format",
+                    "/api/libraries/*/books",
+                    "/api/libraries/*/books/*/decision",
+                ).hasAuthority(ApiScope.LIBRARY_EDIT.authority)
+                a.requestMatchers(HttpMethod.DELETE, "/api/books/*", "/api/books/*/cover", "/api/books/*/formats/*")
                     .hasAuthority(ApiScope.LIBRARY_EDIT.authority)
                 a.requestMatchers("/api/**").hasAuthority(ApiScope.LIBRARY_READ.authority)
                 a.anyRequest().denyAll()

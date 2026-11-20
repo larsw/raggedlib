@@ -1,7 +1,6 @@
 package dev.raggedlib.library
 
 import dev.raggedlib.auth.Access
-import dev.raggedlib.auth.ApiScope
 import dev.raggedlib.calibre.CalibreLibraryWriteLock
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.calibre.CalibreMetadataWriter
@@ -32,7 +31,7 @@ class BookCoverService(
     private val details: BookDetailsService,
 ) {
     fun upload(bookId: Long, image: ByteArray): BookDetails {
-        val library = editableLibrary(bookId)
+        val library = access.requireEditableBook(bookId).library
         CoverImageValidator.validate(image)
         val tempCover = temporaryCover(image)
         try {
@@ -43,18 +42,15 @@ class BookCoverService(
     }
 
     fun remove(bookId: Long): BookDetails {
-        val library = editableLibrary(bookId)
+        val library = access.requireEditableBook(bookId).library
         return change(bookId, library.root, null)
     }
 
     fun useFormat(bookId: Long, format: String): BookDetails {
-        val library = editableLibrary(bookId)
+        val library = access.requireEditableBook(bookId).library
         val normalized = format.uppercase()
         return writeLock.withLibrary(library.root) {
-            access.requireScope(ApiScope.LIBRARY_EDIT)
-            access.requireEditableBook(bookId)
-            access.requireEditableLibrary(library.id)
-            val current = books.find(bookId) ?: notFound("book $bookId not found")
+            val current = access.requireEditableBook(bookId).row
             val relative = current.formatPaths[normalized]
                 ?: badRequest("book has no $normalized format (available: ${current.formatPaths.keys.sorted().joinToString()})")
             val file = paths.resolve(current.book.libraryId, relative).takeIf(Files::isRegularFile)
@@ -77,18 +73,9 @@ class BookCoverService(
         }
     }
 
-    private fun editableLibrary(bookId: Long) = run {
-        access.requireScope(ApiScope.LIBRARY_EDIT)
-        val book = access.requireEditableBook(bookId)
-        access.requireEditableLibrary(book.book.libraryId)
-    }
-
     private fun change(bookId: Long, libraryRoot: Path, cover: Path?): BookDetails =
         writeLock.withLibrary(libraryRoot) {
-            access.requireScope(ApiScope.LIBRARY_EDIT)
-            val authorized = access.requireEditableBook(bookId)
-            access.requireEditableLibrary(authorized.book.libraryId)
-            val current = books.find(bookId) ?: notFound("book $bookId not found")
+            val current = access.requireEditableBook(bookId).row
             if (cover == null && current.coverPath == null) return@withLibrary details.details(bookId)
             updateCover(bookId, libraryRoot, cover)
         }
@@ -114,7 +101,7 @@ class BookCoverService(
                 title = updated.title,
                 actor = access.activityActor(),
                 changes = mapOf("cover" to mapOf("old" to if (before) "present" else "none", "new" to if (updated.coverPath != null) "present" else "none")),
-                action = "EDIT_COVER",
+                action = BookActivityAction.EDIT_COVER,
             )
         }
         return details.details(bookId)
