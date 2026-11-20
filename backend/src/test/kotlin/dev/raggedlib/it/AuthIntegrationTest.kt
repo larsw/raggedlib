@@ -577,7 +577,88 @@ class AuthIntegrationTest {
         assertEquals(200, keySeparate.status, keySeparate.body)
     }
 
-    private fun epubBytes(title: String, author: String): ByteArray = ByteArrayOutputStream().also { output ->
+    @Test
+    fun `book uploads are refused in read-only and paused libraries`() {
+        val part = Browser.MultipartPart("files", "book.epub", "application/epub+zip", byteArrayOf(1))
+
+        val readOnly = as_("admin").postMultipart("/api/libraries/$beta/books", listOf(part))
+        assertEquals(403, readOnly.status, readOnly.body)
+        assertTrue(readOnly.body.contains("no metadata.db"), readOnly.body)
+
+        registry.setEditingPaused(alpha, true)
+        try {
+            val paused = as_("curator").postMultipart("/api/libraries/$alpha/books", listOf(part))
+            assertEquals(403, paused.status, paused.body)
+            assertTrue(paused.body.contains("Editing is paused"), paused.body)
+        } finally {
+            registry.setEditingPaused(alpha, false)
+        }
+    }
+
+    @Test
+    fun `an uploaded EPUB brings its embedded metadata and cover, is listed, and is queued for indexing without Start`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val title = "Embedded cover ${System.nanoTime()}"
+        val cover = ByteArrayOutputStream().also {
+            assertTrue(ImageIO.write(BufferedImage(60, 90, BufferedImage.TYPE_INT_RGB), "png", it))
+        }.toByteArray()
+        val curator = as_("curator")
+
+        val uploaded = curator.postMultipart(
+            "/api/libraries/$alpha/books",
+            listOf(Browser.MultipartPart("files", "upload.epub", "application/epub+zip", epubBytes(title, "Cover Author", cover))),
+        )
+
+        assertEquals(200, uploaded.status, uploaded.body)
+        val book = uploaded.json.path("items")[0].path("book")
+        assertEquals(title, book.path("title").asString())
+        assertEquals(listOf("Cover Author"), book.path("authors").values().map { it.asString() })
+        assertTrue(book.path("hasCover").asBoolean(), book.toString())
+        val bookId = book.path("id").asLong()
+        val listed = curator.get("/api/books?libraryId=$alpha&q=${java.net.URLEncoder.encode(title, Charsets.UTF_8)}")
+        assertEquals(listOf(bookId), listed.json.path("items").values().map { it.path("id").asLong() })
+        // nobody pressed Start: the upload queued it, so an ingest run takes it up (and, with no embedding model
+        // here, gets as far as it can)
+        val deadline = Instant.now().plusSeconds(30)
+        var status = book.path("status").asString()
+        while (status == "PENDING" && Instant.now().isBefore(deadline)) {
+            Thread.sleep(200)
+            status = curator.get("/api/books/$bookId").json.path("status").asString()
+        }
+        assertTrue(status != "PENDING", "the uploaded book is still waiting to be indexed")
+    }
+
+    @Test
+    fun `while editing is paused a duplicate upload can be skipped but not added`() {
+        assumeTrue(calibreTestUnavailableReason == null, calibreTestUnavailableReason ?: "")
+        val title = "Paused duplicate ${System.nanoTime()}"
+        val files = listOf(Browser.MultipartPart("files", "$title.epub", "application/epub+zip", epubBytes(title, "Pause Author")))
+        val curator = as_("curator")
+        assertEquals(200, curator.postMultipart("/api/libraries/$alpha/books", files).status)
+        fun pendingDuplicate(): String {
+            val duplicate = curator.postMultipart("/api/libraries/$alpha/books", files)
+            assertEquals(200, duplicate.status, duplicate.body)
+            return duplicate.json.path("items")[0].path("pendingId").asString()
+        }
+        val toAdd = pendingDuplicate()
+        val toSkip = pendingDuplicate()
+        fun decide(pendingId: String, choice: String) =
+            curator.post("/api/libraries/$alpha/books/$pendingId/decision", mapOf("choice" to choice))
+
+        registry.setEditingPaused(alpha, true)
+        try {
+            val refused = decide(toAdd, "ADD_SEPARATE")
+            assertEquals(403, refused.status, refused.body)
+            assertTrue(refused.body.contains("Editing is paused"), refused.body)
+            assertEquals(200, decide(toSkip, "SKIP").status)
+        } finally {
+            registry.setEditingPaused(alpha, false)
+        }
+        assertEquals(404, decide(toSkip, "SKIP").status, "a skipped upload's files are gone")
+        assertEquals(200, decide(toAdd, "SKIP").status, "a refused decision leaves the upload waiting")
+    }
+
+    private fun epubBytes(title: String, author: String, cover: ByteArray? = null): ByteArray = ByteArrayOutputStream().also { output ->
         ZipOutputStream(output).use { zip ->
             val mime = "application/epub+zip".toByteArray()
             val crc = java.util.zip.CRC32().apply { update(mime) }
@@ -600,8 +681,13 @@ class AuthIntegrationTest {
             )
             entry(
                 "OEBPS/content.opf",
-                """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">upload-${title.hashCode()}</dc:identifier><dc:title>$title</dc:title><dc:creator>$author</dc:creator><dc:language>en</dc:language></metadata><manifest><item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>""",
+                """<?xml version="1.0"?><package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="book-id"><metadata xmlns:dc="http://purl.org/dc/elements/1.1/"><dc:identifier id="book-id">upload-${title.hashCode()}</dc:identifier><dc:title>$title</dc:title><dc:creator>$author</dc:creator><dc:language>en</dc:language>${if (cover != null) """<meta name="cover" content="cover-image"/>""" else ""}</metadata><manifest>${if (cover != null) """<item id="cover-image" href="cover.png" media-type="image/png"/>""" else ""}<item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/></manifest><spine><itemref idref="chapter"/></spine></package>""",
             )
+            if (cover != null) {
+                zip.putNextEntry(ZipEntry("OEBPS/cover.png"))
+                zip.write(cover)
+                zip.closeEntry()
+            }
             entry(
                 "OEBPS/chapter.xhtml",
                 """<?xml version="1.0"?><html xmlns="http://www.w3.org/1999/xhtml"><body><p>Upload test passage.</p></body></html>""",
@@ -1012,13 +1098,20 @@ class AuthIntegrationTest {
             mapOf("id" to betaBook),
         )
 
+        // other tests add books to Alpha too: its values must include Alpha's and never Beta's
         val alphaValues = as_("curator").get("/api/libraries/$alpha/metadata-values")
         assertEquals(200, alphaValues.status, alphaValues.body)
-        assertEquals(listOf("Alpha Author"), alphaValues.json.path("authors").values().map { it.asString() })
-        assertEquals(listOf("Alpha Tag"), alphaValues.json.path("tags").values().map { it.asString() })
-        assertEquals(listOf("Alpha Series"), alphaValues.json.path("series").values().map { it.asString() })
-        assertEquals(listOf("Alpha Press"), alphaValues.json.path("publishers").values().map { it.asString() })
-        assertEquals(listOf("eng"), alphaValues.json.path("languages").values().map { it.asString() })
+        fun values(json: JsonNode, field: String) = json.path(field).values().map { it.asString() }
+        for ((field, alphaValue, betaValue) in listOf(
+            Triple("authors", "Alpha Author", "Beta Author"),
+            Triple("tags", "Alpha Tag", "Beta Tag"),
+            Triple("series", "Alpha Series", "Beta Series"),
+            Triple("publishers", "Alpha Press", "Beta Press"),
+            Triple("languages", "eng", "fra"),
+        )) {
+            assertTrue(alphaValue in values(alphaValues.json, field), "$field: ${values(alphaValues.json, field)}")
+            assertFalse(betaValue in values(alphaValues.json, field), "$field: ${values(alphaValues.json, field)}")
+        }
 
         val betaValues = as_("curator").get("/api/libraries/$beta/metadata-values").json
         assertEquals(listOf("Beta Author"), betaValues.path("authors").values().map { it.asString() })
@@ -1060,6 +1153,9 @@ class AuthIntegrationTest {
             "--field", "title:Changed outside raggedlib",
             "--field", "comments:<p><strong>Original</strong> description</p>",
         )
+        // as if indexed after that sync, whatever earlier tests left behind
+        library.sync(setOf(alpha))
+        jdbc.update("update books set status = 'INDEXED' where id = :id", mapOf("id" to alphaBook))
         val beforeTags = as_("curator").get("/api/books/$alphaBook/details").json
         val edited = as_("curator").put(
             "/api/books/$alphaBook/metadata",
@@ -1079,7 +1175,7 @@ class AuthIntegrationTest {
         assertEquals(
             "updated",
             jdbc.queryForObject(
-                "select changes -> 'tags' -> 'new' ->> 0 from book_activity where book_id = :id",
+                "select changes -> 'tags' -> 'new' ->> 0 from book_activity where book_id = :id order by id desc limit 1",
                 mapOf("id" to alphaBook), String::class.java,
             ),
         )
@@ -1186,7 +1282,7 @@ class AuthIntegrationTest {
         assertEquals("INDEXED", extras.json.path("book").path("status").asString())
         assertEquals(
             "4.5",
-            jdbc.queryForObject("select changes -> 'rating' ->> 'new' from book_activity where book_id = :id", mapOf("id" to alphaBook), String::class.java),
+            jdbc.queryForObject("select changes -> 'rating' ->> 'new' from book_activity where book_id = :id order by id desc limit 1", mapOf("id" to alphaBook), String::class.java),
         )
 
         val beforeDescription = as_("curator").get("/api/books/$alphaBook/details").json
