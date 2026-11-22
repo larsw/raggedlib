@@ -55,6 +55,7 @@ class RequestCancellations {
      * request is cancelled as soon as it arrives, if it is still on its way.
      */
     fun cancel(caller: String, id: String): Boolean {
+        if (id.length > MAX_ID_LENGTH) return false // no request can have it (see [idOf]): nothing to keep
         val key = Key(caller, id)
         running[key]?.let {
             it.cancel()
@@ -71,7 +72,10 @@ class RequestCancellations {
     internal fun runningCount(): Int = running.size
 
     companion object {
-        /** The request's id, for cancelling it: unique per caller while it runs (the web UI's server sends a UUID). */
+        /**
+         * The request's id, for cancelling it: never reused by the caller (the web UI's server sends a UUID), since a
+         * cancel that arrives after its request ended is kept for [EARLY_MS] and would cancel the next one with it.
+         */
         const val HEADER = "X-Request-Id"
         private const val MAX_ID_LENGTH = 128
         private const val EARLY_MS = 60_000L

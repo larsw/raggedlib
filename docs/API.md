@@ -3,7 +3,8 @@
 Base URL: `http://localhost:8080/api` (the web UI proxies it as `/api`, and `/mcp` too). All bodies JSON (camelCase).
 Errors: HTTP 4xx/5xx with `{"error": "message"}`. Timestamps ISO-8601 strings. IDs are calibre book ids (Long).
 
-Cancelling: a request sent with an `X-Request-Id: <id>` header (unique per caller while it runs, e.g. a UUID) can be
+Cancelling: a request sent with an `X-Request-Id: <id>` header (never reused by the caller, e.g. a UUID: a cancel
+that arrives after its request ended is kept for a minute and would cancel the next request with that id) can be
 cancelled while the backend works on it by `POST /api/requests/{id}/cancel` from the same caller (same session or
 API key). The backend can't tell on its own that a client went away, so without a cancel an abandoned request runs to
 its end. `GET /api/vectors` and `/api/vectors/topics` honour it: their Postgres queries are cancelled and their

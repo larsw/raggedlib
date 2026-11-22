@@ -106,6 +106,8 @@ private fun <T> cancellable(sql: String, args: Array<out Any?>, run: (PreparedSt
     var registration: AutoCloseable? = null
     try {
         val statement = PreparedStatementCreator { con ->
+            // cancelled while waiting for a connection: the callback below would come too early to stop anything
+            cancellation.throwIfCancelled()
             con.prepareStatement(sql).also { ps ->
                 ArgumentPreparedStatementSetter(args).setValues(ps)
                 // the driver cancels only while the statement runs, never one run later on the same connection
