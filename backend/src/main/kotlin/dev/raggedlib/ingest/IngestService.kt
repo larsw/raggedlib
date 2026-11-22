@@ -28,6 +28,7 @@ import java.util.concurrent.ConcurrentLinkedDeque
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.RejectedExecutionException
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
@@ -266,16 +267,24 @@ class IngestService(
                     if (done) break else continue
                 }
                 r.inFlight.incrementAndGet()
-                workers.submit {
-                    try {
-                        val extracted = extractOne(id, r.eligible)
-                        if (extracted != null) handOff(queue, Queued(extracted, r)) else r.inFlight.decrementAndGet()
-                    } catch (e: Throwable) {
-                        r.inFlight.decrementAndGet()
-                        log.error("Extraction worker failed for book {}", id, e)
-                    } finally {
-                        permits.release()
+                try {
+                    workers.submit {
+                        try {
+                            val extracted = extractOne(id, r.eligible)
+                            if (extracted != null) handOff(queue, Queued(extracted, r)) else r.inFlight.decrementAndGet()
+                        } catch (e: Throwable) {
+                            r.inFlight.decrementAndGet()
+                            log.error("Extraction worker failed for book {}", id, e)
+                        } finally {
+                            permits.release()
+                        }
                     }
+                } catch (e: RejectedExecutionException) {
+                    // forceStop shut the workers down after the check above: the book stays PENDING, and the run
+                    // ends as below, so the embedder still gets its POISON and stops
+                    r.inFlight.decrementAndGet()
+                    permits.release()
+                    break
                 }
             }
             workers.shutdown()

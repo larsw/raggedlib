@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "../api/client";
 import type { Library } from "../api/types";
 import { loadJson, saveJson, STORAGE_KEYS } from "../lib/storage";
@@ -13,16 +13,22 @@ export function useLibraries() {
   const [librariesLoading, setLibrariesLoading] = useState(true);
   const [libraryId, setLibraryIdState] = useState<number | null>(() => loadJson<number | null>(STORAGE_KEYS.libraryId, null));
 
-  const refreshLibraries = useCallback(
-    () =>
-      api
-        .libraries()
-        .then(setLibraries)
-        // the views say what's wrong with the backend; a 401 signs out (see useAuth)
-        .catch((err) => console.warn("[raggedlib] couldn't load the libraries", err))
-        .finally(() => setLibrariesLoading(false)),
-    [],
-  );
+  // only the latest refresh's answer counts: an older one arriving later (from before a role change) would bring back
+  // the libraries and roles as they were
+  const generation = useRef(0);
+  const refreshLibraries = useCallback(() => {
+    const mine = ++generation.current;
+    return api
+      .libraries()
+      .then((libs) => {
+        if (mine === generation.current) setLibraries(libs);
+      })
+      // the views say what's wrong with the backend; a 401 signs out (see useAuth)
+      .catch((err) => console.warn("[raggedlib] couldn't load the libraries", err))
+      .finally(() => {
+        if (mine === generation.current) setLibrariesLoading(false);
+      });
+  }, []);
 
   useEffect(() => void refreshLibraries(), [refreshLibraries]);
 

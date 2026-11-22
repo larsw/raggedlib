@@ -72,7 +72,7 @@ class BookController(
     @GetMapping("/books/{id}/details")
     fun details(@PathVariable id: Long): BookDetails {
         access.requireBook(id)
-        return details.details(id).let { d -> if (d.duplicateOf != null && !access.canSeeBook(d.duplicateOf.id)) d.copy(duplicateOf = null) else d }
+        return details.details(id)
     }
 
     @PutMapping("/books/{id}/metadata")

@@ -1,5 +1,7 @@
 package dev.raggedlib.library
 
+import dev.raggedlib.auth.Access
+import dev.raggedlib.auth.LibraryRole
 import dev.raggedlib.calibre.CalibreExtras
 import dev.raggedlib.calibre.MetadataDbReader
 import dev.raggedlib.config.notFound
@@ -33,6 +35,7 @@ class BookDetailsService(
     private val activity: BookActivityRepository,
     private val jdbc: NamedParameterJdbcTemplate,
     private val registry: LibraryRegistry,
+    private val access: Access,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val metadataDbByLibrary = ConcurrentHashMap<Long, MetadataDbReader>()
@@ -46,7 +49,11 @@ class BookDetailsService(
             log.debug("No Calibre extras for book {}: {}", id, e.message)
             null
         }
-        val keeper = book.duplicateOf?.let { books.find(it)?.book }?.let { BookRef(it.id, it.title) }
+        // the copy standing in for it may be in a library the caller can't see: then it isn't named (every caller of
+        // this answers a request, after an edit as well as for GET /details)
+        val keeper = book.duplicateOf?.let { books.find(it)?.book }
+            ?.takeIf { access.role(it.libraryId).atLeast(LibraryRole.VIEWER) }
+            ?.let { BookRef(it.id, it.title) }
         return BookDetails(book, extras, keeper, sections(id), activity.lastEdit(id), activity.addedBy(id))
     }
 

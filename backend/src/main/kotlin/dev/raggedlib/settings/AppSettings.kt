@@ -1,5 +1,6 @@
 package dev.raggedlib.settings
 
+import dev.raggedlib.auth.Access
 import dev.raggedlib.config.RaggedlibProperties
 import dev.raggedlib.config.badRequest
 import dev.raggedlib.ingest.IngestService
@@ -88,12 +89,14 @@ class AppSettings(private val jdbc: NamedParameterJdbcTemplate, private val prop
 
 @RestController
 @RequestMapping("/api/settings")
-class SettingsController(private val settings: AppSettings, private val ingest: IngestService) {
+class SettingsController(private val settings: AppSettings, private val ingest: IngestService, private val access: Access) {
     @GetMapping
     fun get(): SettingsView = settings.view()
 
     @PutMapping
     fun put(@RequestBody body: SettingsUpdate): SettingsView {
+        // the URL rule's ROLE_ADMIN is the session's as of sign-in: an admin demoted since must be refused too
+        access.requireAdmin()
         body.parallelBooks?.let {
             settings.setParallelBooks(it)
             ingest.parallelBooksChanged()

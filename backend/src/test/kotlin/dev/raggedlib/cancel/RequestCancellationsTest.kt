@@ -41,6 +41,14 @@ class RequestCancellationsTest {
     }
 
     @Test
+    fun `one caller's early cancels can't crowd out another's`() {
+        repeat(RequestCancellations.MAX_EARLY_PER_CALLER + 10) { cancellations.cancel("mallory", "r$it") }
+        assertFalse(cancellations.handle("mallory", "r${RequestCancellations.MAX_EARLY_PER_CALLER + 5}") { cancelled() }, "over mallory's share")
+        cancellations.cancel("alice", "early")
+        assertTrue(cancellations.handle("alice", "early") { cancelled() })
+    }
+
+    @Test
     fun `requests are not cancellable after they end`() {
         assertEquals("done", cancellations.handle("alice", "r1") { "done" })
         assertEquals(0, cancellations.runningCount())

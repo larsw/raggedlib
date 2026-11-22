@@ -112,6 +112,12 @@ private fun <T> cancellable(sql: String, args: Array<out Any?>, run: (PreparedSt
                 ArgumentPreparedStatementSetter(args).setValues(ps)
                 // the driver cancels only while the statement runs, never one run later on the same connection
                 registration = cancellation.onCancel { ps.cancel() }
+                // so a cancel that came while preparing (its callback ran, on a statement not running yet, to no
+                // effect) is caught here, rather than the query running to its end
+                if (cancellation.isCancelled) {
+                    ps.close() // not handed back, so JdbcTemplate won't close it
+                    throw RequestCancelledException()
+                }
             }
         }
         return run(statement).also { cancellation.throwIfCancelled() }

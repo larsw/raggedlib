@@ -112,7 +112,7 @@ class BookActivityRepository(
                 a.book_title, a.actor, a.action, a.changes::text as changes, a.created_at
             from book_activity a
             join libraries l on l.id = a.library_id
-            left join books b on b.id = a.book_id
+            left join active_books b on b.id = a.book_id
             where $where
             order by a.created_at desc, a.id desc
             limit :limit offset :offset

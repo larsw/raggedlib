@@ -2,6 +2,7 @@ package dev.raggedlib.library
 
 import dev.raggedlib.auth.Access
 import dev.raggedlib.auth.ApiScope
+import dev.raggedlib.auth.LibraryRole
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.config.ApiException
 import dev.raggedlib.config.RaggedlibProperties
@@ -76,6 +77,11 @@ class MetadataSourceLookupService(
     fun candidates(title: String?, authors: List<String>?, isbn: String?): List<MetadataCandidate> {
         requireLookupEnabled()
         access.requireScope(ApiScope.LIBRARY_EDIT)
+        // the scope alone doesn't make a curator (a viewer can mint a key with it): as for a book's lookup, which needs
+        // a book the caller may edit, only a curator somewhere may send queries to the metadata sources
+        if (access.libraries(LibraryRole.CURATOR).isEmpty()) {
+            throw ApiException(HttpStatus.FORBIDDEN, "looking up metadata needs the curator role in a library")
+        }
 
         val queryTitle = title?.trim()?.takeIf(String::isNotEmpty)
         val queryIsbn = isbn?.trim()?.takeIf(String::isNotEmpty)

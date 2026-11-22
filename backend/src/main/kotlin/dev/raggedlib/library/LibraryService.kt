@@ -2,6 +2,7 @@ package dev.raggedlib.library
 
 import dev.raggedlib.calibre.CalibreMetadataSource
 import dev.raggedlib.calibre.CalibreBookIdentity
+import dev.raggedlib.calibre.CalibreLibraryWriteLock
 import dev.raggedlib.calibre.Formats
 import dev.raggedlib.ingest.IngestService
 import dev.raggedlib.config.notFound
@@ -18,15 +19,24 @@ class LibraryService(
     private val ingest: IngestService,
     private val tx: TransactionTemplate,
     private val deletions: BookDeletionService,
+    private val writeLock: CalibreLibraryWriteLock,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
     private val syncLock = Any()
 
     /**
+     * Runs [block] (a sync of [lib]) under the library's write lock, then [syncLock]: an edit landing between reading
+     * Calibre and reconciling would otherwise be overwritten by the older snapshot (and its book queued again). Always
+     * in this order; resuming editing already holds the write lock when it syncs.
+     */
+    private fun <T> syncing(lib: LibraryInfo, block: () -> T): T =
+        writeLock.withLibrary(lib.root) { synchronized(syncLock) { block() } }
+
+    /**
      * Syncs the configured libraries (only [libraryIds], if given); one library's failure (calibredb down, path
      * unmounted) doesn't block the rest.
      */
-    fun sync(libraryIds: Set<Long>? = null): SyncResult = synchronized(syncLock) {
+    fun sync(libraryIds: Set<Long>? = null): SyncResult {
         var added = 0
         var updated = 0
         var removed = 0
@@ -35,21 +45,21 @@ class LibraryService(
         for (lib in registry.all) {
             if (libraryIds != null && lib.id !in libraryIds) continue
             try {
-                val (a, u, r, t, source) = syncOne(lib)
+                val (a, u, r, t, source) = syncing(lib) { syncOne(lib) }
                 added += a; updated += u; removed += r; total += t
                 sources += source
             } catch (e: Exception) {
                 log.warn("Sync failed for library '{}' ({}): {}", lib.name, lib.root, e.message)
             }
         }
-        SyncResult(added, updated, removed, total, sources.joinToString("+").ifEmpty { SyncResult.NOTHING_SYNCED })
+        return SyncResult(added, updated, removed, total, sources.joinToString("+").ifEmpty { SyncResult.NOTHING_SYNCED })
     }
 
     /** Syncs one library and returns the Calibre records identified by [calibreIds], propagating sync failures. */
     fun syncAndFindBooks(libraryId: Long, calibreIds: Set<Long>): Map<Long, Book> {
         if (calibreIds.isEmpty()) return emptyMap()
-        return synchronized(syncLock) {
-            val lib = registry.byId(libraryId)
+        val lib = registry.byId(libraryId)
+        return syncing(lib) {
             syncOne(lib)
             val byCalibreId = books.findAllByLibrary(libraryId).associate { it.book.calibreId to it.book }
             calibreIds.associateWith { calibreId ->
@@ -58,12 +68,17 @@ class LibraryService(
         }
     }
 
-    fun syncAndFindMatchingBooks(libraryId: Long, identity: CalibreBookIdentity): List<Book> = synchronized(syncLock) {
+    fun syncAndFindMatchingBooks(libraryId: Long, identity: CalibreBookIdentity): List<Book> {
         val lib = registry.byId(libraryId)
+        return syncing(lib) { matching(lib, identity) }
+    }
+
+    private fun matching(lib: LibraryInfo, identity: CalibreBookIdentity): List<Book> {
         syncOne(lib)
+        val libraryId = lib.id
         val title = normalizeIdentity(identity.title)
         val authors = identity.authors.map(::normalizeIdentity).sorted()
-        books.findAllByLibrary(libraryId).map { it.book }.filter { book ->
+        return books.findAllByLibrary(libraryId).map { it.book }.filter { book ->
             normalizeIdentity(book.title) == title && book.authors.map(::normalizeIdentity).sorted() == authors
         }
     }

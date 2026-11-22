@@ -224,6 +224,8 @@ class BookUploadService(
                         writer.addBook(target, upload.files.first().path.parent, allowDuplicates = true)
                             ?: error("calibredb refused an upload requested as a separate book")
                     }
+                    // in the library now: if syncing it fails below, deciding again must not add a second copy
+                    pending.discard(upload.id)
                     val added = library.syncAndFindBooks(libraryId, setOf(calibreId)).getValue(calibreId)
                     recordUpload(added, access.activityActor())
                     ingest.enqueue(added.id)

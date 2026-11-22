@@ -224,7 +224,9 @@ class LibraryMembersController(
         access.requireLibrary(libraryId, LibraryRole.ADMIN)
         val role = runCatching { LibraryRole.parse(body.role) }.getOrElse { badRequest(it.message ?: "bad role") }
         if (role == LibraryRole.NONE) badRequest("role must be viewer, curator or admin; DELETE the member to revoke")
-        users.find(userId) ?: notFound("user $userId not found")
+        val user = users.find(userId) ?: notFound("user $userId not found")
+        // not a member: single-user mode's local user is admin everywhere, and isn't listed (see members)
+        if (user.issuer == UserRepository.LOCAL_ISSUER) notFound("user $userId not found")
         users.grant(userId, libraryId, role, access.userId())
         access.invalidate(userId)
         return members(libraryId).first { it.userId == userId }

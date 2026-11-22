@@ -26,6 +26,8 @@ class SampleCache<Spec, T>(
     private val markCached: (T) -> T,
     private val fingerprint: (libraryId: Long) -> String,
     private val maxEntries: Int = 16,
+    /** Each library's current seed; caches of the same samples (layouts and topics) share it, see [currentSeed]. */
+    private val currentSeeds: ConcurrentHashMap<Long, Long> = ConcurrentHashMap(),
 ) {
     private data class Key<Spec>(val libraryId: Long, val spec: Spec)
 
@@ -63,7 +65,6 @@ class SampleCache<Spec, T>(
     }
 
     private val entries = ConcurrentHashMap<Key<Spec>, Entry<T>>()
-    private val currentSeeds = ConcurrentHashMap<Long, Long>()
     private val clock = AtomicLong()
 
     /** The seed of [libraryId]'s current sample: [DEFAULT_SEED] until it is reshuffled. */

@@ -64,6 +64,8 @@ class RequestCancellations {
         val now = clock()
         if (early.size >= MAX_EARLY / 2) early.values.removeIf { it <= now }
         if (early.size >= MAX_EARLY) return false
+        // one caller can't fill the map, and so have everyone else's early cancels dropped
+        if (early.size >= MAX_EARLY_PER_CALLER && early.keys.count { it.caller == caller } >= MAX_EARLY_PER_CALLER) return false
         early[key] = now + EARLY_MS
         return running[key]?.also { early.remove(key); it.cancel() } != null
     }
@@ -80,6 +82,7 @@ class RequestCancellations {
         private const val MAX_ID_LENGTH = 128
         private const val EARLY_MS = 60_000L
         private const val MAX_EARLY = 10_000
+        internal const val MAX_EARLY_PER_CALLER = 1_000
 
         /** The [HEADER] of [request] if it can be one. */
         fun idOf(request: HttpServletRequest): String? =

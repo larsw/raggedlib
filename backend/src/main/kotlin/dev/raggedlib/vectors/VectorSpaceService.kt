@@ -10,6 +10,7 @@ import dev.raggedlib.search.TermStatistics
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.sqrt
 
 /** Lower case in the API ("pca", "umap", "tsne"), as the requests spell it. */
@@ -190,8 +191,17 @@ class VectorSpaceService(
     private val termStats: TermStatistics,
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
-    private val cache = SampleCache<LayoutSpec, VectorSpace>(::compute, { it.copy(cached = true) }, ::fingerprint)
-    private val topicCache = SampleCache<TopicSpec, TopicSpace>(::computeTopics, { it.copy(cached = true) }, ::fingerprint)
+    /**
+     * The library's current sample, one for layouts and topics alike: a reshuffle of either makes its seed current for
+     * both, so topics asked for without a seed are of the points the layout shows.
+     */
+    private val currentSeeds = ConcurrentHashMap<Long, Long>()
+    private val cache = SampleCache<LayoutSpec, VectorSpace>(
+        ::compute, { it.copy(cached = true) }, ::fingerprint, currentSeeds = currentSeeds,
+    )
+    private val topicCache = SampleCache<TopicSpec, TopicSpace>(
+        ::computeTopics, { it.copy(cached = true) }, ::fingerprint, currentSeeds = currentSeeds,
+    )
 
     /**
      * The 2-D layout of the library's current sample (or, given a [seed], of that one, which a reshuffle makes the

@@ -196,14 +196,19 @@ class BookMetadataService(
     private fun toCalibreValue(name: String, value: Any?): String = when (name) {
         "authors" -> (value as List<*>).joinToString(" & ")
         "tags", "languages" -> (value as List<*>).joinToString(",")
-        "seriesIndex" -> (value as? Double)?.toString().orEmpty()
+        // calibredb can't parse an empty number ("could not convert string to float"): a cleared series number is
+        // Calibre's default, 1, and a cleared rating is 0, which Calibre stores as no rating
+        "seriesIndex" -> ((value as? Double) ?: 1.0).toString()
         "description" -> CommentText.toSimpleHtml(value as? String ?: "")
         "identifiers" -> (value as? Map<*, *>)
             ?.entries
             ?.sortedBy { it.key.toString() }
             ?.joinToString(",") { (type, identifier) -> "$type:$identifier" }
             .orEmpty()
-        "rating" -> value?.toString().orEmpty()
+        "rating" -> ((value as? Double) ?: 0.0).toString()
+        // a bare date goes through Calibre's parse_only_date, which moves the 1st of a month to the 2nd and the last
+        // day to the one before; noon UTC is stored as given, and is the same date in every timezone within 12 hours
+        "pubdate" -> (value as? String)?.let { "${it}T12:00:00+00:00" }.orEmpty()
         else -> value?.toString().orEmpty()
     }
 
