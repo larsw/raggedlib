@@ -17,8 +17,8 @@ class StaticApiKeysTest {
 
     @Test
     fun `matches a plain or hashed configured key`() {
-        assertEquals("claude", keys.match("s3cret-one"))
-        assertEquals("ci", keys.match("s3cret-two"))
+        assertEquals(StaticApiKeys.Match("claude", 1), keys.match("s3cret-one"))
+        assertEquals(StaticApiKeys.Match("ci", 2), keys.match("s3cret-two"))
         assertEquals(2, keys.size)
     }
 
@@ -45,7 +45,7 @@ class StaticApiKeysTest {
         // prefix case, a dash and surrounding whitespace are fine: still the hash of "k", not a plain key
         for (ok in listOf("SHA256:$hex", " sha-256:$hex ", "Sha256: ${hex.uppercase()}")) {
             val k = StaticApiKeys(listOf(ApiKey("x", ok)))
-            assertEquals("x", k.match("k"), ok)
+            assertEquals("x", k.match("k")?.name, ok)
             assertNull(k.match(ok.trim()), ok)
         }
     }

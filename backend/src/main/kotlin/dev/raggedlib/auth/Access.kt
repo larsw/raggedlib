@@ -25,6 +25,8 @@ data class Caller(
     val viaApiKey: Boolean,
     /** For logs. */
     val label: String,
+    /** The API key acting ([ApiKeyPrincipal.id], unique unlike its name); null for a session. */
+    val apiKeyId: String? = null,
 )
 
 internal fun formatActivityActor(caller: Caller, userLabel: String?): String = when {
@@ -116,7 +118,7 @@ class Access(
     fun callerOf(auth: Authentication?): Caller? = when {
         auth == null || !auth.isAuthenticated -> null
         auth is ApiKeyAuthenticationToken -> auth.apiKey?.let { k ->
-            Caller(k.userId, k.scopes, k.libraryIds, viaApiKey = true, label = "key '${k.name}'")
+            Caller(k.userId, k.scopes, k.libraryIds, viaApiKey = true, label = "key '${k.name}'", apiKeyId = k.id)
         }
         auth.principal is RaggedlibOidcUser -> {
             val u = auth.principal as RaggedlibOidcUser

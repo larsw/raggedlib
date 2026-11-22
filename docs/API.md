@@ -5,8 +5,8 @@ Errors: HTTP 4xx/5xx with `{"error": "message"}`. Timestamps ISO-8601 strings. I
 
 Cancelling: a request sent with an `X-Request-Id: <id>` header (never reused by the caller, e.g. a UUID: a cancel
 that arrives after its request ended is kept for a minute and would cancel the next request with that id) can be
-cancelled while the backend works on it by `POST /api/requests/{id}/cancel` from the same caller (same session or
-API key). The backend can't tell on its own that a client went away, so without a cancel an abandoned request runs to
+cancelled while the backend works on it by `POST /api/requests/{id}/cancel` from the same caller (the same API key, or
+a session of the same user). The backend can't tell on its own that a client went away, so without a cancel an abandoned request runs to
 its end. `GET /api/vectors` and `/api/vectors/topics` honour it: their Postgres queries are cancelled and their
 computing stops (a layout two requests wait for stops only once both are cancelled), and the request ends with `499`
 and no body. The web UI's server gives every request it proxies an id of its own (replacing the browser's), and

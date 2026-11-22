@@ -85,8 +85,11 @@ class RequestCancellations {
         fun idOf(request: HttpServletRequest): String? =
             request.getHeader(HEADER)?.trim()?.takeIf { it.isNotEmpty() && it.length <= MAX_ID_LENGTH }
 
-        /** Who may cancel the request: whoever made it, with the same credentials (a session, or one API key). */
-        fun callerKey(caller: Caller): String = "${caller.userId}/${caller.label}"
+        /**
+         * Who may cancel the request: whoever made it, with the same credentials. One API key (by its id: keys can
+         * share a name), or the user's browser sessions.
+         */
+        fun callerKey(caller: Caller): String = caller.apiKeyId?.let { "key $it" } ?: "user ${caller.userId}"
     }
 }
 

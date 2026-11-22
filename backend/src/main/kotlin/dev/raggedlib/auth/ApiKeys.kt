@@ -18,8 +18,8 @@ import java.util.UUID
 
 /** Who an authenticated API key acts as. */
 data class ApiKeyPrincipal(
-    /** null for a key from the configuration. */
-    val keyId: UUID?,
+    /** Unique among keys, unlike [name]: a database key's id, or `config-<n>` for the n-th configured key. */
+    val id: String,
     val name: String,
     /** The owner of a personal key; null for a system-wide key. */
     val userId: Long?,
@@ -98,7 +98,7 @@ class ApiKeyService(
 
     /** The principal for [raw], or null if it isn't a valid key (unknown, revoked, expired, or its owner disabled). */
     fun authenticate(raw: String): ApiKeyPrincipal? {
-        static.match(raw)?.let { return ApiKeyPrincipal(null, it, null, setOf(ApiScope.LIBRARY_READ), null) }
+        static.match(raw)?.let { return ApiKeyPrincipal("config-${it.position}", it.name, null, setOf(ApiScope.LIBRARY_READ), null) }
         if (!raw.startsWith(PREFIX)) return null
         val row = jdbc.query(
             "$select where k.key_hash = :hash and k.revoked_at is null", mapOf("hash" to hash(raw)), rowMapper,
@@ -110,7 +110,7 @@ class ApiKeyService(
             jdbc.update("update api_keys set last_used_at = now() where id = :id", mapOf("id" to row.id))
         }
         val scopes = row.scopes.mapNotNull { s -> ApiScope.entries.firstOrNull { it.id == s } }.toSet()
-        return ApiKeyPrincipal(row.id, row.name, row.userId, scopes, row.libraryIds?.toSet())
+        return ApiKeyPrincipal(row.id.toString(), row.name, row.userId, scopes, row.libraryIds?.toSet())
     }
 
     /** [userId]'s keys that are still usable or merely expired (revoked ones are gone). */

@@ -17,7 +17,10 @@ import java.util.HexFormat
 class StaticApiKeys(keys: List<RaggedlibProperties.ApiKey>) {
     private val log = LoggerFactory.getLogger(javaClass)
 
-    private class Key(val name: String, val digest: ByteArray)
+    private class Key(val name: String, val position: Int, val digest: ByteArray)
+
+    /** A configured key that matched: its [name], and its [position] in the configuration (1-based), unique to it. */
+    data class Match(val name: String, val position: Int)
 
     private val keys: List<Key> = keys.mapIndexedNotNull { i, k ->
         val value = k.key.trim()
@@ -35,7 +38,7 @@ class StaticApiKeys(keys: List<RaggedlibProperties.ApiKey>) {
                 throw IllegalArgumentException("raggedlib.mcp.api-keys[$i] ($name) looks like a hash but isn't 'sha256:<64 hex>'")
             else -> sha256(value)
         }
-        Key(name, digest)
+        Key(name, i + 1, digest)
     }
 
     init {
@@ -44,13 +47,13 @@ class StaticApiKeys(keys: List<RaggedlibProperties.ApiKey>) {
 
     val size: Int get() = keys.size
 
-    /** Name of the configured key matching [presented], or null. */
-    fun match(presented: String?): String? {
+    /** The configured key matching [presented], or null. */
+    fun match(presented: String?): Match? {
         if (presented.isNullOrEmpty()) return null
         val digest = sha256(presented)
-        var found: String? = null
+        var found: Match? = null
         for (k in keys) {
-            if (MessageDigest.isEqual(digest, k.digest) && found == null) found = k.name
+            if (MessageDigest.isEqual(digest, k.digest) && found == null) found = Match(k.name, k.position)
         }
         return found
     }
