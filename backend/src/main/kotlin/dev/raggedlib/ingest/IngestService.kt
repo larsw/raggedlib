@@ -497,8 +497,10 @@ class IngestService(
             val other = books.find(m.bookId)?.book ?: continue
             if (other.status == BookStatus.EXTRACTING || other.status == BookStatus.EMBEDDING) continue // decided on its own
             val distinct = chunks.distinctPassages(m.bookId)
-            val keeper = Duplicates.keeper(m.bookId, m.chunks, distinct, listOf(Duplicates.Match(id, m.shared, ex.chunks.size)),
-                minShare, MIN_SHARED) ?: continue
+            val keeper = Duplicates.keeper(
+                m.bookId, other.libraryId, m.chunks, distinct,
+                listOf(Duplicates.Match(id, m.shared, ex.chunks.size, ex.row.book.libraryId)), minShare, MIN_SHARED,
+            ) { hashes.size } ?: continue
             val share = keeper.shared * 100 / distinct.coerceAtLeast(1)
             val marked = tx.execute {
                 books.markDuplicate(m.bookId, id, "same text as “${ex.row.book.title}” (#$id): $share% of its passages", null)
@@ -523,8 +525,10 @@ class IngestService(
             return true
         }
         val hashes = ex.chunks.mapTo(HashSet()) { Duplicates.md5(it.text) }
-        val keeper = Duplicates.keeper(id, ex.chunks.size, hashes.size, chunks.booksContaining(hashes, id), minShare, MIN_SHARED)
-            ?: return false
+        val keeper = Duplicates.keeper(
+            id, ex.row.book.libraryId, ex.chunks.size, hashes.size, chunks.booksContaining(hashes, id), minShare, MIN_SHARED,
+            chunks::distinctPassages,
+        ) ?: return false
         val keeperTitle = books.find(keeper.bookId)?.book?.title ?: "#${keeper.bookId}"
         val share = keeper.shared * 100 / hashes.size
         val marked = tx.execute {

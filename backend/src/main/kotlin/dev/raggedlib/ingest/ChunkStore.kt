@@ -56,13 +56,13 @@ class ChunkStore(
         if (hashes.isEmpty()) return emptyList()
         return named.query(
             """
-            select v.book_id, count(distinct md5(v.content)) as shared, b.chunk_count
+            select v.book_id, count(distinct md5(v.content)) as shared, b.chunk_count, b.library_id
             from vector_store v join active_books b on b.id = v.book_id
             where md5(v.content) = any(:hashes) and v.book_id <> :id
-            group by v.book_id, b.chunk_count
+            group by v.book_id, b.chunk_count, b.library_id
             """.trimIndent(),
             MapSqlParameterSource("hashes", hashes.toTypedArray()).addValue("id", bookId),
-        ) { rs, _ -> Duplicates.Match(rs.getLong(1), rs.getInt(2), rs.getInt(3)) }
+        ) { rs, _ -> Duplicates.Match(rs.getLong(1), rs.getInt(2), rs.getInt(3), rs.getLong(4)) }
     }
 
     /** Number of different passage texts [bookId] has. */

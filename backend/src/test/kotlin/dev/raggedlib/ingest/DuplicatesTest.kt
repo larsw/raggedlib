@@ -7,7 +7,10 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNull
 
 class DuplicatesTest {
-    private fun keeper(id: Long, chunks: Int, vararg m: Match) = Duplicates.keeper(id, chunks, chunks, m.toList(), 0.9, 5)
+    private fun keeper(id: Long, chunks: Int, vararg m: Match) =
+        Duplicates.keeper(id, LIB, chunks, chunks, m.toList(), 0.9, 5) { error("same library: not asked") }
+
+    private fun Match(bookId: Long, shared: Int, chunks: Int) = Duplicates.Match(bookId, shared, chunks, LIB)
 
     @Test
     fun `of two identical copies the lower id is kept`() {
@@ -36,6 +39,18 @@ class DuplicatesTest {
     }
 
     @Test
+    fun `across libraries only an exact copy is kept, so its passages are all the duplicate's own`() {
+        val distinct = mapOf(1L to 100, 2L to 5000, 3L to 101)
+        fun keeper(vararg m: Duplicates.Match) = Duplicates.keeper(9, LIB, 100, 100, m.toList(), 0.9, 5) { distinct.getValue(it) }
+
+        assertNull(keeper(Duplicates.Match(2, 100, 5000, OTHER)), "an excerpt of a longer book elsewhere")
+        assertNull(keeper(Duplicates.Match(1, 95, 100, OTHER)), "nearly the same book elsewhere")
+        assertNull(keeper(Duplicates.Match(3, 100, 101, OTHER)), "the same passages and one more")
+        assertEquals(1L, keeper(Duplicates.Match(1, 100, 100, OTHER))?.bookId, "the same book elsewhere")
+        assertEquals(2L, keeper(Duplicates.Match(2, 100, 5000, LIB))?.bookId, "an excerpt in the same library")
+    }
+
+    @Test
     fun `md5 matches Postgres md5(text)`() {
         assertEquals("7e1e84379e8e3c749a3abaa39abff5dd", Duplicates.md5("Grüße – λ")) // select md5('Grüße – λ')
         assertEquals("900150983cd24fb0d6963f7d28e17f72", Duplicates.md5("abc"))
@@ -45,5 +60,10 @@ class DuplicatesTest {
     fun `parses pgvector text`() {
         assertContentEquals(floatArrayOf(0.1f, -2f, 3e-5f), ChunkStore.parseVector("[0.1,-2,3e-05]"))
         assertContentEquals(floatArrayOf(), ChunkStore.parseVector("[]"))
+    }
+
+    private companion object {
+        const val LIB = 1L
+        const val OTHER = 2L
     }
 }
