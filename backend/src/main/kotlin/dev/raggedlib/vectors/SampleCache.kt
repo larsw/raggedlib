@@ -1,10 +1,6 @@
 package dev.raggedlib.vectors
 
 import dev.raggedlib.cancel.Cancellation
-import dev.raggedlib.cancel.RequestCancelledException
-import java.util.concurrent.CancellationException
-import java.util.concurrent.CompletableFuture
-import java.util.concurrent.CompletionException
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 
@@ -18,7 +14,8 @@ import java.util.concurrent.atomic.AtomicLong
  *
  * Identical requests arriving while one is being computed wait for it rather than computing it again. A request
  * that is cancelled ([Cancellation.current]) stops waiting, and once every request waiting for a computation has
- * been, the computation is cancelled too ([compute] runs with a [Cancellation] of its own, current): nobody wants it.
+ * been, the computation is cancelled too ([compute] runs with a [Cancellation] of its own, current): nobody wants it
+ * (see [SharedComputation]).
  * At most [maxEntries] are kept, least recently used dropped first. All in memory: a restart starts over from seed 1.
  */
 class SampleCache<Spec, T>(
@@ -32,36 +29,8 @@ class SampleCache<Spec, T>(
     private data class Key<Spec>(val libraryId: Long, val spec: Spec)
 
     private class Entry<T>(val seed: Long, val fingerprint: String) {
-        val result = CompletableFuture<T>()
+        val computation = SharedComputation<T>()
         val lastUsed = AtomicLong()
-
-        /** The computation's own, cancelled when the last request waiting for it is. */
-        val cancellation = Cancellation()
-
-        // guarded by this: requests waiting for the result, the one computing it included
-        private var waiting = 1
-        private var abandoned = false
-
-        /** Whether a request can have this: done, or still being computed (then it waits for it too, see [leave]). */
-        @Synchronized
-        fun share(): Boolean = when {
-            result.isCompletedExceptionally -> false
-            result.isDone -> true
-            abandoned -> false
-            else -> {
-                waiting++
-                true
-            }
-        }
-
-        /** A request waiting for it was cancelled; the last one to go cancels the computation. */
-        fun leave() {
-            val last = synchronized(this) {
-                waiting--
-                (waiting == 0 && !result.isDone).also { if (it) abandoned = true }
-            }
-            if (last) cancellation.cancel()
-        }
     }
 
     private val entries = ConcurrentHashMap<Key<Spec>, Entry<T>>()
@@ -78,49 +47,23 @@ class SampleCache<Spec, T>(
         val key = Key(libraryId, spec)
         val mine = Entry<T>(s, fp)
         val entry = entries.compute(key) { _, old ->
-            if (old != null && old.seed == s && old.fingerprint == fp && old.share()) old else mine
+            if (old != null && old.seed == s && old.fingerprint == fp && old.computation.share()) old else mine
         }!!
         entry.lastUsed.set(clock.incrementAndGet())
 
-        if (entry !== mine) return markCached(await(entry))
+        if (entry !== mine) return markCached(entry.computation.await())
         evictBeyondLimit()
-        // computed here for every request that comes to wait for it too, so under its own cancellation, not this
-        // request's: this request being cancelled only means one fewer waiting
-        Cancellation.current().onCancel(entry::leave).use {
-            try {
-                return entry.cancellation.bind {
-                    entry.cancellation.throwIfCancelled() // this request already was, and no other waits yet
-                    compute(libraryId, spec, s)
-                }.also { entry.result.complete(it) }
-            } catch (e: Throwable) {
-                entry.result.completeExceptionally(e) // whoever waits on it gets the error too; the next request tries again
-                entries.remove(key, entry)
-                throw e
-            }
-        }
-    }
-
-    /** [entry]'s result, once computed; given up on with [RequestCancelledException] if this request is cancelled. */
-    private fun await(entry: Entry<T>): T {
-        // a copy to stop waiting on, without stopping the computation itself for the others
-        val result = entry.result.copy()
-        val registration = Cancellation.current().onCancel {
-            if (result.cancel(false)) entry.leave()
-        }
-        registration.use {
-            try {
-                return result.join()
-            } catch (_: CancellationException) {
-                throw RequestCancelledException() // the copy was cancelled, by this request (a failure comes as below)
-            } catch (e: CompletionException) {
-                throw e.cause ?: e
-            }
+        try {
+            return entry.computation.run { compute(libraryId, spec, s) }
+        } catch (e: Throwable) {
+            entries.remove(key, entry) // the next request tries again
+            throw e
         }
     }
 
     private fun evictBeyondLimit() {
         while (entries.size > maxEntries) {
-            val oldest = entries.entries.filter { it.value.result.isDone }.minByOrNull { it.value.lastUsed.get() } ?: return
+            val oldest = entries.entries.filter { it.value.computation.isDone }.minByOrNull { it.value.lastUsed.get() } ?: return
             entries.remove(oldest.key, oldest.value)
         }
     }

@@ -5,11 +5,11 @@ import dev.raggedlib.cancel.RequestCancelledException
 import dev.raggedlib.cancel.cancellableQuery
 import dev.raggedlib.cancel.cancellableQueryEach
 import dev.raggedlib.config.RaggedlibProperties
-import dev.raggedlib.ingest.ChunkStore
 import dev.raggedlib.search.TermStatistics
 import org.slf4j.LoggerFactory
 import org.springframework.jdbc.core.JdbcTemplate
 import org.springframework.stereotype.Service
+import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.sqrt
 
@@ -132,7 +132,7 @@ data class TopicSpace(
     val topics: List<Topic>,
     /** point id (matching GET /api/vectors' point ids for the same library/level/size/seed) -> topic id, or -1 for noise */
     val pointTopics: Map<String, Int>,
-    /** milliseconds per step of computing it, in order (sample, parse, distances, hdbscan, labels, …) */
+    /** milliseconds per step of computing it, in order (count and sample when the sample was fetched, distances, hdbscan, labels, …) */
     val timings: Map<String, Long> = emptyMap(),
     val cached: Boolean = false,
 )
@@ -177,7 +177,7 @@ data class VectorSpace(
     /** how long computing it took (also when served from the cache) */
     val elapsedMs: Long,
     val points: List<VectorPoint>,
-    /** milliseconds per step of computing it, in order (sample, parse, pca, distances, umap/tsne, …) */
+    /** milliseconds per step of computing it, in order (count and sample when the sample was fetched, pca, distances, umap/tsne, …) */
     val timings: Map<String, Long> = emptyMap(),
     /** served from the cache rather than computed for this request */
     val cached: Boolean = false,
@@ -202,6 +202,8 @@ class VectorSpaceService(
     private val topicCache = SampleCache<TopicSpec, TopicSpace>(
         ::computeTopics, { it.copy(cached = true) }, ::fingerprint, currentSeeds = currentSeeds,
     )
+    /** The sampled rows both are computed from, fetched once per sample (see [SampleStore]). */
+    private val samples = SampleStore<Row>(::fingerprint)
 
     /**
      * The 2-D layout of the library's current sample (or, given a [seed], of that one, which a reshuffle makes the
@@ -259,8 +261,7 @@ class VectorSpaceService(
      */
     private fun layout(libraryId: Long, spec: LayoutSpec, seed: Long, timer: StepTimer): VectorSpace {
         val (level, method, size, dims, requested) = spec
-        val (total, missing) = timer.step("count") { countTotal(level, libraryId) to bookVectors.countMissing(libraryId) }
-        val rows = sample(timer, level, libraryId, size, seed)
+        val (rows, _, total, missing) = sample(timer, level, libraryId, size, seed)
 
         val n = rows.size
         if (n < MIN_POINTS) {
@@ -339,8 +340,7 @@ class VectorSpaceService(
     private fun cluster(libraryId: Long, spec: TopicSpec, seed: Long, timer: StepTimer): TopicSpace {
         val minClusterSize = spec.minClusterSize!!
         val minSamples = spec.minSamples!!
-        val total = timer.step("count") { countTotal(spec.level, libraryId) }
-        val rows = sample(timer, spec.level, libraryId, spec.size, seed)
+        val (rows, _, total) = sample(timer, spec.level, libraryId, spec.size, seed)
         val n = rows.size
         if (n < MIN_POINTS) {
             return TopicSpace(
@@ -420,34 +420,32 @@ class VectorSpaceService(
     }
 
     /**
-     * The sample's rows: fetched ("sample", embeddings as pgvector text), then their embeddings parsed in parallel
-     * ("parse": a 1,024-dimensional vector is ~10 KB of text, 2,000 of them take a while on one core).
+     * The sample's rows, with the counts over the library: kept from an earlier layout or topics run of the same
+     * sample if there was one ([samples]), else fetched, recorded in [timer] as "count" and "sample" (none on a hit).
      */
-    private fun sample(timer: StepTimer, level: VectorLevel, libraryId: Long, size: Int, seed: Long): List<Row> {
-        val sampleSql = when (level) {
-            VectorLevel.PASSAGES -> PASSAGE_SAMPLE_SQL
-            VectorLevel.BOOKS -> BOOK_SAMPLE_SQL
+    private fun sample(timer: StepTimer, level: VectorLevel, libraryId: Long, size: Int, seed: Long): SampleStore.Sample<Row> =
+        samples.get(libraryId, level, seed, size) { n ->
+            val (total, missing) = timer.step("count") { countTotal(level, libraryId) to bookVectors.countMissing(libraryId) }
+            val sampleSql = when (level) {
+                VectorLevel.PASSAGES -> PASSAGE_SAMPLE_SQL
+                VectorLevel.BOOKS -> BOOK_SAMPLE_SQL
+            }
+            val rows = timer.step("sample") {
+                // a pass over all of the library's passages: stopped in Postgres if the requests for it are cancelled
+                jdbc.cancellableQuery(sampleSql, { rs, _ ->
+                    Row(
+                        id = rs.getString(1),
+                        bookId = rs.getLong(2),
+                        title = rs.getString(3),
+                        page = rs.getObject(4) as Int?,
+                        section = rs.getString(5),
+                        snippet = rs.getString(6) ?: "",
+                        embedding = parseVectorSend(rs.getBytes(7)),
+                    )
+                }, seed.toString(), libraryId, n)
+            }
+            SampleStore.Sample(rows, n, total, missing)
         }
-        val fetched = timer.step("sample") {
-            // a pass over all of the library's passages: stopped in Postgres if the requests for it are cancelled
-            jdbc.cancellableQuery(sampleSql, { rs, _ ->
-                FetchedRow(
-                    id = rs.getString(1),
-                    bookId = rs.getLong(2),
-                    title = rs.getString(3),
-                    page = rs.getObject(4) as Int?,
-                    section = rs.getString(5),
-                    snippet = rs.getString(6) ?: "",
-                    embedding = rs.getString(7),
-                )
-            }, libraryId, seed.toString(), size)
-        }
-        return timer.step("parse") {
-            val embeddings = arrayOfNulls<FloatArray>(fetched.size)
-            Parallel.forEach(fetched.size) { i -> embeddings[i] = ChunkStore.parseVector(fetched[i].embedding) }
-            fetched.mapIndexed { i, r -> Row(r.id, r.bookId, r.title, r.page, r.section, r.snippet, embeddings[i]!!) }
-        }
-    }
 
     private fun countTotal(level: VectorLevel, libraryId: Long): Long {
         val countSql = when (level) {
@@ -456,16 +454,6 @@ class VectorSpaceService(
         }
         return jdbc.cancellableQuery(countSql, { rs, _ -> rs.getLong(1) }, libraryId).singleOrNull() ?: 0L
     }
-
-    private class FetchedRow(
-        val id: String,
-        val bookId: Long,
-        val title: String,
-        val page: Int?,
-        val section: String?,
-        val snippet: String,
-        val embedding: String,
-    )
 
     private class Row(
         val id: String,
@@ -476,7 +464,6 @@ class VectorSpaceService(
         val snippet: String,
         val embedding: FloatArray,
     )
-
 
     companion object {
         const val MIN_POINTS = 3
@@ -489,35 +476,62 @@ class VectorSpaceService(
             where v.embedding is not null and b.library_id = ?
         """.trimIndent()
 
-        private val PASSAGE_SAMPLE_SQL = """
-            select v.id::text, v.book_id, b.title, v.page, v.section, left(v.content, $SNIPPET_CHARS), v.embedding::text
-            from vector_store v join active_books b on b.id = v.book_id
-            where v.embedding is not null and b.library_id = ?
-            order by md5(v.id::text || ?)
-            limit ?
+        /**
+         * Pass over the library's passages for the sample's ids, then the rows of those only: the snippet and the
+         * embedding computed in the select list of the pass itself were computed (and sorted, spilling to disk) for
+         * every passage (1.5 s instead of about 0.1 s for 2,000 of 60,000). Embeddings in pgvector's binary form
+         * ([parseVectorSend]): 4 KB each, not about 11 KB of text to parse. Parameters: seed, library, size.
+         */
+        internal val PASSAGE_SAMPLE_SQL = """
+            with picked as materialized (
+                select v.id, md5(v.id::text || ?) as h
+                from vector_store v join active_books b on b.id = v.book_id
+                where v.embedding is not null and b.library_id = ?
+                order by h
+                limit ?
+            )
+            select v.id::text, v.book_id, b.title, v.page, v.section, left(v.content, $SNIPPET_CHARS), vector_send(v.embedding)
+            from picked p join vector_store v on v.id = p.id join active_books b on b.id = v.book_id
+            order by p.h
         """.trimIndent()
 
         private val BOOK_COUNT_SQL = """
             select count(*) from book_vectors bv join active_books b on b.id = bv.book_id where b.library_id = ?
         """.trimIndent()
 
-        private val BOOK_SAMPLE_SQL = """
+        /** As [PASSAGE_SAMPLE_SQL], of book vectors. Parameters: seed, library, size. */
+        internal val BOOK_SAMPLE_SQL = """
+            with picked as materialized (
+                select bv.book_id, md5(bv.book_id::text || ?) as h
+                from book_vectors bv join active_books b on b.id = bv.book_id
+                where b.library_id = ?
+                order by h
+                limit ?
+            )
             select b.id::text, b.id, b.title, null::int, bv.passages || ' passages',
                    concat_ws(' · ', nullif(array_to_string(b.authors, ', '), ''), b.publisher,
                              extract(year from b.pubdate)::int::text),
-                   bv.embedding::text
-            from book_vectors bv join active_books b on b.id = bv.book_id
-            where b.library_id = ?
-            order by md5(b.id::text || ?)
-            limit ?
+                   vector_send(bv.embedding)
+            from picked p join book_vectors bv on bv.book_id = p.book_id join active_books b on b.id = bv.book_id
+            order by p.h
         """.trimIndent()
 
-        private val WORD_COUNT_PASSAGES_SQL = """
-            select v.id::text, unnest(tsvector_to_array(v.content_tsv)) from vector_store v where v.id::text = any(?::text[])
+        // the ids compared as what they are, not as text, so the primary key finds them
+        internal val WORD_COUNT_PASSAGES_SQL = """
+            select v.id::text, unnest(tsvector_to_array(v.content_tsv)) from vector_store v where v.id = any(?::uuid[])
         """.trimIndent()
 
-        private val WORD_COUNT_BOOKS_SQL = """
-            select b.id::text, unnest(tsvector_to_array(to_tsvector('english', b.title))) from active_books b where b.id::text = any(?::text[])
+        internal val WORD_COUNT_BOOKS_SQL = """
+            select b.id::text, unnest(tsvector_to_array(to_tsvector('english', b.title))) from active_books b where b.id = any(?::bigint[])
         """.trimIndent()
+
+        /** A vector in pgvector's binary form (`vector_send`): the dimensions (int16), an unused int16, the floats (big-endian). */
+        internal fun parseVectorSend(bytes: ByteArray): FloatArray {
+            val buf = ByteBuffer.wrap(bytes)
+            val dims = buf.short.toInt() and 0xffff
+            buf.short
+            require(bytes.size == 4 + 4 * dims) { "not a pgvector vector: ${bytes.size} bytes for $dims dimensions" }
+            return FloatArray(dims).also { buf.asFloatBuffer().get(it) }
+        }
     }
 }
